@@ -1,0 +1,6 @@
+{
+  "name": "教师 AI 助手",
+  "description": "面向初中语文教师的教学证据采集、作业 AI 批改、学情诊断、学生画像和教学管理系统。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
