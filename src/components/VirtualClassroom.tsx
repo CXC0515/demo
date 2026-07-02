@@ -36,6 +36,7 @@ export default function VirtualClassroom({
   const [remText, setRemText] = useState('');
   const [showObsInput, setShowObsInput] = useState(false);
   const [showRemInput, setShowRemInput] = useState(false);
+  const [editMode, setEditMode] = useState(false);
 
   // Filter students by selected class
   const classStudents = students.filter(s => s.classId === selectedClassId);
@@ -112,7 +113,7 @@ export default function VirtualClassroom({
           <div className="space-y-1">
             <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
               <GraduationCap className="w-5 h-5 text-emerald-700 dark:text-emerald-400" />
-              虚拟教室：七年级 3 班 
+              班级可视化：{activeClass.name}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               点击课桌即可查看对应学生近期听写、作业、课堂观察以及多维度家校学情。
@@ -120,6 +121,12 @@ export default function VirtualClassroom({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setEditMode(!editMode)}
+              className={`px-3 py-1.5 text-xs rounded-xl font-bold transition-all ${editMode ? 'bg-emerald-700 text-white' : 'bg-white/80 dark:bg-zinc-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-zinc-700'}`}
+            >
+              {editMode ? '完成编辑' : '编辑座位'}
+            </button>
             <span className="text-xs text-slate-400">切换班级:</span>
             <select
               id="cr-class-select"
@@ -140,12 +147,12 @@ export default function VirtualClassroom({
         {/* 3D-feeling Classroom Stage */}
         <div className="flex-1 glass-panel rounded-3xl p-6 flex flex-col justify-between overflow-hidden relative min-h-[560px] bg-gradient-to-b from-slate-100/50 to-slate-200/20 dark:from-zinc-900/40 dark:to-zinc-900/20">
           
-          {/* Blackboard / Front area at the top, standard teacher perspective */}
+          {/* Blackboard / far wall area */}
           <div className="w-full flex flex-col items-center justify-center space-y-1 border-b border-slate-200/60 dark:border-zinc-800 pb-3 mb-4">
-            <div className="w-64 py-1.5 bg-slate-700 dark:bg-zinc-800 text-slate-200 rounded-lg shadow-inner text-center text-xs tracking-widest font-mono">
-              █ █ █ 统编版七下语文·讲台 █ █ █
+            <div className="w-72 py-1.5 bg-slate-700 dark:bg-zinc-800 text-slate-200 rounded-lg shadow-inner text-center text-xs tracking-widest font-mono">
+              █ █ █ 黑板 · 统编版七下语文 █ █ █
             </div>
-            <span className="text-[10px] text-slate-400 font-medium">老师授课视角 (讲台在此端)</span>
+            <span className="text-[10px] text-slate-400 font-medium">教师站在下方讲台向前看</span>
           </div>
 
           {/* Student Desk Area */}
@@ -217,6 +224,26 @@ export default function VirtualClassroom({
               })}
             </div>
           </div>
+
+          {/* Podium at bottom: teacher perspective */}
+          <div className="mt-5 flex justify-center">
+            <div className="w-80 h-14 rounded-t-[28px] bg-gradient-to-b from-amber-100 to-amber-200 dark:from-zinc-800 dark:to-zinc-900 border border-amber-200/80 dark:border-zinc-700 shadow-inner flex items-center justify-center">
+              <span className="text-xs font-black text-amber-900 dark:text-zinc-200 tracking-[0.35em]">讲台</span>
+            </div>
+          </div>
+
+          {editMode && (
+            <div className="mt-4 p-3 rounded-2xl bg-emerald-500/5 border border-emerald-500/10 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+              <div>
+                <span className="font-black text-emerald-800 dark:text-emerald-300">座位编辑模式</span>
+                <p className="text-slate-500 mt-1">可切换“排课桌 / 排座位”。当前为原型模式：点击学生卡片查看，后续接入拖拽换座。</p>
+              </div>
+              <div className="flex gap-2">
+                <button className="px-3 py-1.5 rounded-xl bg-white/80 dark:bg-zinc-800 text-slate-600 dark:text-slate-300 font-bold">排课桌</button>
+                <button className="px-3 py-1.5 rounded-xl bg-emerald-700 text-white font-bold">排座位</button>
+              </div>
+            </div>
+          )}
 
           {/* Status Legends at bottom */}
           <div className="mt-6 pt-4 border-t border-slate-200/40 dark:border-zinc-800/40 flex flex-wrap justify-center gap-6 text-[11px] text-slate-500">
@@ -432,14 +459,21 @@ export default function VirtualClassroom({
                 )}
               </div>
 
-              {/* Primary Profile Action */}
-              <button
-                onClick={() => onViewStudentProfile(selectedStudent.id)}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl flex items-center justify-center gap-1 transition-all active:scale-98 cursor-pointer"
-              >
-                查看完整电子画像与雷达图
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => onViewStudentProfile(selectedStudent.id)}
+                  className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-1 transition-all active:scale-98 cursor-pointer"
+                >
+                  学生画像
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => onNavigate('student-mgmt')}
+                  className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl flex items-center justify-center gap-1 transition-all active:scale-98 cursor-pointer"
+                >
+                  编辑档案
+                </button>
+              </div>
 
             </div>
           ) : (

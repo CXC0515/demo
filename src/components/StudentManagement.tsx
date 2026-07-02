@@ -41,6 +41,7 @@ export default function StudentManagement({
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [showImportToast, setShowImportToast] = useState(false);
   const [importCount, setImportCount] = useState(0);
+  const [otherRelation, setOtherRelation] = useState('');
 
   // Form states for Student add/edit
   const [formData, setFormData] = useState<Partial<Student>>({
@@ -62,6 +63,8 @@ export default function StudentManagement({
 
   const [bulkTargetClass, setBulkTargetClass] = useState('c1');
   const [bulkNewTag, setBulkNewTag] = useState('');
+  const familyAttentionTags = ['留守儿童', '双职工家庭', '隔代教养', '单亲家庭', '重组家庭', '家长期望较高', '作业陪伴不足', '沟通需谨慎'];
+  const selectedFamilyTags = (formData.familyStatusTag || '').split('、').filter(Boolean);
 
   // Filter students
   const filteredStudents = students.filter(s => {
@@ -644,25 +647,63 @@ export default function StudentManagement({
                       })}
                       className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border"
                     >
-                      <option>父亲</option>
                       <option>母亲</option>
-                      <option>爷爷</option>
+                      <option>父亲</option>
+                      <option>姥姥</option>
                       <option>奶奶</option>
-                      <option>其他监护人</option>
+                      <option>姥爷</option>
+                      <option>爷爷</option>
+                      <option>其他</option>
                     </select>
+                    {formData.parent?.relation === '其他' && (
+                      <input
+                        type="text"
+                        value={otherRelation}
+                        onChange={(e) => setOtherRelation(e.target.value)}
+                        placeholder="请输入具体关系"
+                        className="w-full mt-2 px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border"
+                      />
+                    )}
                   </div>
                   <div className="space-y-1">
                     <label className="text-[11px] font-bold text-slate-500">家校沟通随记</label>
-                    <input
-                      type="text"
+                    <textarea
                       value={formData.parent?.remark || ''}
                       onChange={(e) => setFormData({
                         ...formData,
                         parent: { ...formData.parent, remark: e.target.value } as ParentInfo
                       })}
                       placeholder="沟通时间及关键诉求"
-                      className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border"
+                      rows={5}
+                      className="w-full px-3 py-2 rounded-lg bg-white dark:bg-zinc-800 border resize-none"
                     />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-bold text-slate-500">家庭关注类型</label>
+                  <div className="flex flex-wrap gap-2">
+                    {familyAttentionTags.map(tag => {
+                      const checked = selectedFamilyTags.includes(tag);
+                      return (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => {
+                            const next = checked
+                              ? selectedFamilyTags.filter(item => item !== tag)
+                              : [...selectedFamilyTags, tag];
+                            setFormData({ ...formData, familyStatusTag: next.join('、'), familyStatus: next.length ? 'attention' : 'normal' });
+                          }}
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all ${
+                            checked
+                              ? 'bg-emerald-700 text-white border-emerald-700'
+                              : 'bg-white dark:bg-zinc-800 text-slate-500 border-slate-200 dark:border-zinc-700'
+                          }`}
+                        >
+                          {tag}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

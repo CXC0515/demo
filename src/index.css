@@ -206,7 +206,10 @@ body {
   border-radius: 12px;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.dark-theme-active .btn-secondary,
+.dark-theme-active .btn-secondary {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme-forced]) .btn-secondary {
     background-color: rgba(255, 255, 255, 0.03);

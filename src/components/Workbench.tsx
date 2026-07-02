@@ -16,6 +16,7 @@ interface WorkbenchProps {
   students: Student[];
   schedule: ScheduleItem[];
   reminders: TimerReminder[];
+  selectedClassId: string;
   onNavigate: (pageId: string, subPageId?: string) => void;
   onEnterClass: (classId: string) => void;
   onSelectTask: (taskId: string) => void;
@@ -28,6 +29,7 @@ export default function Workbench({
   students,
   schedule,
   reminders,
+  selectedClassId,
   onNavigate,
   onEnterClass,
   onSelectTask,
@@ -88,7 +90,7 @@ export default function Workbench({
           <div className="mt-6 flex flex-wrap gap-3 z-10">
             <button 
               id="wb-quick-action"
-              onClick={() => onNavigate('grading', 'workflow')}
+              onClick={() => onNavigate('grading-flow')}
               className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-700 text-white text-sm font-medium rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-emerald-700/10 active:scale-95 cursor-pointer"
             >
               <Sparkles className="w-4 h-4" />
@@ -126,10 +128,10 @@ export default function Workbench({
           </div>
           <button 
             id="wb-enter-classroom"
-            onClick={() => onEnterClass('c1')}
+            onClick={() => onEnterClass(selectedClassId)}
             className="mt-6 w-full py-3 bg-emerald-800 hover:bg-emerald-900 dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg active:scale-98 cursor-pointer"
           >
-            进入 3 班虚拟教室
+            进入教室
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>
@@ -246,40 +248,58 @@ export default function Workbench({
           
           {/* Today's Schedule & Reminders */}
           <div className="glass-panel rounded-2xl p-5 space-y-4">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-              <Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              今日课表与提醒
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                <Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                今日日程
+              </h3>
+              <button
+                onClick={() => onNavigate('schedule')}
+                className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 hover:underline"
+              >
+                查看课表日程
+              </button>
+            </div>
 
-            <div className="space-y-3">
-              {todaySchedule.map(sch => (
-                <div key={sch.id} className="p-3 rounded-xl bg-slate-50 dark:bg-zinc-800/40 border border-slate-100 dark:border-zinc-800 flex items-start justify-between">
-                  <div className="space-y-1">
-                    <p className="text-xs text-slate-400 font-mono">{sch.time}</p>
-                    <h5 className="text-sm font-semibold text-slate-700 dark:text-slate-300">{sch.title}</h5>
-                  </div>
-                  <span className={`px-2 py-0.5 text-[10px] font-medium rounded-md ${
-                    sch.type === 'class' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400' :
-                    sch.type === 'research' ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/20 dark:text-blue-400' :
-                    'bg-slate-100 text-slate-700 dark:bg-zinc-800 dark:text-slate-300'
-                  }`}>
-                    {sch.type === 'class' ? '授课' : sch.type === 'research' ? '教研' : '其他'}
-                  </span>
+            <div className="flex gap-4">
+              <div className="w-20 rounded-[22px] bg-white/80 dark:bg-zinc-900/70 border border-slate-200/70 dark:border-zinc-800/80 overflow-hidden shadow-sm flex-shrink-0">
+                <div className="bg-rose-500 text-white text-center text-[11px] font-black py-1">周五</div>
+                <div className="py-3 text-center">
+                  <div className="text-3xl font-black text-slate-900 dark:text-slate-50 leading-none">03</div>
+                  <div className="text-[10px] text-slate-400 mt-1">7月</div>
                 </div>
-              ))}
+              </div>
 
-              {activeReminders.slice(0, 2).map(rem => (
-                <div key={rem.id} className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/10 flex items-start gap-2.5">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-500 mt-0.5 flex-shrink-0" />
-                  <div className="space-y-0.5">
-                    <p className="text-[10px] text-amber-700 dark:text-amber-400 font-semibold">
-                      收作业提醒 · {rem.className}
-                    </p>
-                    <h5 className="text-xs text-slate-700 dark:text-slate-300">{rem.name}</h5>
-                    <p className="text-[10px] text-slate-400 font-mono">{rem.time}</p>
+              <div className="flex-1 space-y-2">
+                {todaySchedule.map(sch => (
+                  <div key={sch.id} className="relative pl-4 py-1.5">
+                    <span className="absolute left-0 top-2.5 w-2 h-2 rounded-full bg-emerald-500 shadow-sm"></span>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-[11px] font-mono font-black text-slate-500 dark:text-slate-400">{sch.time}</p>
+                        <h5 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{sch.title}</h5>
+                        <p className="text-[10px] text-slate-400">{sch.className}</p>
+                      </div>
+                      <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
+                        sch.type === 'class' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400' :
+                        sch.type === 'research' ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/20 dark:text-blue-400' :
+                        'bg-slate-100 text-slate-700 dark:bg-zinc-800 dark:text-slate-300'
+                      }`}>
+                        {sch.type === 'class' ? '授课' : sch.type === 'research' ? '教研' : '日程'}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+
+                {activeReminders.slice(0, 2).map(rem => (
+                  <div key={rem.id} className="relative pl-4 py-1.5">
+                    <span className="absolute left-0 top-2.5 w-2 h-2 rounded-full bg-amber-500 shadow-sm"></span>
+                    <p className="text-[11px] font-mono font-black text-amber-700 dark:text-amber-400">{rem.time}</p>
+                    <h5 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{rem.name}</h5>
+                    <p className="text-[10px] text-slate-400">收作业提醒 · {rem.className}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 

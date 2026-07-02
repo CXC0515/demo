@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Sliders, Shield, Eye, FileOutput, HelpCircle, 
   Sparkles, Save, BookOpen, Layers, CheckCircle 
@@ -26,6 +26,25 @@ export default function SystemSettings({
   const [researchSource, setResearchSource] = useState('国家中小学智慧教育平台 + 语文报教研大纲');
   const [exportFormat, setExportFormat] = useState('PDF + Excel');
   const [localThreshold, setLocalThreshold] = useState(lowConfidenceThreshold);
+  const [theme, setTheme] = useState('morandi-green');
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'morandi-green') {
+      root.removeAttribute('data-theme');
+      root.removeAttribute('data-theme-forced');
+      root.classList.remove('dark-theme-active');
+      return;
+    }
+
+    root.setAttribute('data-theme', theme);
+    root.setAttribute('data-theme-forced', 'true');
+    if (theme === 'dark-graphite') {
+      root.classList.add('dark-theme-active');
+    } else {
+      root.classList.remove('dark-theme-active');
+    }
+  }, [theme]);
 
   const handleSaveSettings = () => {
     onUpdateThreshold(localThreshold);
@@ -180,10 +199,35 @@ export default function SystemSettings({
             </select>
           </div>
 
-          <div className="space-y-1.5 p-3 bg-emerald-500/5 rounded-2xl border border-dashed text-[11px] text-slate-500 leading-normal">
-            <span className="font-bold text-emerald-800 dark:text-emerald-400 block mb-1">💡 系统高级配置提示：</span>
-            本系统的所有智能批改数据目前安全保存在您的本地浏览器中，且符合<b>《国家教育数据安全隐私规范》</b>规范。无多余敏感泄露风险。
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">6. 主题色与深色模式</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                ['morandi-green', '莫兰迪绿'],
+                ['fog-blue', '雾蓝'],
+                ['dusty-pink', '豆沙粉'],
+                ['warm-gray', '暖灰'],
+                ['dark-graphite', '深色石墨']
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => setTheme(value)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
+                    theme === value
+                      ? 'bg-emerald-700 text-white border-emerald-700'
+                      : 'bg-slate-50 dark:bg-zinc-800/40 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-zinc-700'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
+        </div>
+
+        <div className="space-y-1.5 p-3 bg-emerald-500/5 rounded-2xl border border-dashed text-[11px] text-slate-500 leading-normal">
+          <span className="font-bold text-emerald-800 dark:text-emerald-400 block mb-1">系统配置提示：</span>
+          本系统的所有智能批改数据目前安全保存在您的本地浏览器中。正式版本需要增加班级、学生、作业原图和家校信息的权限控制与数据归档策略。
         </div>
 
       </div>

@@ -4,9 +4,10 @@
  */
 
 import React, { useState } from 'react';
-import { 
+import {
   Sparkles, LayoutDashboard, Grid, FolderOpen, Users, Calendar, 
-  Workflow, CheckSquare, BarChart3, UserSquare2, Sliders, Bell, HelpCircle, Sun, Moon 
+  Workflow, CheckSquare, BarChart3, UserSquare2, Sliders, HelpCircle,
+  ChevronDown, Database, Network, LibraryBig, Settings2, GraduationCap
 } from 'lucide-react';
 
 // Import Types and Mock Data
@@ -16,7 +17,8 @@ import {
 } from './types';
 import { 
   initialClasses, initialStudents, initialTasks, 
-  initialSchedule, initialReminders, initialReviewQueue, initialWorkflowState 
+  initialSchedule, initialReminders, initialReviewQueue, initialWorkflowState,
+  initialKnowledgeNodes
 } from './mockData';
 
 // Import Custom Sub-Components
@@ -28,8 +30,10 @@ import ScheduleReminder from './components/ScheduleReminder';
 import GradingWorkflow from './components/GradingWorkflow';
 import ReviewQueuePage from './components/ReviewQueuePage';
 import ClassDiagnosis from './components/ClassDiagnosis';
-import StudentProfile from './components/StudentProfile';
+import StudentProfile from './components/StudentProfileV2';
 import SystemSettings from './components/SystemSettings';
+import KnowledgeLibrary from './components/KnowledgeLibrary';
+import TagManagement from './components/TagManagement';
 
 export default function App() {
   // Navigation & View State
@@ -37,6 +41,13 @@ export default function App() {
   const [selectedClassId, setSelectedClassId] = useState<string>('c1');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('s1');
   const [lowConfidenceThreshold, setLowConfidenceThreshold] = useState<number>(0.75);
+  const [libraryMode, setLibraryMode] = useState<'graph' | 'editor'>('graph');
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
+    management: true,
+    grading: true,
+    diagnosis: true,
+    library: true
+  });
 
   // Core App States (simulating cloud database persistence with local states)
   const [classes, setClasses] = useState<SchoolClass[]>(initialClasses);
@@ -242,30 +253,89 @@ export default function App() {
       }
       setActivePage('profile');
     }
+    if (pageId === 'library' && subPageId === 'editor') {
+      setLibraryMode('editor');
+      setActivePage('library-editor');
+    }
+    if (pageId === 'library' && subPageId === 'graph') {
+      setLibraryMode('graph');
+      setActivePage('knowledge-graph');
+    }
   };
 
-  // Navigation items specification
-  const sidebarItems = [
-    { id: 'workbench', label: '我的工作台', icon: LayoutDashboard },
-    { id: 'classroom', label: '虚拟教室视图', icon: Grid },
-    { id: 'class-mgmt', label: '授课班级管理', icon: FolderOpen },
-    { id: 'student-mgmt', label: '学生档案管理', icon: Users },
-    { id: 'schedule', label: '教学行事与排课', icon: Calendar },
-    { id: 'grading-flow', label: '作业批改工作流', icon: Workflow },
-    { id: 'review-queue', label: '置信复核队列', icon: CheckSquare },
-    { id: 'diagnosis', label: '班级学情诊断', icon: BarChart3 },
-    { id: 'profile', label: '学生电子画像', icon: UserSquare2 },
-    { id: 'settings', label: '智能辅助设置', icon: Sliders }
+  const toggleGroup = (groupId: string) => {
+    setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
+  };
+
+  const selectedClass = classes.find(c => c.id === selectedClassId) ?? classes[0];
+  const pendingReviewCount = reviewQueue.filter(r => r.status === 'pending').length;
+
+  const navGroups = [
+    {
+      id: 'entry',
+      label: '工作台',
+      icon: LayoutDashboard,
+      items: [
+        { id: 'workbench', label: '任务总览', icon: LayoutDashboard }
+      ]
+    },
+    {
+      id: 'management',
+      label: '管理',
+      icon: FolderOpen,
+      items: [
+        { id: 'class-mgmt', label: '班级管理', icon: FolderOpen },
+        { id: 'student-mgmt', label: '学生管理', icon: Users },
+        { id: 'classroom', label: '班级可视化', icon: Grid },
+        { id: 'schedule', label: '课表日程', icon: Calendar },
+        { id: 'tag-mgmt', label: '标签管理', icon: Sparkles }
+      ]
+    },
+    {
+      id: 'grading',
+      label: 'AI 批改',
+      icon: Workflow,
+      items: [
+        { id: 'grading-flow', label: '作业工作流', icon: Workflow },
+        { id: 'review-queue', label: '复核队列', icon: CheckSquare, badge: pendingReviewCount }
+      ]
+    },
+    {
+      id: 'diagnosis',
+      label: '学情诊断',
+      icon: BarChart3,
+      items: [
+        { id: 'diagnosis', label: '班级诊断', icon: BarChart3 },
+        { id: 'profile', label: '学生画像', icon: UserSquare2 }
+      ]
+    },
+    {
+      id: 'library',
+      label: '资料库',
+      icon: Database,
+      items: [
+        { id: 'knowledge-graph', label: '知识图谱', icon: Network },
+        { id: 'library-editor', label: '资料编辑', icon: LibraryBig }
+      ]
+    },
+    {
+      id: 'system',
+      label: '设置',
+      icon: Settings2,
+      items: [
+        { id: 'settings', label: '系统设置', icon: Sliders }
+      ]
+    }
   ];
 
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-zinc-950 text-slate-800 dark:text-slate-100 font-sans flex flex-col antialiased">
       
       {/* Universal header */}
-      <header className="h-16 bg-white dark:bg-zinc-900 border-b border-slate-150 dark:border-zinc-800/80 px-6 flex items-center justify-between z-30 sticky top-0">
+      <header className="h-16 bg-white/75 dark:bg-zinc-900/75 backdrop-blur-2xl border-b border-slate-200/70 dark:border-zinc-800/80 px-6 flex items-center justify-between z-30 sticky top-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-700 dark:bg-emerald-600 flex items-center justify-center text-white shadow shadow-emerald-700/10">
-            <Sparkles className="w-5.5 h-5.5" />
+          <div className="w-10 h-10 rounded-[20px] bg-emerald-700 dark:bg-emerald-600 flex items-center justify-center text-white shadow-lg shadow-emerald-900/10">
+            <GraduationCap className="w-5.5 h-5.5" />
           </div>
           <div>
             <h1 className="text-sm font-black text-slate-800 dark:text-slate-100 tracking-tight flex items-center gap-1.5">
@@ -274,19 +344,25 @@ export default function App() {
                 PRO v1.5
               </span>
             </h1>
-            <p className="text-[10px] text-slate-400">面向初中语文教师的教学证据采集、作业 AI 批改、学情诊断和学生画像平台</p>
+            <p className="text-[10px] text-slate-400">教学证据采集、作业 AI 批改、学情诊断和学生画像平台</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          
-          {/* Active Class Dropdown for quick sync */}
-          <div className="hidden md:flex items-center gap-1.5">
-            <span className="text-[11px] font-bold text-slate-400 uppercase">当前焦点：</span>
+        <div className="flex items-center gap-3">
+          <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/65 dark:bg-zinc-800/65 border border-slate-200/70 dark:border-zinc-700/70 text-[11px] text-slate-500 dark:text-slate-400">
+            <span>2026 春季学期</span>
+            <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+            <span>初中语文</span>
+            <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+            <span>统编版七年级下册</span>
+          </div>
+
+          <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-700/10">
+            <span className="text-[11px] font-bold text-emerald-900/60 dark:text-emerald-200/70">当前班级</span>
             <select
               value={selectedClassId}
               onChange={(e) => setSelectedClassId(e.target.value)}
-              className="px-2.5 py-1 bg-slate-50 dark:bg-zinc-800 border rounded-xl text-xs font-semibold cursor-pointer text-slate-600 dark:text-slate-200"
+              className="bg-transparent text-xs font-semibold cursor-pointer text-emerald-950 dark:text-emerald-100 focus:outline-none"
             >
               {classes.filter(c => c.status === 'active').map(c => (
                 <option key={c.id} value={c.id}>{c.name}</option>
@@ -294,12 +370,9 @@ export default function App() {
             </select>
           </div>
 
-          <div className="h-4 w-px bg-slate-200"></div>
-
-          {/* User profile details info */}
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">王王老师 (初一语文)</span>
-            <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">王老师</span>
+            <div className="w-8 h-8 rounded-full bg-slate-200/90 dark:bg-zinc-800 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center text-xs">
               王
             </div>
           </div>
@@ -310,47 +383,78 @@ export default function App() {
       <div className="flex-1 flex overflow-hidden">
         
         {/* Vertical sidebar */}
-        <aside className="w-64 bg-white dark:bg-zinc-900 border-r border-slate-150 dark:border-zinc-800/80 flex flex-col justify-between p-4 flex-shrink-0 select-none z-20">
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-3 block mb-2">主导航菜单</span>
-            <nav className="space-y-1">
-              {sidebarItems.map(item => {
-                const Icon = item.icon;
-                const isActive = activePage === item.id;
+        <aside className="w-72 bg-white/70 dark:bg-zinc-900/70 backdrop-blur-2xl border-r border-slate-200/70 dark:border-zinc-800/80 flex flex-col justify-between p-4 flex-shrink-0 select-none z-20">
+          <div className="space-y-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-3 block mb-2">导航</span>
+            <nav className="space-y-2">
+              {navGroups.map(group => {
+                const GroupIcon = group.icon;
+                const isSingle = group.items.length === 1;
+                const isExpanded = isSingle || expandedGroups[group.id];
+                const hasActiveChild = group.items.some(item => item.id === activePage);
+
                 return (
-                  <button
-                    key={item.id}
-                    id={`sidebar-item-${item.id}`}
-                    onClick={() => setActivePage(item.id)}
-                    className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
-                      isActive 
-                        ? 'bg-emerald-700 text-white dark:bg-emerald-600 shadow-md shadow-emerald-700/10' 
-                        : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800 dark:hover:bg-zinc-850 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Icon className="w-4.5 h-4.5" />
-                      <span>{item.label}</span>
-                    </div>
-                    {/* Badge numbers for Review & Alerts */}
-                    {item.id === 'review-queue' && reviewQueue.filter(r => r.status === 'pending').length > 0 && (
-                      <span className={`px-1.5 py-0.2 text-[9px] rounded-full font-bold ${isActive ? 'bg-white text-emerald-800' : 'bg-red-500 text-white'}`}>
-                        {reviewQueue.filter(r => r.status === 'pending').length}
-                      </span>
+                  <div key={group.id} className="rounded-2xl">
+                    <button
+                      onClick={() => isSingle ? setActivePage(group.items[0].id) : toggleGroup(group.id)}
+                      className={`w-full px-3 py-2.5 rounded-2xl text-xs font-bold flex items-center justify-between transition-all cursor-pointer ${
+                        hasActiveChild
+                          ? 'bg-emerald-700/10 text-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-200'
+                          : 'text-slate-500 hover:bg-white/80 hover:text-slate-800 dark:hover:bg-zinc-800/80 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <GroupIcon className="w-4.5 h-4.5" />
+                        <span>{group.label}</span>
+                      </div>
+                      {!isSingle && (
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                      )}
+                    </button>
+
+                    {isExpanded && (
+                      <div className="mt-1 ml-5 pl-3 border-l border-slate-200/80 dark:border-zinc-800/80 space-y-1">
+                        {group.items.map(item => {
+                          const ItemIcon = item.icon;
+                          const isActive = activePage === item.id;
+                          return (
+                            <button
+                              key={item.id}
+                              id={`sidebar-item-${item.id}`}
+                              onClick={() => setActivePage(item.id)}
+                              className={`w-full px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                                isActive
+                                  ? 'bg-emerald-700 text-white shadow-md shadow-emerald-700/10'
+                                  : 'text-slate-500 hover:bg-white/80 hover:text-slate-800 dark:hover:bg-zinc-800/80 dark:hover:text-slate-200'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <ItemIcon className="w-4 h-4" />
+                                <span>{item.label}</span>
+                              </div>
+                              {'badge' in item && item.badge > 0 && (
+                                <span className={`px-1.5 py-0.2 text-[9px] rounded-full font-bold ${isActive ? 'bg-white text-emerald-800' : 'bg-red-500 text-white'}`}>
+                                  {item.badge}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
                     )}
-                  </button>
+                  </div>
                 );
               })}
             </nav>
           </div>
 
           {/* Quick help context / documentation footer */}
-          <div className="p-3 bg-slate-50 dark:bg-zinc-850/40 rounded-2xl border border-slate-150 dark:border-zinc-800/60 text-[11px] text-slate-500 space-y-1">
+          <div className="p-3 bg-white/65 dark:bg-zinc-850/40 rounded-2xl border border-slate-200/70 dark:border-zinc-800/60 text-[11px] text-slate-500 space-y-1">
             <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
               <HelpCircle className="w-3.5 h-3.5" />
-              语文教研协作区
+              当前班级
             </span>
-            <p className="leading-normal">部编版初中语文名家名篇知识要点、自适应巩固微课已在后台全量就绪。可直接在[学生电子画像]中给特定孩子一键定制推送。</p>
+            <p className="leading-normal">{selectedClass?.name}，{selectedClass?.studentCount} 人。课代表：{selectedClass?.representatives.length || 0} 名。待复核 {pendingReviewCount} 条。</p>
           </div>
         </aside>
 
@@ -365,6 +469,7 @@ export default function App() {
               students={students}
               schedule={schedule}
               reminders={reminders}
+              selectedClassId={selectedClassId}
               onNavigate={handleNavigate}
               onEnterClass={(classId) => {
                 setSelectedClassId(classId);
@@ -489,11 +594,34 @@ export default function App() {
             <StudentProfile
               students={students}
               classes={classes}
+              selectedClassId={selectedClassId}
               selectedStudentId={selectedStudentId}
+              onSelectClass={setSelectedClassId}
               onSelectStudent={setSelectedStudentId}
+              onEditStudent={(studentId) => {
+                setSelectedStudentId(studentId);
+                setActivePage('student-mgmt');
+                triggerToast('已跳转到学生管理，请在列表中编辑该学生档案');
+              }}
               onAddObservation={handleAddObservation}
               onShowToast={triggerToast}
             />
+          )}
+
+          {(activePage === 'knowledge-graph' || activePage === 'library-editor') && (
+            <KnowledgeLibrary
+              nodes={initialKnowledgeNodes}
+              mode={activePage === 'library-editor' ? 'editor' : libraryMode}
+              onSwitchMode={(mode) => {
+                setLibraryMode(mode);
+                setActivePage(mode === 'graph' ? 'knowledge-graph' : 'library-editor');
+              }}
+              onShowToast={triggerToast}
+            />
+          )}
+
+          {activePage === 'tag-mgmt' && (
+            <TagManagement onShowToast={triggerToast} />
           )}
 
           {activePage === 'settings' && (
