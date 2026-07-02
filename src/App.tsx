@@ -34,6 +34,7 @@ import StudentProfile from './components/StudentProfileV2';
 import SystemSettings from './components/SystemSettings';
 import KnowledgeLibrary from './components/KnowledgeLibrary';
 import TagManagement from './components/TagManagement';
+import GradingTaskManagement from './components/GradingTaskManagement';
 
 export default function App() {
   // Navigation & View State
@@ -122,8 +123,9 @@ export default function App() {
   };
 
   const handleArchiveClass = (classId: string) => {
-    setClasses(classes.map(c => c.id === classId ? { ...c, status: 'archived' as any } : c));
-    triggerToast('该班级已成功归档并冻结其课程与学生档案数据。');
+    setClasses(classes.map(c => c.id === classId ? { ...c, status: c.status === 'active' ? 'archived' as any : 'active' as any } : c));
+    const target = classes.find(c => c.id === classId);
+    triggerToast(target?.status === 'active' ? '该班级已归档。' : '该班级已取消归档。');
   };
 
   // 5. Student actions
@@ -276,7 +278,7 @@ export default function App() {
       label: '工作台',
       icon: LayoutDashboard,
       items: [
-        { id: 'workbench', label: '任务总览', icon: LayoutDashboard }
+        { id: 'workbench', label: '工作台', icon: LayoutDashboard }
       ]
     },
     {
@@ -296,6 +298,7 @@ export default function App() {
       label: 'AI 批改',
       icon: Workflow,
       items: [
+        { id: 'grading-tasks', label: '任务管理', icon: FolderOpen },
         { id: 'grading-flow', label: '作业工作流', icon: Workflow },
         { id: 'review-queue', label: '复核队列', icon: CheckSquare, badge: pendingReviewCount }
       ]
@@ -412,7 +415,7 @@ export default function App() {
                       )}
                     </button>
 
-                    {isExpanded && (
+                    {!isSingle && isExpanded && (
                       <div className="mt-1 ml-5 pl-3 border-l border-slate-200/80 dark:border-zinc-800/80 space-y-1">
                         {group.items.map(item => {
                           const ItemIcon = item.icon;
@@ -558,10 +561,42 @@ export default function App() {
             />
           )}
 
+          {activePage === 'grading-tasks' && (
+            <GradingTaskManagement
+              tasks={tasks}
+              classes={classes}
+              workflowState={workflowState}
+              onCreateTask={(task) => {
+                setTasks([task, ...tasks]);
+                triggerToast('批改任务已创建，可进入作业工作流继续配置');
+              }}
+              onEnterWorkflow={(task) => {
+                setWorkflowState({
+                  ...workflowState,
+                  taskName: task.name,
+                  classId: task.classId,
+                  deadline: task.deadline
+                });
+                setSelectedClassId(task.classId);
+                setActivePage('grading-flow');
+              }}
+            />
+          )}
+
           {activePage === 'grading-flow' && (
             <GradingWorkflow
               workflowState={workflowState}
               classes={classes}
+              tasks={tasks}
+              onSelectTask={(task) => {
+                setWorkflowState({
+                  ...workflowState,
+                  taskName: task.name,
+                  classId: task.classId,
+                  deadline: task.deadline
+                });
+                setSelectedClassId(task.classId);
+              }}
               onUpdateState={(updated) => setWorkflowState({ ...workflowState, ...updated })}
               onSyncToProfiles={handleSyncToProfiles}
               onShowToast={triggerToast}

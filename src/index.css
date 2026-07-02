@@ -223,6 +223,83 @@ body {
   transform: scale(0.97);
 }
 
+/* Theme bridge: make Tailwind emerald accents respond to Settings theme switch. */
+.bg-emerald-700,
+.bg-emerald-600,
+.hover\:bg-emerald-700:hover,
+.hover\:bg-emerald-600:hover,
+.dark .dark\:bg-emerald-600,
+.dark .dark\:hover\:bg-emerald-600:hover {
+  background-color: var(--theme-primary) !important;
+}
+
+.bg-emerald-500,
+.bg-emerald-500\/60,
+.bg-emerald-500\/80 {
+  background-color: var(--theme-primary) !important;
+}
+
+.hover\:bg-emerald-800:hover,
+.hover\:bg-emerald-900:hover,
+.dark .dark\:hover\:bg-emerald-700:hover {
+  background-color: var(--theme-primary-hover) !important;
+}
+
+.text-emerald-700,
+.text-emerald-800,
+.text-emerald-900,
+.text-emerald-950,
+.text-emerald-500,
+.text-emerald-600,
+.dark .dark\:text-emerald-300,
+.dark .dark\:text-emerald-400 {
+  color: var(--theme-primary) !important;
+}
+
+.border-emerald-700,
+.border-emerald-200,
+.border-emerald-500,
+.border-emerald-500\/10,
+.border-emerald-500\/20,
+.border-emerald-500\/30,
+.border-emerald-700\/10 {
+  border-color: var(--theme-primary-border) !important;
+}
+
+.bg-emerald-50,
+.bg-emerald-100,
+.bg-emerald-500\/5,
+.bg-emerald-500\/10,
+.bg-emerald-500\/15,
+.bg-emerald-500\/20,
+.bg-emerald-600\/5,
+.bg-emerald-600\/10,
+.bg-emerald-700\/10,
+.dark .dark\:bg-emerald-950\/20,
+.dark .dark\:bg-emerald-950\/30,
+.dark .dark\:bg-emerald-950\/40 {
+  background-color: var(--theme-primary-light) !important;
+}
+
+.ring-emerald-500\/20,
+.ring-emerald-400\/25 {
+  --tw-ring-color: var(--theme-primary-border) !important;
+}
+
+.accent-emerald-700,
+.accent-emerald-750 {
+  accent-color: var(--theme-primary);
+}
+
+.from-emerald-500\/5,
+.from-emerald-500\/10,
+.from-emerald-600,
+.from-emerald-600\/10 {
+  --tw-gradient-from: var(--theme-primary-light) var(--tw-gradient-from-position);
+  --tw-gradient-to: rgba(255, 255, 255, 0) var(--tw-gradient-to-position);
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+}
+
 /* Classroom view layout */
 .classroom-grid {
   perspective: 1200px;

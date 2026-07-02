@@ -147,12 +147,11 @@ export default function VirtualClassroom({
         {/* 3D-feeling Classroom Stage */}
         <div className="flex-1 glass-panel rounded-3xl p-6 flex flex-col justify-between overflow-hidden relative min-h-[560px] bg-gradient-to-b from-slate-100/50 to-slate-200/20 dark:from-zinc-900/40 dark:to-zinc-900/20">
           
-          {/* Blackboard / far wall area */}
+          {/* Back wall: far end of classroom */}
           <div className="w-full flex flex-col items-center justify-center space-y-1 border-b border-slate-200/60 dark:border-zinc-800 pb-3 mb-4">
-            <div className="w-72 py-1.5 bg-slate-700 dark:bg-zinc-800 text-slate-200 rounded-lg shadow-inner text-center text-xs tracking-widest font-mono">
-              █ █ █ 黑板 · 统编版七下语文 █ █ █
+            <div className="w-72 py-1.5 bg-slate-200/70 dark:bg-zinc-800/70 text-slate-500 rounded-lg shadow-inner text-center text-xs tracking-widest font-mono">
+              教室后排
             </div>
-            <span className="text-[10px] text-slate-400 font-medium">教师站在下方讲台向前看</span>
           </div>
 
           {/* Student Desk Area */}
@@ -225,8 +224,11 @@ export default function VirtualClassroom({
             </div>
           </div>
 
-          {/* Podium at bottom: teacher perspective */}
-          <div className="mt-5 flex justify-center">
+          {/* Blackboard and podium at bottom: teacher viewpoint origin */}
+          <div className="mt-5 flex flex-col items-center gap-2">
+            <div className="w-[420px] max-w-full py-2 bg-slate-800 dark:bg-zinc-900 text-slate-100 rounded-2xl shadow-inner text-center text-xs tracking-[0.25em] font-mono">
+              黑板 · 统编版七下语文
+            </div>
             <div className="w-80 h-14 rounded-t-[28px] bg-gradient-to-b from-amber-100 to-amber-200 dark:from-zinc-800 dark:to-zinc-900 border border-amber-200/80 dark:border-zinc-700 shadow-inner flex items-center justify-center">
               <span className="text-xs font-black text-amber-900 dark:text-zinc-200 tracking-[0.35em]">讲台</span>
             </div>
@@ -317,7 +319,7 @@ export default function VirtualClassroom({
               <div className="space-y-2">
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                   <Tag className="w-3 h-3" />
-                  表现与关注标签
+                  日常表现标签
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
                   {selectedStudent.behaviorTags.map((tag, idx) => (

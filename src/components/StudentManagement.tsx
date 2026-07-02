@@ -64,7 +64,10 @@ export default function StudentManagement({
   const [bulkTargetClass, setBulkTargetClass] = useState('c1');
   const [bulkNewTag, setBulkNewTag] = useState('');
   const familyAttentionTags = ['留守儿童', '双职工家庭', '隔代教养', '单亲家庭', '重组家庭', '家长期望较高', '作业陪伴不足', '沟通需谨慎'];
+  const relationOptions = ['母亲', '父亲', '姥姥', '奶奶', '姥爷', '爷爷', '其他'];
+  const dailyBehaviorTags = ['课堂积极', '注意力易分散', '作业拖延', '书写认真', '情绪敏感', '同伴关系良好'];
   const selectedFamilyTags = (formData.familyStatusTag || '').split('、').filter(Boolean);
+  const selectedBehaviorTags = formData.behaviorTags || [];
 
   // Filter students
   const filteredStudents = students.filter(s => {
@@ -107,6 +110,7 @@ export default function StudentManagement({
 
   const handleOpenAdd = () => {
     setIsEditMode(false);
+    setOtherRelation('');
     setFormData({
       id: 's' + (students.length + 1),
       name: '',
@@ -129,6 +133,7 @@ export default function StudentManagement({
 
   const handleOpenEdit = (s: Student) => {
     setIsEditMode(true);
+    setOtherRelation(relationOptions.includes(s.parent.relation) ? '' : s.parent.relation);
     setFormData({ ...s });
     setShowAddEditModal(true);
   };
@@ -139,8 +144,15 @@ export default function StudentManagement({
       return;
     }
     const currentClass = classes.find(c => c.id === formData.classId);
+    const normalizedParent = {
+      ...formData.parent,
+      relation: formData.parent?.relation === '其他' && otherRelation.trim()
+        ? otherRelation.trim()
+        : formData.parent?.relation || '父亲'
+    } as ParentInfo;
     const updated = {
       ...formData,
+      parent: normalizedParent,
       className: currentClass ? currentClass.name : ''
     } as Student;
 
@@ -534,7 +546,7 @@ export default function StudentManagement({
       {/* Add / Edit Student Modal */}
       {showAddEditModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-150 dark:border-zinc-800 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl max-w-3xl w-full p-6 space-y-4 shadow-2xl border border-slate-150 dark:border-zinc-800 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-zinc-800">
               <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">
                 {isEditMode ? '修改学生档案' : '录入新学生档案'}
@@ -610,60 +622,59 @@ export default function StudentManagement({
               {/* Parent fields */}
               <div className="p-3 bg-slate-50 dark:bg-zinc-800/40 rounded-2xl border border-slate-200 dark:border-zinc-700 space-y-3">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">家长联系信息</span>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-500">家长姓名</label>
-                    <input
-                      type="text"
-                      value={formData.parent?.name || ''}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        parent: { ...formData.parent, name: e.target.value } as ParentInfo
-                      })}
-                      className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-500">联系电话</label>
-                    <input
-                      type="text"
-                      value={formData.parent?.phone || ''}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        parent: { ...formData.parent, phone: e.target.value } as ParentInfo
-                      })}
-                      className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-500">关系</label>
-                    <select
-                      value={formData.parent?.relation || '父亲'}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        parent: { ...formData.parent, relation: e.target.value } as ParentInfo
-                      })}
-                      className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border"
-                    >
-                      <option>母亲</option>
-                      <option>父亲</option>
-                      <option>姥姥</option>
-                      <option>奶奶</option>
-                      <option>姥爷</option>
-                      <option>爷爷</option>
-                      <option>其他</option>
-                    </select>
-                    {formData.parent?.relation === '其他' && (
+                <div className="grid md:grid-cols-[260px_1fr] gap-4">
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-500">家长姓名</label>
                       <input
                         type="text"
-                        value={otherRelation}
-                        onChange={(e) => setOtherRelation(e.target.value)}
-                        placeholder="请输入具体关系"
-                        className="w-full mt-2 px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border"
+                        value={formData.parent?.name || ''}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          parent: { ...formData.parent, name: e.target.value } as ParentInfo
+                        })}
+                        className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border"
                       />
-                    )}
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-500">联系电话</label>
+                      <input
+                        type="text"
+                        value={formData.parent?.phone || ''}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          parent: { ...formData.parent, phone: e.target.value } as ParentInfo
+                        })}
+                        className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-500">关系</label>
+                      <select
+                        value={relationOptions.includes(formData.parent?.relation || '') ? formData.parent?.relation : '其他'}
+                        onChange={(e) => {
+                          if (e.target.value !== '其他') setOtherRelation('');
+                          setFormData({
+                            ...formData,
+                            parent: { ...formData.parent, relation: e.target.value } as ParentInfo
+                          });
+                        }}
+                        className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border"
+                      >
+                        {relationOptions.map(option => (
+                          <option key={option}>{option}</option>
+                        ))}
+                      </select>
+                      {(formData.parent?.relation === '其他' || !relationOptions.includes(formData.parent?.relation || '')) && (
+                        <input
+                          type="text"
+                          value={otherRelation}
+                          onChange={(e) => setOtherRelation(e.target.value)}
+                          placeholder="请输入具体关系"
+                          className="w-full mt-2 px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border"
+                        />
+                      )}
+                    </div>
                   </div>
                   <div className="space-y-1">
                     <label className="text-[11px] font-bold text-slate-500">家校沟通随记</label>
@@ -674,8 +685,8 @@ export default function StudentManagement({
                         parent: { ...formData.parent, remark: e.target.value } as ParentInfo
                       })}
                       placeholder="沟通时间及关键诉求"
-                      rows={5}
-                      className="w-full px-3 py-2 rounded-lg bg-white dark:bg-zinc-800 border resize-none"
+                      rows={9}
+                      className="w-full h-full min-h-[168px] px-3 py-2 rounded-lg bg-white dark:bg-zinc-800 border resize-none"
                     />
                   </div>
                 </div>
@@ -708,6 +719,34 @@ export default function StudentManagement({
                 </div>
               </div>
 
+              <div className="p-3 bg-slate-50 dark:bg-zinc-800/40 rounded-2xl border border-slate-200 dark:border-zinc-700 space-y-3">
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">日常表现标签</label>
+                <div className="flex flex-wrap gap-2">
+                  {dailyBehaviorTags.map(tag => {
+                    const checked = selectedBehaviorTags.includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => {
+                          const next = checked
+                            ? selectedBehaviorTags.filter(item => item !== tag)
+                            : [...selectedBehaviorTags, tag];
+                          setFormData({ ...formData, behaviorTags: next });
+                        }}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all ${
+                          checked
+                            ? 'bg-emerald-700 text-white border-emerald-700'
+                            : 'bg-white dark:bg-zinc-800 text-slate-500 border-slate-200 dark:border-zinc-700'
+                        }`}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Representatives / Status */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
@@ -719,11 +758,11 @@ export default function StudentManagement({
                       onChange={(e) => setFormData({ ...formData, isRepresentative: e.target.checked })}
                       className="accent-emerald-700"
                     />
-                    <span className="text-xs">任语文课代表职责</span>
+                    <span className="text-xs">设为课代表</span>
                   </label>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-400 block">初始学情诊断</label>
+                  <label className="text-xs font-bold text-slate-400 block">日常表现评估</label>
                   <select
                     value={formData.status || 'good'}
                     onChange={(e) => setFormData({ ...formData, status: e.target.value as StudentStatus })}

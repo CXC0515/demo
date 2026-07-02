@@ -13,6 +13,8 @@ import { WorkflowState, SchoolClass, WorkbenchTask } from '../types';
 interface GradingWorkflowProps {
   workflowState: WorkflowState;
   classes: SchoolClass[];
+  tasks: WorkbenchTask[];
+  onSelectTask: (task: WorkbenchTask) => void;
   onUpdateState: (newState: Partial<WorkflowState>) => void;
   onSyncToProfiles: () => void;
   onShowToast: (message: string) => void;
@@ -22,6 +24,8 @@ interface GradingWorkflowProps {
 export default function GradingWorkflow({
   workflowState,
   classes,
+  tasks,
+  onSelectTask,
   onUpdateState,
   onSyncToProfiles,
   onShowToast,
@@ -99,6 +103,27 @@ export default function GradingWorkflow({
 
   return (
     <div className="space-y-6 animate-fade-in" id="grading-workflow-page">
+      <div className="glass-panel rounded-3xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wider">AI 批改 / 作业工作流</p>
+          <h2 className="text-xl font-black text-slate-900 dark:text-slate-50">{workflowState.taskName}</h2>
+          <p className="text-xs text-slate-500 mt-1">{currentClass?.name} · 截止 {workflowState.deadline}</p>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-slate-500">
+          切换任务
+          <select
+            value={tasks.find(t => t.name === workflowState.taskName)?.id || ''}
+            onChange={(e) => {
+              const task = tasks.find(t => t.id === e.target.value);
+              if (task) onSelectTask(task);
+            }}
+            className="min-w-64 px-3 py-2 rounded-2xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-sm font-bold text-slate-700 dark:text-slate-200 focus:outline-none"
+          >
+            <option value="">当前模拟任务</option>
+            {tasks.map(task => <option key={task.id} value={task.id}>{task.name}</option>)}
+          </select>
+        </label>
+      </div>
       
       {/* 10-step horizontal wizard stepper, beautiful and fully interactive */}
       <div className="glass-panel rounded-3xl p-5 overflow-x-auto">
