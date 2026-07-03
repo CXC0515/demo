@@ -6,8 +6,9 @@
 import React, { useState } from 'react';
 import {
   Sparkles, LayoutDashboard, Grid, FolderOpen, Users, Calendar, 
-  Workflow, CheckSquare, BarChart3, UserSquare2, Sliders, HelpCircle,
-  ChevronDown, Database, Network, LibraryBig, Settings2, GraduationCap
+  Workflow, BarChart3, Sliders, HelpCircle, ChevronDown, Database,
+  Network, LibraryBig, Settings2, GraduationCap, BookOpen, FileText,
+  BriefcaseBusiness, Presentation, Trophy, ScrollText
 } from 'lucide-react';
 
 // Import Types and Mock Data
@@ -27,14 +28,13 @@ import VirtualClassroom from './components/VirtualClassroom';
 import ClassManagement from './components/ClassManagement';
 import StudentManagement from './components/StudentManagement';
 import ScheduleReminder from './components/ScheduleReminder';
-import GradingWorkflow from './components/GradingWorkflow';
-import ReviewQueuePage from './components/ReviewQueuePage';
-import ClassDiagnosis from './components/ClassDiagnosis';
-import StudentProfile from './components/StudentProfileV2';
-import SystemSettings from './components/SystemSettings';
+import SystemSettings from './components/SystemSettingsPanel';
 import KnowledgeLibrary from './components/KnowledgeLibrary';
 import TagManagement from './components/TagManagement';
-import GradingTaskManagement from './components/GradingTaskManagement';
+import LessonPlanWorkspace from './components/LessonPlanWorkspace';
+import GradingWorkspace from './components/GradingWorkspace';
+import DiagnosisWorkspace from './components/DiagnosisWorkspace';
+import CareerPlaceholder from './components/CareerPlaceholder';
 
 export default function App() {
   // Navigation & View State
@@ -44,9 +44,9 @@ export default function App() {
   const [lowConfidenceThreshold, setLowConfidenceThreshold] = useState<number>(0.75);
   const [libraryMode, setLibraryMode] = useState<'graph' | 'editor'>('graph');
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    management: true,
-    grading: true,
-    diagnosis: true,
+    teaching: true,
+    homeSchool: true,
+    career: false,
     library: true
   });
 
@@ -246,15 +246,21 @@ export default function App() {
 
   // Page Routing Navigation
   const handleNavigate = (pageId: string, subPageId?: string) => {
-    setActivePage(pageId);
-    if (pageId === 'diagnosis' && subPageId === 'profile') {
-      // Find the first risk student if any to display on profile
-      const riskStudent = students.find(s => s.status === 'risk');
-      if (riskStudent) {
-        setSelectedStudentId(riskStudent.id);
-      }
-      setActivePage('profile');
+    if (pageId === 'grading-flow' || pageId === 'grading-tasks' || pageId === 'review-queue') {
+      setActivePage('grading-workspace');
+      return;
     }
+    if (pageId === 'diagnosis' || pageId === 'profile') {
+      if (subPageId === 'profile' || pageId === 'profile') {
+        const riskStudent = students.find(s => s.status === 'risk');
+        if (riskStudent) {
+          setSelectedStudentId(riskStudent.id);
+        }
+      }
+      setActivePage('diagnosis-workspace');
+      return;
+    }
+    setActivePage(pageId);
     if (pageId === 'library' && subPageId === 'editor') {
       setLibraryMode('editor');
       setActivePage('library-editor');
@@ -282,34 +288,36 @@ export default function App() {
       ]
     },
     {
-      id: 'management',
-      label: '管理',
-      icon: FolderOpen,
+      id: 'teaching',
+      label: '教学工作',
+      icon: BookOpen,
+      items: [
+        { id: 'lesson-plan', label: 'AI 教案', icon: FileText },
+        { id: 'grading-workspace', label: 'AI 批改', icon: Workflow, badge: pendingReviewCount },
+        { id: 'diagnosis-workspace', label: '学情诊断', icon: BarChart3 }
+      ]
+    },
+    {
+      id: 'homeSchool',
+      label: '家校管理',
+      icon: Users,
       items: [
         { id: 'class-mgmt', label: '班级管理', icon: FolderOpen },
         { id: 'student-mgmt', label: '学生管理', icon: Users },
         { id: 'classroom', label: '班级可视化', icon: Grid },
-        { id: 'schedule', label: '课表日程', icon: Calendar },
+        { id: 'schedule', label: '课表与提醒', icon: Calendar },
         { id: 'tag-mgmt', label: '标签管理', icon: Sparkles }
       ]
     },
     {
-      id: 'grading',
-      label: 'AI 批改',
-      icon: Workflow,
+      id: 'career',
+      label: '个人职业',
+      icon: BriefcaseBusiness,
       items: [
-        { id: 'grading-tasks', label: '任务管理', icon: FolderOpen },
-        { id: 'grading-flow', label: '作业工作流', icon: Workflow },
-        { id: 'review-queue', label: '复核队列', icon: CheckSquare, badge: pendingReviewCount }
-      ]
-    },
-    {
-      id: 'diagnosis',
-      label: '学情诊断',
-      icon: BarChart3,
-      items: [
-        { id: 'diagnosis', label: '班级诊断', icon: BarChart3 },
-        { id: 'profile', label: '学生画像', icon: UserSquare2 }
+        { id: 'career-open-class', label: '公开课', icon: Presentation },
+        { id: 'career-competition', label: '教学比赛', icon: Trophy },
+        { id: 'career-paper', label: '论文课题', icon: ScrollText },
+        { id: 'career-title', label: '职称材料', icon: BriefcaseBusiness }
       ]
     },
     {
@@ -488,9 +496,13 @@ export default function App() {
                   classId: task.classId,
                   deadline: task.deadline
                 });
-                handleNavigate('grading-flow');
+                handleNavigate('grading-workspace');
               }}
             />
+          )}
+
+          {activePage === 'lesson-plan' && (
+            <LessonPlanWorkspace onShowToast={triggerToast} />
           )}
 
           {activePage === 'classroom' && (
@@ -561,11 +573,13 @@ export default function App() {
             />
           )}
 
-          {activePage === 'grading-tasks' && (
-            <GradingTaskManagement
+          {activePage === 'grading-workspace' && (
+            <GradingWorkspace
               tasks={tasks}
               classes={classes}
               workflowState={workflowState}
+              reviewQueue={reviewQueue}
+              lowConfidenceThreshold={lowConfidenceThreshold}
               onCreateTask={(task) => {
                 setTasks([task, ...tasks]);
                 triggerToast('批改任务已创建，可进入作业工作流继续配置');
@@ -578,16 +592,7 @@ export default function App() {
                   deadline: task.deadline
                 });
                 setSelectedClassId(task.classId);
-                setActivePage('grading-flow');
               }}
-            />
-          )}
-
-          {activePage === 'grading-flow' && (
-            <GradingWorkflow
-              workflowState={workflowState}
-              classes={classes}
-              tasks={tasks}
               onSelectTask={(task) => {
                 setWorkflowState({
                   ...workflowState,
@@ -599,14 +604,6 @@ export default function App() {
               }}
               onUpdateState={(updated) => setWorkflowState({ ...workflowState, ...updated })}
               onSyncToProfiles={handleSyncToProfiles}
-              onShowToast={triggerToast}
-              lowConfidenceThreshold={lowConfidenceThreshold}
-            />
-          )}
-
-          {activePage === 'review-queue' && (
-            <ReviewQueuePage
-              reviewQueue={reviewQueue}
               onConfirmReview={handleConfirmReview}
               onBounceToOcr={handleBounceToOcr}
               onMarkAsSample={handleMarkAsSample}
@@ -614,19 +611,8 @@ export default function App() {
             />
           )}
 
-          {activePage === 'diagnosis' && (
-            <ClassDiagnosis
-              students={students}
-              classes={classes}
-              selectedClassId={selectedClassId}
-              onSelectClass={setSelectedClassId}
-              onNavigate={handleNavigate}
-              onShowToast={triggerToast}
-            />
-          )}
-
-          {activePage === 'profile' && (
-            <StudentProfile
+          {activePage === 'diagnosis-workspace' && (
+            <DiagnosisWorkspace
               students={students}
               classes={classes}
               selectedClassId={selectedClassId}
@@ -639,6 +625,7 @@ export default function App() {
                 triggerToast('已跳转到学生管理，请在列表中编辑该学生档案');
               }}
               onAddObservation={handleAddObservation}
+              onNavigate={handleNavigate}
               onShowToast={triggerToast}
             />
           )}
@@ -663,6 +650,41 @@ export default function App() {
             <SystemSettings
               lowConfidenceThreshold={lowConfidenceThreshold}
               onUpdateThreshold={setLowConfidenceThreshold}
+              classes={classes}
+              selectedClassId={selectedClassId}
+              onSelectClass={setSelectedClassId}
+              onShowToast={triggerToast}
+            />
+          )}
+
+          {activePage === 'career-open-class' && (
+            <CareerPlaceholder
+              title="公开课"
+              description="未来用于整理公开课选题、教学设计、磨课记录和展示材料。"
+              onShowToast={triggerToast}
+            />
+          )}
+
+          {activePage === 'career-competition' && (
+            <CareerPlaceholder
+              title="教学比赛"
+              description="未来用于管理参赛任务、材料清单、课例打磨和评审反馈。"
+              onShowToast={triggerToast}
+            />
+          )}
+
+          {activePage === 'career-paper' && (
+            <CareerPlaceholder
+              title="论文课题"
+              description="未来用于沉淀教学案例、研究问题、论文草稿和课题过程材料。"
+              onShowToast={triggerToast}
+            />
+          )}
+
+          {activePage === 'career-title' && (
+            <CareerPlaceholder
+              title="职称材料"
+              description="未来用于汇总成果证明、公开课记录、论文课题和教学反思材料。"
               onShowToast={triggerToast}
             />
           )}
