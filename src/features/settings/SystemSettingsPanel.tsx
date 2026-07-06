@@ -1,11 +1,11 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import React, { useEffect, useState } from 'react';
 import { BookOpen, Database, Palette, Save, Settings2, Sliders, UserRound } from 'lucide-react';
-import { SchoolClass } from '../types';
+import { SchoolClass } from '../../domain/types';
 
 interface SystemSettingsPanelProps {
   lowConfidenceThreshold: number;
@@ -265,3 +265,4 @@ function SettingSelect({
     </label>
   );
 }
+

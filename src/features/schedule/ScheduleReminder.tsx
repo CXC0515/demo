@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { 
   Calendar, Clock, Plus, Bell, X, Trash2, Edit, AlertCircle, Check 
 } from 'lucide-react';
-import { ScheduleItem, TimerReminder, SchoolClass } from '../types';
+import { ScheduleItem, TimerReminder, SchoolClass } from '../../domain/types';
 
 interface ScheduleReminderProps {
   schedule: ScheduleItem[];
@@ -520,3 +520,4 @@ export default function ScheduleReminder({
     </div>
   );
 }
+

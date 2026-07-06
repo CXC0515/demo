@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -8,7 +8,7 @@ import {
   Users, UserPlus, Upload, FileSpreadsheet, Edit, Trash2, Tag, 
   ArrowLeftRight, Filter, Search, X, Check, Eye, HelpCircle, Award, Sparkles 
 } from 'lucide-react';
-import { Student, SchoolClass, StudentStatus, ParentInfo } from '../types';
+import { Student, SchoolClass, StudentStatus, ParentInfo } from '../../domain/types';
 
 interface StudentManagementProps {
   students: Student[];
@@ -859,3 +859,4 @@ export default function StudentManagement({
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -8,7 +8,7 @@ import {
   Sparkles, ChevronRight, Check, Upload, FileText, Image, CheckCircle, 
   RefreshCw, Sliders, AlertTriangle, Play, BookOpen, BarChart2, Share2, Plus, Trash2, ShieldAlert
 } from 'lucide-react';
-import { WorkflowState, SchoolClass, WorkbenchTask } from '../types';
+import { WorkflowState, SchoolClass, WorkbenchTask } from '../../domain/types';
 
 interface GradingWorkflowProps {
   workflowState: WorkflowState;
@@ -743,3 +743,4 @@ export default function GradingWorkflow({
     </div>
   );
 }
+

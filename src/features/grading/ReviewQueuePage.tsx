@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -8,7 +8,7 @@ import {
   CheckSquare, ShieldAlert, Sparkles, User, FileText, Check, 
   ArrowLeft, RefreshCw, Star, Share2, HelpCircle 
 } from 'lucide-react';
-import { ReviewItem } from '../types';
+import { ReviewItem } from '../../domain/types';
 
 interface ReviewQueuePageProps {
   reviewQueue: ReviewItem[];
@@ -289,3 +289,4 @@ export default function ReviewQueuePage({
     </div>
   );
 }
+

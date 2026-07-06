@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -8,7 +8,7 @@ import {
   User, Award, AlertCircle, TrendingUp, Tag, ShieldAlert, 
   MessageSquare, Bell, ArrowRight, BookOpen, GraduationCap 
 } from 'lucide-react';
-import { Student, SchoolClass } from '../types';
+import { Student, SchoolClass } from '../../domain/types';
 
 interface VirtualClassroomProps {
   students: Student[];
@@ -491,3 +491,4 @@ export default function VirtualClassroom({
     </div>
   );
 }
+

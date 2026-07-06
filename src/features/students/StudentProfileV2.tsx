@@ -1,11 +1,11 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import React, { useMemo, useState } from 'react';
 import { ArrowLeft, Edit3, Eye, MessageSquare, Search, TrendingUp } from 'lucide-react';
-import { SchoolClass, Student, TeacherObservation } from '../types';
+import { SchoolClass, Student, TeacherObservation } from '../../domain/types';
 
 interface StudentProfileV2Props {
   students: Student[];
@@ -249,3 +249,4 @@ export default function StudentProfileV2({
     </div>
   );
 }
+

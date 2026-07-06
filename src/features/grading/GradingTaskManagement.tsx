@@ -1,11 +1,11 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import React, { useState } from 'react';
 import { ArrowRight, Plus, Search, Workflow } from 'lucide-react';
-import { SchoolClass, WorkbenchTask, WorkflowState } from '../types';
+import { SchoolClass, WorkbenchTask, WorkflowState } from '../../domain/types';
 
 interface GradingTaskManagementProps {
   tasks: WorkbenchTask[];
@@ -130,3 +130,4 @@ export default function GradingTaskManagement({
     </div>
   );
 }
+

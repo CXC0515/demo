@@ -1,13 +1,13 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import React, { useState } from 'react';
 import { BarChart3, UserSquare2 } from 'lucide-react';
-import { SchoolClass, Student, TeacherObservation } from '../types';
+import { SchoolClass, Student, TeacherObservation } from '../../domain/types';
 import ClassDiagnosis from './ClassDiagnosis';
-import StudentProfile from './StudentProfileV2';
+import StudentProfile from '../students/StudentProfileV2';
 
 interface DiagnosisWorkspaceProps {
   students: Student[];
@@ -98,3 +98,4 @@ export default function DiagnosisWorkspace({
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -8,7 +8,7 @@ import {
   BarChart2, ShieldAlert, Award, FileText, Download, Sparkles, 
   ChevronRight, TrendingDown, BookOpen, Clock, RefreshCw 
 } from 'lucide-react';
-import { Student, SchoolClass } from '../types';
+import { Student, SchoolClass } from '../../domain/types';
 
 interface ClassDiagnosisProps {
   students: Student[];
@@ -233,3 +233,4 @@ export default function ClassDiagnosis({
     </div>
   );
 }
+

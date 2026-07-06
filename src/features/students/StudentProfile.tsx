@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -8,7 +8,7 @@ import {
   User, Sparkles, TrendingUp, AlertTriangle, BookOpen, Calendar, 
   ChevronRight, Award, Brain, Mail, MessageSquare, Phone, Plus, History, Download 
 } from 'lucide-react';
-import { Student, SchoolClass, TeacherObservation } from '../types';
+import { Student, SchoolClass, TeacherObservation } from '../../domain/types';
 
 interface StudentProfileProps {
   students: Student[];
@@ -342,3 +342,4 @@ export default function StudentProfile({
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -7,7 +7,7 @@ import React, { useMemo, useState } from 'react';
 import {
   BookOpen, Boxes, GitBranch, Network, Plus, Save, Search, Trash2
 } from 'lucide-react';
-import { KnowledgeNode } from '../types';
+import { KnowledgeNode } from '../../domain/types';
 
 interface KnowledgeLibraryProps {
   nodes: KnowledgeNode[];
@@ -249,3 +249,4 @@ export default function KnowledgeLibrary({
     </div>
   );
 }
+

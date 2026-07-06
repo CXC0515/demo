@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -8,7 +8,7 @@ import {
   Users, Plus, Edit, Trash2, Archive, CheckCircle, Clock, 
   UserCheck, Shield, BookOpen, X, ArrowRight, Search
 } from 'lucide-react';
-import { SchoolClass, Student } from '../types';
+import { SchoolClass, Student } from '../../domain/types';
 
 interface ClassManagementProps {
   classes: SchoolClass[];
@@ -475,3 +475,4 @@ export default function ClassManagement({
     </div>
   );
 }
+

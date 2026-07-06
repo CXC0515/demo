@@ -1,11 +1,11 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import React, { useState } from 'react';
 import { CheckSquare, FolderOpen, Workflow } from 'lucide-react';
-import { ReviewItem, SchoolClass, WorkbenchTask, WorkflowState } from '../types';
+import { ReviewItem, SchoolClass, WorkbenchTask, WorkflowState } from '../../domain/types';
 import GradingTaskManagement from './GradingTaskManagement';
 import GradingWorkflow from './GradingWorkflow';
 import ReviewQueuePage from './ReviewQueuePage';
@@ -120,3 +120,4 @@ export default function GradingWorkspace({
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -8,7 +8,7 @@ import {
   Upload, FileSearch, Sparkles, CheckSquare, FileText, AlertTriangle, 
   Clock, ArrowRight, BookOpen, Calendar, UserMinus, ShieldAlert, Award, MessageSquare 
 } from 'lucide-react';
-import { Student, SchoolClass, WorkbenchTask, ScheduleItem, TimerReminder } from '../types';
+import { Student, SchoolClass, WorkbenchTask, ScheduleItem, TimerReminder } from '../../domain/types';
 
 interface WorkbenchProps {
   tasks: WorkbenchTask[];
@@ -389,3 +389,4 @@ export default function Workbench({
     </div>
   );
 }
+
