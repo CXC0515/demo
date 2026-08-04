@@ -144,22 +144,26 @@ export default function VirtualClassroom({
           </div>
         </div>
 
-        {/* 3D-feeling Classroom Stage */}
-        <div className="flex-1 glass-panel rounded-3xl p-6 flex flex-col justify-between overflow-hidden relative min-h-[560px] bg-gradient-to-b from-slate-100/50 to-slate-200/20 dark:from-zinc-900/40 dark:to-zinc-900/20">
-          
-          {/* Back wall: far end of classroom */}
-          <div className="w-full flex flex-col items-center justify-center space-y-1 border-b border-slate-200/60 dark:border-zinc-800 pb-3 mb-4">
-            <div className="w-72 py-1.5 bg-slate-200/70 dark:bg-zinc-800/70 text-slate-500 rounded-lg shadow-inner text-center text-xs tracking-widest font-mono">
-              教室后排
+        {/* Flat Classroom Floor Plan */}
+        <div className="flex-1 glass-panel rounded-3xl p-6 flex flex-col overflow-hidden relative min-h-[560px] bg-slate-50/70 dark:bg-zinc-900/40">
+
+          {/* Front teaching area */}
+          <div className="shrink-0 space-y-3 border-b border-slate-200/70 dark:border-zinc-800/80 pb-5">
+            <div className="w-full h-12 rounded-2xl bg-slate-800 dark:bg-zinc-950 text-slate-100 shadow-inner flex items-center justify-center text-xs tracking-[0.28em] font-mono">
+              黑板 · 统编版七下语文
+            </div>
+            <div className="mx-auto w-80 max-w-full h-12 rounded-2xl bg-amber-100 dark:bg-zinc-800 border border-amber-200/80 dark:border-zinc-700 shadow-sm flex items-center justify-center">
+              <span className="text-xs font-black text-amber-900 dark:text-zinc-200 tracking-[0.32em]">讲台</span>
             </div>
           </div>
 
           {/* Student Desk Area */}
-          <div className="classroom-grid flex-1 flex flex-col justify-center">
-            <div className="classroom-desk-area grid grid-cols-7 gap-x-4 gap-y-6 max-w-4xl mx-auto w-full px-2">
+          <div className="classroom-grid flex-1 flex items-center justify-center py-7">
+            <div className="classroom-desk-area grid grid-cols-7 gap-x-3 gap-y-4 max-w-5xl mx-auto w-full px-2">
               {desks.map((desk, idx) => {
                 const isReal = !('isPlaceholder' in desk);
                 const isSelected = selectedStudentId === desk.id;
+                const isAisleAfterThirdCol = (idx % gridCols) === 2;
                 
                 return (
                   <div
@@ -170,12 +174,12 @@ export default function VirtualClassroom({
                         setSelectedStudentId(desk.id);
                       }
                     }}
-                    className={`student-desk p-2.5 rounded-xl border flex flex-col items-center justify-between text-center cursor-pointer transition-all relative ${
+                    className={`student-desk min-h-[86px] p-2.5 rounded-xl border flex flex-col items-center justify-between text-center cursor-pointer transition-all relative ${isAisleAfterThirdCol ? 'mr-5' : ''} ${
                       isReal 
                         ? isSelected
                           ? 'bg-emerald-600/10 border-emerald-500 shadow-md ring-2 ring-emerald-500/20'
-                          : 'bg-white dark:bg-zinc-800/80 hover:bg-slate-50 border-slate-200 dark:border-zinc-700'
-                        : 'bg-slate-50/50 dark:bg-zinc-800/20 border-slate-100 dark:border-zinc-900 opacity-30 cursor-not-allowed pointer-events-none'
+                          : 'bg-white dark:bg-zinc-800/80 hover:bg-slate-50 border-slate-200 dark:border-zinc-700 shadow-sm'
+                        : 'bg-slate-100/50 dark:bg-zinc-800/20 border-slate-200/60 dark:border-zinc-900 opacity-35 cursor-not-allowed pointer-events-none'
                     }`}
                   >
                     {/* Status Indicator Dot at corner */}
@@ -221,16 +225,6 @@ export default function VirtualClassroom({
                   </div>
                 );
               })}
-            </div>
-          </div>
-
-          {/* Blackboard and podium at bottom: teacher viewpoint origin */}
-          <div className="mt-5 flex flex-col items-center gap-2">
-            <div className="w-[420px] max-w-full py-2 bg-slate-800 dark:bg-zinc-900 text-slate-100 rounded-2xl shadow-inner text-center text-xs tracking-[0.25em] font-mono">
-              黑板 · 统编版七下语文
-            </div>
-            <div className="w-80 h-14 rounded-t-[28px] bg-gradient-to-b from-amber-100 to-amber-200 dark:from-zinc-800 dark:to-zinc-900 border border-amber-200/80 dark:border-zinc-700 shadow-inner flex items-center justify-center">
-              <span className="text-xs font-black text-amber-900 dark:text-zinc-200 tracking-[0.35em]">讲台</span>
             </div>
           </div>
 
