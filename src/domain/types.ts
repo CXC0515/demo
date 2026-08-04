@@ -54,6 +54,18 @@ export interface Student {
   weakKnowledge: string[];
   recentHomeworkTrend: number[]; // Last 5 homework scores (out of 100)
   homeworkHistory: HomeworkRecord[];
+  weaknessEvidence?: WeaknessEvidence[];
+}
+
+export interface WeaknessEvidence {
+  id: string;
+  knowledgePoint: string;
+  issue: string;
+  taskName: string;
+  questionTitle: string;
+  date: string;
+  occurrenceCount: number;
+  status: 'current' | 'sustained';
 }
 
 export interface SchoolClass {
@@ -80,6 +92,80 @@ export interface WorkbenchTask {
   deadline: string;
   status: 'pending' | 'running' | 'completed' | 'error';
   progress?: number;
+}
+
+export type GradingMode = 'per-submission' | 'batch-checkpoint' | 'auto-continue';
+export type CalibrationResultSource = 'ai-confirmed' | 'teacher-adjusted' | 'teacher-manual';
+
+export interface SubmissionPage {
+  id: string;
+  sequence: number;
+  studentId?: string;
+  expectedStudentName: string;
+  detectedStudentNo: string;
+  pageCount: number;
+  ocrConfidence: number;
+  studentNoConfidence?: number;
+  textConfidence?: number;
+  regionCompleteness?: number;
+  pageContinuity?: number;
+  reviewSource?: 'automatic' | 'multimodal' | 'teacher';
+  issueReason?: string;
+  status: 'matched' | 'needs-review' | 'missing-page';
+}
+
+export interface CalibrationSample {
+  id: string;
+  questionId?: string;
+  studentId: string;
+  studentName: string;
+  studentNo: string;
+  sampleType: 'high' | 'middle' | 'low' | 'boundary' | 'ocr-risk';
+  rawImageDescription: string;
+  ocrText: string;
+  ocrConfidence: number;
+  aiScore: number;
+  fullScore: number;
+  gradingConfidence: number;
+  matchedPoints: string[];
+  missedPoints: string[];
+  status: 'pending' | 'confirmed';
+  resultSource?: CalibrationResultSource;
+  teacherScore?: number;
+  teacherReason?: string;
+  isFinal?: boolean;
+  rubricVersion: number;
+}
+
+export interface GradingRubricPoint {
+  point: string;
+  score: number;
+  description: string;
+}
+
+export interface QuestionGradingState {
+  questionId: string;
+  standardAnswer: string;
+  gradingRubric: GradingRubricPoint[];
+  teacherRules: string[];
+  rubricVersion: number;
+  sampleTarget: 3 | 5;
+  calibrationSamples: CalibrationSample[];
+  jointReviewEnabled: boolean;
+}
+
+export interface MissingSubmission {
+  studentId: string;
+  studentName: string;
+  studentNo: string;
+  status: 'missing' | 'excused' | 'late';
+}
+
+export interface AiReviewOpinion {
+  reviewer: string;
+  score: number;
+  confidence: number;
+  reason: string;
 }
 
 export interface ScheduleItem {
@@ -116,13 +202,11 @@ export interface WorkflowState {
     score: number;
     knowledgePoint: string;
     desc: string;
+    stem?: string;
+    aiQuestionType?: string;
   }[];
   standardAnswer: string;
-  gradingRubric: {
-    point: string;
-    score: number;
-    description: string;
-  }[];
+  gradingRubric: GradingRubricPoint[];
   uploadProgress: number;
   isUploading: boolean;
   uploadedCount: number;
@@ -141,10 +225,20 @@ export interface WorkflowState {
     errorType: string;
     confidence: number;
   }[];
+  rubricVersion?: number;
+  gradingMode?: GradingMode;
+  teacherRules?: string[];
+  submissionPages?: SubmissionPage[];
+  calibrationSamples?: CalibrationSample[];
+  jointReviewQuestionIds?: string[];
+  questionGradingStates?: QuestionGradingState[];
+  missingSubmissions?: MissingSubmission[];
 }
 
 export interface ReviewItem {
   id: string;
+  taskId?: string;
+  questionId?: string;
   studentId: string;
   studentName: string;
   taskName: string;
@@ -160,6 +254,11 @@ export interface ReviewItem {
   differenceReason: string;
   evidenceText: string;
   status: 'pending' | 'completed';
+  questionTitle?: string;
+  ocrConfidence?: number;
+  gradingConfidence?: number;
+  rawImageDescription?: string;
+  aiReviews?: AiReviewOpinion[];
 }
 
 export interface KnowledgeNode {

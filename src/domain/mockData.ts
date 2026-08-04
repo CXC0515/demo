@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Student, SchoolClass, WorkbenchTask, ScheduleItem, TimerReminder, ReviewItem, KnowledgeNode, WorkflowState } from './types';
+import { CalibrationSample, Student, SchoolClass, WorkbenchTask, ScheduleItem, TimerReminder, ReviewItem, KnowledgeNode, WorkflowState } from './types';
 
 export const initialClasses: SchoolClass[] = [
   {
@@ -547,6 +547,8 @@ export const initialReminders: TimerReminder[] = [
 export const initialReviewQueue: ReviewItem[] = [
   {
     id: 'rv1',
+    taskId: 't1',
+    questionId: 'q3',
     studentId: 's2',
     studentName: '张雨轩',
     taskName: '《驿路梨花》阅读理解检测',
@@ -561,10 +563,16 @@ export const initialReviewQueue: ReviewItem[] = [
     teacherFinalScore: 4,
     differenceReason: 'AI 标注“雷锋精神在驿路上传递”置信度为 0.71（低于 0.75 阈值）。',
     evidenceText: '“代表了雷锋精神在驿路上传递”',
-    status: 'pending'
+    status: 'pending',
+    questionTitle: '第 3 题：标题含义与作用',
+    ocrConfidence: 0.82,
+    gradingConfidence: 0.71,
+    rawImageDescription: '答题区第 3 题，右上角学号 0302，末行有轻微涂改。'
   },
   {
     id: 'rv2',
+    taskId: 't1',
+    questionId: 'q3',
     studentId: 's3',
     studentName: '陈梓睿',
     taskName: '《驿路梨花》阅读理解检测',
@@ -579,10 +587,21 @@ export const initialReviewQueue: ReviewItem[] = [
     teacherFinalScore: 3,
     differenceReason: '大模型1给分2分，大模型2给分4分，分差超过设置的1分阈值。需人工裁决。',
     evidenceText: '“给人带来温暖和希望，象征好人好事”',
-    status: 'pending'
+    status: 'pending',
+    questionTitle: '第 3 题：标题含义与作用',
+    ocrConfidence: 0.91,
+    gradingConfidence: 0.58,
+    rawImageDescription: '答题区第 3 题，右上角学号 0303，字迹清晰。',
+    aiReviews: [
+      { reviewer: '证据核查 AI', score: 2, confidence: 0.82, reason: '只明确命中自然景物，象征表达过于宽泛。' },
+      { reviewer: '整体理解 AI', score: 4, confidence: 0.76, reason: '“好人好事”可以视作对雷锋精神的概括。' },
+      { reviewer: '严格评分 AI', score: 2, confidence: 0.88, reason: '缺少哈尼姑娘梨花和精神传承两个明确要点。' }
+    ]
   },
   {
     id: 'rv3',
+    taskId: 't1',
+    questionId: 'q3',
     studentId: 's7',
     studentName: '徐昊然',
     taskName: '《驿路梨花》阅读理解检测',
@@ -597,10 +616,21 @@ export const initialReviewQueue: ReviewItem[] = [
     teacherFinalScore: 4,
     differenceReason: '多模型置信度发生实质冲突（模型A判断为主旨完整，模型B判断为缺少第三层象征）。',
     evidenceText: '“指路边的梨花和叫梨花的小姑娘”',
-    status: 'pending'
+    status: 'pending',
+    questionTitle: '第 3 题：标题含义与作用',
+    ocrConfidence: 0.95,
+    gradingConfidence: 0.63,
+    rawImageDescription: '答题区第 3 题，右上角学号 0307，页面完整。',
+    aiReviews: [
+      { reviewer: '证据核查 AI', score: 4, confidence: 0.91, reason: '自然梨花和人物梨花两个要点均有证据。' },
+      { reviewer: '整体理解 AI', score: 4, confidence: 0.86, reason: '完成双关层面，但没有上升到文章主旨。' },
+      { reviewer: '严格评分 AI', score: 3, confidence: 0.78, reason: '人物层面没有说明其品质，表达不够完整。' }
+    ]
   },
   {
     id: 'rv4',
+    taskId: 't1',
+    questionId: 'q3',
     studentId: 's5',
     studentName: '周宇洋',
     taskName: '《驿路梨花》阅读理解检测',
@@ -615,7 +645,11 @@ export const initialReviewQueue: ReviewItem[] = [
     teacherFinalScore: 6,
     differenceReason: '高分卷（满分卷）常规抽样审核。',
     evidenceText: '“自然界的梨花；照顾驿站的小姑娘；雷锋精神”',
-    status: 'pending'
+    status: 'pending',
+    questionTitle: '第 3 题：标题含义与作用',
+    ocrConfidence: 0.98,
+    gradingConfidence: 0.96,
+    rawImageDescription: '答题区第 3 题，右上角学号 0305，字迹工整。'
   }
 ];
 
@@ -631,6 +665,49 @@ export const initialKnowledgeNodes: KnowledgeNode[] = [
   { id: 'n9', name: '没有结合文本', type: 'error', typeName: '错误类型', desc: '回答空洞泛泛，没有结合哀牢山、哈尼族、雷锋精神具体细节，属于答题规范缺失。', weight: 4, parentId: 'n5' }
 ];
 
+const calibrationStudents = [
+  { id: 's1', name: '林子涵', no: '2026070301', type: 'high' as const, ocr: 0.98, grading: 0.97 },
+  { id: 's2', name: '张雨轩', no: '2026070302', type: 'boundary' as const, ocr: 0.82, grading: 0.71 },
+  { id: 's3', name: '陈梓睿', no: '2026070303', type: 'low' as const, ocr: 0.91, grading: 0.68 },
+  { id: 's4', name: '许佳琪', no: '2026070304', type: 'ocr-risk' as const, ocr: 0.58, grading: 0.52 },
+  { id: 's5', name: '周宇洋', no: '2026070305', type: 'middle' as const, ocr: 0.96, grading: 0.88 }
+];
+
+const sampleAnswers: Record<string, string[]> = {
+  q1: ['陡峭、竹篾、简陋。', '陡峭、竹蔑、简陋。', '陡峭、简陋。', '陡峭、竹……', '陡峭、竹篾、简陋。'],
+  q2: ['“我”和老余发现小茅屋，瑶族老人说明米的来历，哈尼小姑娘揭示建屋人。', '先发现小屋，再遇到老人，最后知道梨花姑娘照料小屋。', '大家在山里找到了一间小屋。', '发现小屋后遇到……', '发现、借宿、追问，最后揭开小屋主人的故事。'],
+  q3: ['驿路梨花既指山路旁的梨花，也指哈尼姑娘梨花，更象征无私奉献的雷锋精神代代相传。', '驿路梨花是路边的梨花树，也是名字叫梨花的小女孩，代表了雷锋精神在驿路上传递。', '梨花开在路边很好看，象征大家做的好人好事。', '梨花既是景物又是姑娘的名字，还象征着人与人之间……', '标题指自然界的梨花，也指姑娘梨花，赞美无私帮助他人的雷锋精神。'],
+  q4: ['三次梨花描写由实到虚，照应标题，串联人物并深化雷锋精神的主旨。', '梨花描写很美，也写出了梨花姑娘的善良。', '梨花象征人物品质。', '梨花描写照应了……', '多次写梨花推动情节并表现互助精神。']
+};
+
+const makeCalibrationSamples = (questionId: string, fullScore: number, target: 3 | 5, confirmedCount: number): CalibrationSample[] =>
+  calibrationStudents.slice(0, target).map((student, index) => {
+    const confirmed = index < confirmedCount;
+    const scoreRatios = [1, 0.76, 0.42, 0.58, 0.84];
+    const aiScore = Math.round(fullScore * scoreRatios[index]);
+    return {
+      id: `${questionId}-sample-${index + 1}`,
+      questionId,
+      studentId: student.id,
+      studentName: student.name,
+      studentNo: student.no,
+      sampleType: student.type,
+      rawImageDescription: `第 ${questionId.slice(1)} 题答题区，右上角学号 ${student.no.slice(-4)}，${student.type === 'ocr-risk' ? '末句边缘疑似被截断。' : '页面完整。'}`,
+      ocrText: sampleAnswers[questionId][index],
+      ocrConfidence: student.ocr,
+      aiScore,
+      fullScore,
+      gradingConfidence: student.grading,
+      matchedPoints: index === 0 ? ['主要采分点完整', '结合文本'] : ['部分采分点'],
+      missedPoints: index === 0 ? [] : ['表达或证据仍需教师确认'],
+      status: confirmed ? 'confirmed' : 'pending',
+      resultSource: confirmed ? 'ai-confirmed' : undefined,
+      teacherScore: confirmed ? aiScore : undefined,
+      isFinal: confirmed,
+      rubricVersion: 2
+    };
+  });
+
 export const initialWorkflowState: WorkflowState = {
   currentStep: 6, // default AI grading step
   taskName: '《驿路梨花》阅读理解检测',
@@ -639,10 +716,10 @@ export const initialWorkflowState: WorkflowState = {
   relatedText: '《驿路梨花》课文第14-25段',
   homeworkType: 'reading',
   questions: [
-    { id: 'q1', title: '注音与词语填空', score: 10, knowledgePoint: '字词默写', desc: '第1题：拼音与重点字形纠错。' },
-    { id: 'q2', title: '现代文叙事概括', score: 30, knowledgePoint: '现代文叙事概括', desc: '第2题：理清文章叙事脉络，概括寻访“梨花”的过程。' },
-    { id: 'q3', title: '标题含义与作用', score: 30, knowledgePoint: '标题作用题', desc: '第3题：理解“驿路梨花”的双关和象征含义。' },
-    { id: 'q4', title: '梨花的象征手法鉴赏', score: 30, knowledgePoint: '修辞手法鉴赏', desc: '第4题：分析文中三处梨花描写在刻画人物和表现雷锋精神时的作用。' }
+    { id: 'q1', title: '注音与词语填空', score: 10, knowledgePoint: '字词默写', desc: '拼音与重点字形纠错。', stem: '根据拼音写出词语，并订正句中的错别字：山路陡qiào，屋内用竹miè编成的器物虽然简lòu，却十分整洁。', aiQuestionType: '基础积累 · 字音字形' },
+    { id: 'q2', title: '现代文叙事概括', score: 30, knowledgePoint: '现代文叙事概括', desc: '理清文章叙事脉络，概括寻访“梨花”的过程。', stem: '阅读全文，按照故事发展的顺序，概括“我”和老余从发现小茅屋到弄清小茅屋主人身份的主要经过。', aiQuestionType: '叙事概括 · 情节梳理' },
+    { id: 'q3', title: '标题含义与作用', score: 30, knowledgePoint: '标题作用题', desc: '理解“驿路梨花”的双关和象征含义。', stem: '结合全文，谈谈标题“驿路梨花”有哪些含义，并分析它在表现文章主题方面的作用。', aiQuestionType: '标题作用 · 主旨理解' },
+    { id: 'q4', title: '梨花的象征手法鉴赏', score: 30, knowledgePoint: '修辞手法鉴赏', desc: '分析文中三处梨花描写在刻画人物和表现雷锋精神时的作用。', stem: '文中三次描写梨花。请分别联系上下文，分析这些描写在营造氛围、刻画人物和深化主题方面的作用。', aiQuestionType: '写法鉴赏 · 象征手法' }
   ],
   standardAnswer: '第三题标准答案要点：\n1. 交代背景：实指哀牢山路旁的梨花，为故事设置温馨浪漫的背景环境。\n2. 象征哈尼姑娘“梨花”：双关手法，实写景物，虚写人物。\n3. 象征无私奉献的“雷锋精神”：深化主题，说明雷锋精神处处开花、代代相传。',
   gradingRubric: [
@@ -653,6 +730,79 @@ export const initialWorkflowState: WorkflowState = {
   uploadProgress: 100,
   isUploading: false,
   uploadedCount: 42,
+  rubricVersion: 2,
+  gradingMode: 'auto-continue',
+  teacherRules: [
+    '“好人好事代代相传”也算命中雷锋精神与无私奉献。',
+    '只写“梨花很美”不算命中自然环境作用。',
+    '三层意思都有但没有结合文本，最高得 25 分。'
+  ],
+  submissionPages: [
+    { id: 'page-1', sequence: 1, studentId: 's1', expectedStudentName: '林子涵', detectedStudentNo: '2026070301', pageCount: 2, ocrConfidence: 0.98, studentNoConfidence: 0.99, textConfidence: 0.98, regionCompleteness: 1, pageContinuity: 1, reviewSource: 'automatic', status: 'matched' },
+    { id: 'page-2', sequence: 2, studentId: 's2', expectedStudentName: '张雨轩', detectedStudentNo: '2026070302', pageCount: 2, ocrConfidence: 0.82, studentNoConfidence: 0.98, textConfidence: 0.82, regionCompleteness: 0.91, pageContinuity: 1, reviewSource: 'multimodal', issueReason: '末行有涂改，文字模型与多模态核验结果不一致。', status: 'needs-review' },
+    { id: 'page-3', sequence: 3, studentId: 's3', expectedStudentName: '陈梓睿', detectedStudentNo: '无法识别', pageCount: 2, ocrConfidence: 0.54, studentNoConfidence: 0.28, textConfidence: 0.86, regionCompleteness: 0.96, pageContinuity: 1, reviewSource: 'teacher', issueReason: '学号无法稳定识别，不能自动确认学生归属。', status: 'needs-review' },
+    { id: 'page-4', sequence: 4, studentId: 's4', expectedStudentName: '许佳琪', detectedStudentNo: '2026070304', pageCount: 1, ocrConfidence: 0.97, studentNoConfidence: 0.99, textConfidence: 0.97, regionCompleteness: 0.52, pageContinuity: 0.35, reviewSource: 'teacher', issueReason: '只识别到一页，属于缺页硬异常。', status: 'missing-page' },
+    { id: 'page-5', sequence: 5, studentId: 's5', expectedStudentName: '周宇洋', detectedStudentNo: '2026070305', pageCount: 2, ocrConfidence: 0.96, studentNoConfidence: 0.99, textConfidence: 0.96, regionCompleteness: 1, pageContinuity: 1, reviewSource: 'automatic', status: 'matched' }
+  ],
+  calibrationSamples: makeCalibrationSamples('q3', 30, 5, 1),
+  missingSubmissions: [
+    { studentId: 's11', studentName: '赵晨曦', studentNo: '2026070311', status: 'missing' },
+    { studentId: 's18', studentName: '蒋思远', studentNo: '2026070318', status: 'missing' }
+  ],
+  questionGradingStates: [
+    {
+      questionId: 'q1',
+      standardAnswer: '陡峭、竹篾、简陋。',
+      gradingRubric: [{ point: '字形准确', score: 10, description: '每个词语字形正确；同音错别字不得分。' }],
+      teacherRules: ['“竹篾”的“篾”部件书写清楚即可，不要求印刷体。'],
+      rubricVersion: 2,
+      sampleTarget: 3,
+      calibrationSamples: makeCalibrationSamples('q1', 10, 3, 3),
+      jointReviewEnabled: false
+    },
+    {
+      questionId: 'q2',
+      standardAnswer: '按“发现小屋—追问主人—揭示梨花姑娘与解放军建屋”的顺序概括主要情节。',
+      gradingRubric: [
+        { point: '主要事件完整', score: 15, description: '写出发现、追问和揭示三个环节。' },
+        { point: '叙事顺序准确', score: 15, description: '人物和事件关系清楚，无关键性错位。' }
+      ],
+      teacherRules: ['使用“寻找小屋主人”概括中间过程也算分。'],
+      rubricVersion: 2,
+      sampleTarget: 3,
+      calibrationSamples: makeCalibrationSamples('q2', 30, 3, 2),
+      jointReviewEnabled: false
+    },
+    {
+      questionId: 'q3',
+      standardAnswer: '第三题标准答案要点：\n1. 交代自然环境背景。\n2. 双关哈尼姑娘“梨花”。\n3. 象征无私奉献的雷锋精神。',
+      gradingRubric: [
+        { point: '交代自然环境背景', score: 10, description: '回答包含路边梨花及环境作用。' },
+        { point: '双关哈尼姑娘梨花', score: 10, description: '回答提到哈尼姑娘梨花及人物品质。' },
+        { point: '象征奉献与雷锋精神', score: 10, description: '回答涉及互助、奉献和主题。' }
+      ],
+      teacherRules: ['“好人好事代代相传”也算命中雷锋精神与无私奉献。', '三层意思都有但没有结合文本，最高得 25 分。'],
+      rubricVersion: 2,
+      sampleTarget: 5,
+      calibrationSamples: makeCalibrationSamples('q3', 30, 5, 1),
+      jointReviewEnabled: true
+    },
+    {
+      questionId: 'q4',
+      standardAnswer: '三处梨花描写由实到虚，照应标题、串联人物，并深化雷锋精神的主题。',
+      gradingRubric: [
+        { point: '描写作用', score: 10, description: '说明环境或氛围作用。' },
+        { point: '结构作用', score: 10, description: '说明照应标题或推动情节。' },
+        { point: '主题作用', score: 10, description: '联系人物品质和雷锋精神。' }
+      ],
+      teacherRules: ['答出“梨花贯穿全文”可视为结构作用。'],
+      rubricVersion: 2,
+      sampleTarget: 3,
+      calibrationSamples: makeCalibrationSamples('q4', 30, 3, 1),
+      jointReviewEnabled: true
+    }
+  ],
+  jointReviewQuestionIds: ['q3'],
   ocrResults: [
     { studentName: '林子涵', rawImage: 'img_lin.png', ocrText: '题目三：我认为驿路梨花既是指大山中路边怒放的梨花；也代表了那位细心热忱照顾路人的哈尼姑娘梨花。最后它更象征了像雷锋那样无私奉献、温暖他人的精神，在整条路上传承。', matchScore: 98 },
     { studentName: '张雨轩', rawImage: 'img_zhang.png', ocrText: '答：驿路梨花就是路边的梨花树，还有那个名字叫梨花的小女孩，她们都非常善良。雷锋精神是很好的，在哀牢山传递着。', matchScore: 82 },

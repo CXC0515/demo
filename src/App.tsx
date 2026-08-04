@@ -38,6 +38,8 @@ export default function App() {
   const [selectedClassId, setSelectedClassId] = useState<string>('c1');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('s1');
   const [lowConfidenceThreshold, setLowConfidenceThreshold] = useState<number>(0.75);
+  const [ocrHumanReviewThreshold, setOcrHumanReviewThreshold] = useState<number>(0.70);
+  const [ocrAutoPassThreshold, setOcrAutoPassThreshold] = useState<number>(0.90);
   const [libraryMode, setLibraryMode] = useState<'graph' | 'editor'>('graph');
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
     teaching: true,
@@ -398,6 +400,8 @@ export default function App() {
               workflowState={workflowState}
               reviewQueue={reviewQueue}
               lowConfidenceThreshold={lowConfidenceThreshold}
+              ocrHumanReviewThreshold={ocrHumanReviewThreshold}
+              ocrAutoPassThreshold={ocrAutoPassThreshold}
               onCreateTask={(task) => {
                 setTasks([task, ...tasks]);
                 triggerToast('批改任务已创建，可进入作业工作流继续配置');
@@ -468,6 +472,12 @@ export default function App() {
             <SystemSettings
               lowConfidenceThreshold={lowConfidenceThreshold}
               onUpdateThreshold={setLowConfidenceThreshold}
+              ocrHumanReviewThreshold={ocrHumanReviewThreshold}
+              ocrAutoPassThreshold={ocrAutoPassThreshold}
+              onUpdateOcrThresholds={(humanReview, autoPass) => {
+                setOcrHumanReviewThreshold(humanReview);
+                setOcrAutoPassThreshold(autoPass);
+              }}
               classes={classes}
               selectedClassId={selectedClassId}
               onSelectClass={setSelectedClassId}

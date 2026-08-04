@@ -1,13 +1,10 @@
-﻿/**
+/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { 
-  CheckSquare, ShieldAlert, Sparkles, User, FileText, Check, 
-  ArrowLeft, RefreshCw, Star, Share2, HelpCircle 
-} from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, FileImage, RefreshCw, ScanLine, ShieldCheck, Sparkles, Star, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { ReviewItem } from '../../domain/types';
 
 interface ReviewQueuePageProps {
@@ -18,275 +15,103 @@ interface ReviewQueuePageProps {
   onShowToast: (message: string) => void;
 }
 
-export default function ReviewQueuePage({
-  reviewQueue,
-  onConfirmReview,
-  onBounceToOcr,
-  onMarkAsSample,
-  onShowToast
-}: ReviewQueuePageProps) {
-  const [activeTab, setActiveTab] = useState<'low-confidence' | 'large-gap' | 'conflict' | 'pending-confirm' | 'completed'>('low-confidence');
+type ReviewFilter = 'all' | 'ocr' | 'grading' | 'sample' | 'completed';
+
+const filters: { id: ReviewFilter; label: string }[] = [
+  { id: 'all', label: '全部异常' },
+  { id: 'ocr', label: 'OCR 异常' },
+  { id: 'grading', label: '评分异常' },
+  { id: 'sample', label: '抽样检查' },
+  { id: 'completed', label: '已完成' }
+];
+
+const inputClass = 'h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-emerald-600 dark:border-zinc-800 dark:bg-zinc-900';
+
+export default function ReviewQueuePage({ reviewQueue, onConfirmReview, onBounceToOcr, onMarkAsSample, onShowToast }: ReviewQueuePageProps) {
+  const [activeFilter, setActiveFilter] = useState<ReviewFilter>('all');
+  const [viewMode, setViewMode] = useState<'student' | 'question'>('student');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-  
-  // Local form state for editing score/reason in details panel
-  const [editedScore, setEditedScore] = useState<number>(4);
+  const selectedItem = reviewQueue.find(item => item.id === selectedItemId) ?? null;
+  const [editedScore, setEditedScore] = useState(0);
   const [reasonInput, setReasonInput] = useState('');
+  const [sampledIds, setSampledIds] = useState<Set<string>>(() => new Set());
 
-  const tabs = [
-    { id: 'low-confidence', label: '低置信度', count: reviewQueue.filter(r => r.type === 'low-confidence' && r.status === 'pending').length },
-    { id: 'large-gap', label: '分差过大', count: reviewQueue.filter(r => r.type === 'large-gap' && r.status === 'pending').length },
-    { id: 'conflict', label: 'AI 冲突', count: reviewQueue.filter(r => r.type === 'conflict' && r.status === 'pending').length },
-    { id: 'pending-confirm', label: '待主批确认', count: reviewQueue.filter(r => r.type === 'pending-confirm' && r.status === 'pending').length },
-    { id: 'completed', label: '已完成', count: reviewQueue.filter(r => r.status === 'completed').length }
-  ];
+  const items = useMemo(() => reviewQueue.filter(item => {
+    if (activeFilter === 'completed') return item.status === 'completed';
+    if (item.status === 'completed') return false;
+    if (activeFilter === 'all') return true;
+    if (activeFilter === 'ocr') return (item.ocrConfidence ?? 1) < 0.85;
+    if (activeFilter === 'sample') return item.type === 'pending-confirm';
+    return item.type === 'low-confidence' || item.type === 'large-gap' || item.type === 'conflict';
+  }), [activeFilter, reviewQueue]);
 
-  // Filter queue by active tab
-  const items = reviewQueue.filter(r => {
-    if (activeTab === 'completed') return r.status === 'completed';
-    return r.type === activeTab && r.status === 'pending';
-  });
-
-  const selectedItem = reviewQueue.find(r => r.id === selectedItemId);
-
-  const handleSelectItem = (item: ReviewItem) => {
+  const openItem = (item: ReviewItem) => {
     setSelectedItemId(item.id);
     setEditedScore(item.teacherFinalScore);
     setReasonInput('');
   };
 
-  const getPriorityBadge = (p: string) => {
-    switch (p) {
-      case 'high': return <span className="px-1.5 py-0.5 bg-red-100 text-red-800 dark:bg-red-950/20 dark:text-red-400 rounded text-[10px] font-bold">高优先级</span>;
-      case 'medium': return <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 dark:bg-amber-950/20 dark:text-amber-400 rounded text-[10px] font-semibold">中优先级</span>;
-      default: return <span className="px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded text-[10px] font-medium">低优先级</span>;
-    }
-  };
-
-  const handleConfirmSubmit = () => {
-    if (!selectedItemId) return;
-    onConfirmReview(selectedItemId, editedScore, reasonInput || '教师核准修改。');
-    onShowToast(`🎉 已成功复核并裁决 [${selectedItem?.studentName}] 的分数，最终得分定为 ${editedScore} 分！`);
+  const confirmReview = () => {
+    if (!selectedItem) return;
+    onConfirmReview(selectedItem.id, editedScore, reasonInput || '教师根据原图、OCR 和评分证据完成终审。');
+    onShowToast(`${selectedItem.studentName} 已完成教师终审，最终得分 ${editedScore} 分`);
     setSelectedItemId(null);
   };
 
-  const handleBounceSubmit = () => {
-    if (!selectedItemId) return;
-    onBounceToOcr(selectedItemId);
-    onShowToast(`↩️ 学生 [${selectedItem?.studentName}] 的答卷已退回到第 5 步识别校对队列。`);
+  const returnToOcr = () => {
+    if (!selectedItem) return;
+    onBounceToOcr(selectedItem.id);
+    onShowToast(`${selectedItem.studentName} 已退回 OCR 识别质检`);
     setSelectedItemId(null);
   };
+
+  const pendingCount = reviewQueue.filter(item => item.status === 'pending').length;
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 h-full animate-fade-in" id="review-queue-page">
-      
-      {/* Left: Interactive list pane */}
-      <div className="flex-1 flex flex-col space-y-4 min-w-0">
-        
-        {/* Tab filters */}
-        <div className="glass-panel rounded-2xl p-2 flex flex-wrap gap-1.5 bg-slate-100/60">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => {
-                setActiveTab(tab.id as any);
-                setSelectedItemId(null);
-              }}
-              className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                activeTab === tab.id
-                  ? 'bg-white text-slate-800 dark:bg-zinc-800 dark:text-slate-100 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              {tab.label}
-              {tab.count > 0 && (
-                <span className="px-1.5 py-0.2 text-[9px] bg-red-500 text-white rounded-full font-bold">
-                  {tab.count}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+    <div className="space-y-4" id="review-queue-page">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">{filters.map(filter => {
+          const count = filter.id === 'completed' ? reviewQueue.filter(item => item.status === 'completed').length : filter.id === 'all' ? pendingCount : undefined;
+          return <button key={filter.id} type="button" onClick={() => setActiveFilter(filter.id)} className={`rounded-2xl px-4 py-2.5 text-xs font-bold transition-all ${activeFilter === filter.id ? 'bg-emerald-700 text-white shadow-md shadow-emerald-700/10' : 'glass-panel text-slate-500 hover:text-slate-800 dark:text-slate-300'}`}>{filter.label}{count !== undefined ? ` ${count}` : ''}</button>;
+        })}</div>
+        <div className="glass-panel flex rounded-2xl bg-slate-100/60 p-2 dark:bg-zinc-900/60"><button type="button" onClick={() => setViewMode('student')} className={`rounded-xl px-4 py-2 text-xs font-bold ${viewMode === 'student' ? 'bg-white text-slate-900 shadow-sm dark:bg-zinc-800 dark:text-white' : 'text-slate-500'}`}>按学生</button><button type="button" onClick={() => setViewMode('question')} className={`rounded-xl px-4 py-2 text-xs font-bold ${viewMode === 'question' ? 'bg-white text-slate-900 shadow-sm dark:bg-zinc-800 dark:text-white' : 'text-slate-500'}`}>按题目</button></div>
+      </div>
 
-        {/* List content */}
-        <div className="space-y-3">
+      {items.length ? (
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {items.map(item => {
-            const isSelected = selectedItemId === item.id;
+            const primary = viewMode === 'student' ? item.studentName : item.questionTitle?.split('：')[0] ?? '阅读理解题';
+            const secondary = viewMode === 'student' ? item.questionTitle : item.studentName;
             return (
-              <div
-                key={item.id}
-                id={`review-item-${item.id}`}
-                onClick={() => handleSelectItem(item)}
-                className={`glass-panel glass-panel-hover rounded-2xl p-4 flex items-center justify-between gap-4 cursor-pointer border-l-4 ${
-                  isSelected 
-                    ? 'bg-emerald-600/5 dark:bg-emerald-500/5 border-emerald-500 shadow' 
-                    : 'border-l-slate-300 dark:border-l-zinc-700'
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-slate-100 dark:bg-zinc-800/60 rounded-xl mt-0.5">
-                    <User className="w-4 h-4 text-slate-500" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">{item.studentName}</h4>
-                      <span className="text-xs text-slate-400">{item.className}</span>
-                    </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 font-medium truncate max-w-sm sm:max-w-md mt-0.5">
-                      学生手写答卷：{item.studentAnswer}
-                    </p>
-                    <p className="text-[10px] text-slate-400 font-semibold mt-1">
-                      拦截原因：<span className="text-red-700 dark:text-red-400">{item.differenceReason}</span>
-                    </p>
-                  </div>
-                </div>
-
-                <div className="text-right space-y-1.5 flex flex-col items-end">
-                  {getPriorityBadge(item.priority)}
-                  <span className="text-xs font-mono font-bold text-slate-500 dark:text-slate-300">
-                    建议给分：{item.aiSuggestedScore}分
-                  </span>
-                </div>
-              </div>
+              <button key={item.id} type="button" onClick={() => openItem(item)} className="glass-panel min-h-40 rounded-[24px] p-4 text-left transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600">
+                <div className="flex items-start justify-between gap-3"><div className="min-w-0"><strong className="block truncate text-lg font-black text-slate-900 dark:text-white">{primary}</strong><span className="mt-1 block truncate text-xs font-bold text-slate-500">{secondary}</span></div><span className={`rounded-xl px-2 py-1 text-[10px] font-bold ${item.priority === 'high' ? 'bg-rose-100 text-rose-800' : item.priority === 'medium' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>{item.typeName}</span></div>
+                <p className="mt-4 line-clamp-2 text-xs leading-5 text-slate-500">{item.differenceReason}</p>
+                <div className="mt-4 flex items-center justify-between border-t border-slate-200/70 pt-3 text-[11px] dark:border-zinc-800"><span className="text-slate-400">{item.status === 'completed' ? '已完成' : '待教师处理'}</span><span className="font-bold text-emerald-700">查看证据</span></div>
+              </button>
             );
           })}
+        </section>
+      ) : <section className="glass-panel flex min-h-72 flex-col items-center justify-center rounded-[24px] text-center"><CheckCircle2 className="h-10 w-10 text-emerald-500" /><p className="mt-3 text-sm font-bold text-slate-600 dark:text-slate-300">当前筛选下没有待复核项</p></section>}
 
-          {items.length === 0 && (
-            <div className="glass-panel rounded-3xl p-12 text-center text-slate-400">
-              <CheckSquare className="w-12 h-12 stroke-1 text-slate-300 mx-auto mb-2" />
-              <p className="text-sm">恭喜！本分组队列下暂无积压的待复核试卷。</p>
+      {selectedItem ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`${selectedItem.studentName} 异常复核详情`}>
+          <div className="flex max-h-[calc(100vh-32px)] w-full max-w-6xl flex-col overflow-hidden rounded-[24px] bg-white shadow-2xl dark:bg-zinc-950">
+            <header className="flex flex-none items-start justify-between gap-3 border-b border-slate-200 px-6 py-4 dark:border-zinc-800"><div><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-black text-slate-900 dark:text-white">{selectedItem.studentName}</h2><span className="rounded-xl bg-rose-100 px-2.5 py-1 text-xs font-bold text-rose-800">{selectedItem.typeName}</span></div><p className="mt-1 text-sm text-slate-500">{selectedItem.questionTitle}</p></div><button type="button" title="关闭详情" aria-label="关闭详情" onClick={() => setSelectedItemId(null)} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-zinc-800"><X className="h-4 w-4" /></button></header>
+
+            <div className="min-h-0 overflow-y-auto p-5">
+              <div className="grid gap-4 lg:grid-cols-3">
+                <section className="glass-panel rounded-[24px] p-4"><h3 className="flex items-center gap-2 text-sm font-black"><FileImage className="h-4 w-4 text-emerald-700" />原始答卷</h3><div className="relative mx-auto mt-4 min-h-64 max-w-sm rotate-[-0.5deg] border border-slate-300 bg-[#fffdf7] p-5 shadow-sm"><span className="absolute right-4 top-3 font-mono text-xs text-slate-500">{selectedItem.studentId.toUpperCase()}</span><p className="mt-8 font-serif text-sm leading-8 text-slate-700">{selectedItem.studentAnswer}</p><p className="mt-5 border-t border-dashed border-slate-300 pt-3 text-[11px] leading-5 text-slate-400">模拟原图：{selectedItem.rawImageDescription}</p></div></section>
+                <section className="glass-panel rounded-[24px] p-4"><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><ScanLine className="h-4 w-4 text-emerald-700" />OCR 文本</h3><span className="rounded-xl bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">{Math.round((selectedItem.ocrConfidence ?? 1) * 100)}%</span></div><p className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm leading-7 text-slate-700 dark:bg-zinc-900 dark:text-slate-200">{selectedItem.studentAnswer}</p><button type="button" onClick={returnToOcr} className="mt-3 flex items-center gap-2 rounded-2xl border border-slate-200 px-3 py-2.5 text-xs font-bold dark:border-zinc-700"><RefreshCw className="h-3.5 w-3.5" />退回 OCR 质检</button></section>
+                <section className="glass-panel rounded-[24px] p-4"><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><Sparkles className="h-4 w-4 text-emerald-700" />AI 评分</h3><span className="text-xs text-slate-400">置信度 {Math.round((selectedItem.gradingConfidence ?? 0.75) * 100)}%</span></div><div className="mt-3 flex items-end gap-1"><strong className="text-3xl">{selectedItem.aiSuggestedScore}</strong><span className="pb-1 text-sm text-slate-400">/ 6 分</span></div><div className="mt-3 rounded-2xl bg-rose-50 p-3 text-xs leading-5 text-rose-800"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />{selectedItem.differenceReason}</div><div className="mt-3 rounded-2xl bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:bg-zinc-900 dark:text-slate-300"><strong>当前评分依据：</strong>{selectedItem.rubric}</div></section>
+              </div>
+
+              {selectedItem.aiReviews?.length ? <section className="glass-panel mt-4 rounded-[24px] p-4"><div className="flex items-start justify-between"><div><h3 className="text-sm font-black">三路 AI 独立评审</h3><p className="mt-1 text-xs text-slate-500">差异过大时只提供证据，不替代教师终审。</p></div><span className="rounded-xl bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800">联合评审</span></div><div className="mt-4 grid gap-3 md:grid-cols-3">{selectedItem.aiReviews.map(review => <div key={review.reviewer} className="rounded-2xl border border-slate-200 p-3 dark:border-zinc-800"><div className="flex items-center justify-between"><strong className="text-xs">{review.reviewer}</strong><span className="text-sm font-black">{review.score} / 6</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{review.reason}</p><span className="mt-2 block text-[10px] text-slate-400">置信度 {Math.round(review.confidence * 100)}%</span></div>)}</div></section> : null}
             </div>
-          )}
+
+            <footer className="flex-none border-t border-slate-200 bg-white px-5 py-4 dark:border-zinc-800 dark:bg-zinc-950"><div className="grid items-end gap-3 lg:grid-cols-[120px_minmax(0,1fr)_auto]"><label className="space-y-1"><span className="text-xs font-bold text-slate-500">教师最终分</span><input type="number" min={0} max={6} value={editedScore} onChange={event => setEditedScore(Number(event.target.value))} className={inputClass} /></label><label className="space-y-1"><span className="text-xs font-bold text-slate-500">终审理由</span><input value={reasonInput} onChange={event => setReasonInput(event.target.value)} placeholder="说明采用或调整分数的证据" className={inputClass} /></label><div className="flex flex-wrap gap-2"><button type="button" onClick={() => { setSampledIds(current => { const next = new Set(current); next.add(selectedItem.id); return next; }); onMarkAsSample(selectedItem.studentName); onShowToast(`${selectedItem.studentName} 已设为讲评样本`); }} className={`flex h-11 items-center gap-2 rounded-2xl border px-3 text-xs font-bold ${sampledIds.has(selectedItem.id) ? 'border-amber-300 bg-amber-100 text-amber-900' : 'border-slate-200 text-slate-600 dark:border-zinc-700 dark:text-slate-300'}`}><Star className={`h-4 w-4 ${sampledIds.has(selectedItem.id) ? 'fill-amber-500 text-amber-600' : 'text-amber-500'}`} />{sampledIds.has(selectedItem.id) ? '已收藏' : '讲评样本'}</button><button type="button" onClick={confirmReview} className="flex h-11 items-center gap-2 rounded-2xl bg-emerald-700 px-4 text-xs font-bold text-white"><Check className="h-4 w-4" />确认裁定</button></div></div></footer>
+          </div>
         </div>
-
-      </div>
-
-      {/* Right: Double comparison details pane */}
-      <div className={`w-full lg:w-[440px] flex-shrink-0 flex flex-col ${selectedItem ? '' : 'hidden lg:flex'}`}>
-        <div className="flex-1 glass-panel rounded-3xl p-5 flex flex-col justify-between overflow-y-auto space-y-4 max-h-[85vh]">
-          {selectedItem ? (
-            <div className="space-y-4 animate-fade-in" id="review-details-drawer">
-              
-              {/* Header profile */}
-              <div className="flex justify-between items-start border-b pb-3">
-                <div>
-                  <h3 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                    核准：{selectedItem.studentName} 
-                  </h3>
-                  <p className="text-xs text-slate-400">{selectedItem.taskName} · {selectedItem.className}</p>
-                </div>
-                {getPriorityBadge(selectedItem.priority)}
-              </div>
-
-              {/* Comparison boxes */}
-              <div className="space-y-3 text-xs">
-                
-                {/* Student Answer */}
-                <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">学生手写原始文本 (OCR 抓取)</span>
-                  <div className="p-3 bg-slate-50 dark:bg-zinc-800/80 rounded-xl border font-serif text-slate-800 dark:text-slate-200 leading-relaxed">
-                    “{selectedItem.studentAnswer}”
-                    {/* Highlighted Evidence marker */}
-                    <div className="mt-2 text-[10px] bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-400 px-2 py-0.5 rounded font-semibold flex items-center gap-1">
-                      <Check className="w-3.5 h-3.5" />
-                      自动抓取的采分点证据：{selectedItem.evidenceText}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Standard Answer & rubrics */}
-                <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">参考标准答案要点</span>
-                  <pre className="p-3 bg-slate-50 dark:bg-zinc-800/40 rounded-xl border font-mono text-[10px] text-slate-500 leading-relaxed whitespace-pre-line">
-                    {selectedItem.standardAnswer}
-                  </pre>
-                </div>
-
-                <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">判定采分细则</span>
-                  <p className="p-2.5 bg-slate-100/50 dark:bg-zinc-800/20 text-[10px] text-slate-400 leading-relaxed rounded-xl">
-                    {selectedItem.rubric}
-                  </p>
-                </div>
-
-              </div>
-
-              {/* Teacher grading tool box */}
-              <div className="p-4 bg-emerald-500/5 rounded-2xl border border-emerald-500/10 space-y-4">
-                <span className="text-xs font-bold text-emerald-800 dark:text-emerald-400 uppercase tracking-wider block">人工教师仲裁给分控制</span>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <span className="text-[10px] text-slate-400 font-bold block">AI 推荐给分</span>
-                    <p className="text-xl font-black text-slate-500">{selectedItem.aiSuggestedScore} <span className="text-xs font-normal">分</span></p>
-                  </div>
-                  <div className="space-y-1 text-right">
-                    <span className="text-[10px] text-emerald-800 dark:text-emerald-400 font-bold block">教师最终裁定分</span>
-                    <input
-                      type="number"
-                      max={6}
-                      min={0}
-                      value={editedScore}
-                      onChange={(e) => setEditedScore(parseInt(e.target.value) || 0)}
-                      className="w-16 text-center text-lg font-bold py-1 bg-white border border-emerald-500 rounded-lg text-emerald-800 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <span className="text-[10px] text-slate-400 font-bold block">修改/给分原因补充 (选填)</span>
-                  <input
-                    type="text"
-                    placeholder="如：学生提及了雷锋精神象征，采分点完整匹配，额外给予及格上分数。"
-                    value={reasonInput}
-                    onChange={(e) => setReasonInput(e.target.value)}
-                    className="w-full p-2 bg-white dark:bg-zinc-800 text-xs border border-slate-200 dark:border-zinc-700 rounded-lg focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Multi-action footer */}
-              <div className="space-y-2 pt-3 border-t">
-                <button
-                  onClick={handleConfirmSubmit}
-                  className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-1 cursor-pointer"
-                >
-                  <Check className="w-4 h-4" />
-                  确认当前分数，同步画像
-                </button>
-                
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={handleBounceSubmit}
-                    className="py-2 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-xl flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    退回重新校对
-                  </button>
-                  <button
-                    onClick={() => {
-                      onMarkAsSample(selectedItem.studentName);
-                      onShowToast(`🌟 学生 [${selectedItem.studentName}] 的高分试卷已被标记为“优秀讲评样例”，自动加入备课范文库！`);
-                    }}
-                    className="py-2 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-xl flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <Star className="w-3.5 h-3.5 text-amber-500" />
-                    标记优秀范文
-                  </button>
-                </div>
-              </div>
-
-            </div>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400 space-y-2 h-full">
-              <CheckSquare className="w-12 h-12 stroke-1 text-slate-300" />
-              <p className="text-sm">未选择复核件</p>
-              <p className="text-xs">点击左侧列表中的任意学生拦截卡片，在此处显示手写体切片图像、模型采分高亮匹配、多模型偏差对照，并直接手动仲裁。</p>
-            </div>
-          )}
-        </div>
-      </div>
-
+      ) : null}
     </div>
   );
 }
-

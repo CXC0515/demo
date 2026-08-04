@@ -10,6 +10,9 @@ import { SchoolClass } from '../../domain/types';
 interface SystemSettingsPanelProps {
   lowConfidenceThreshold: number;
   onUpdateThreshold: (val: number) => void;
+  ocrHumanReviewThreshold: number;
+  ocrAutoPassThreshold: number;
+  onUpdateOcrThresholds: (humanReview: number, autoPass: number) => void;
   classes: SchoolClass[];
   selectedClassId: string;
   onSelectClass: (classId: string) => void;
@@ -37,6 +40,9 @@ const themeOptions = [
 export default function SystemSettingsPanel({
   lowConfidenceThreshold,
   onUpdateThreshold,
+  ocrHumanReviewThreshold,
+  ocrAutoPassThreshold,
+  onUpdateOcrThresholds,
   classes,
   selectedClassId,
   onSelectClass,
@@ -52,6 +58,8 @@ export default function SystemSettingsPanel({
   const [grade, setGrade] = useState('七年级');
   const [textbook, setTextbook] = useState('统编版七年级下册');
   const [localThreshold, setLocalThreshold] = useState(lowConfidenceThreshold);
+  const [localOcrHumanThreshold, setLocalOcrHumanThreshold] = useState(ocrHumanReviewThreshold);
+  const [localOcrAutoThreshold, setLocalOcrAutoThreshold] = useState(ocrAutoPassThreshold);
   const [scoreGapThreshold, setScoreGapThreshold] = useState(1);
   const [resourceSource, setResourceSource] = useState('国家中小学智慧教育平台');
   const [lessonReferenceSite, setLessonReferenceSite] = useState('学科网 / 语文报教研资源');
@@ -80,6 +88,7 @@ export default function SystemSettingsPanel({
 
   const handleSaveSettings = () => {
     onUpdateThreshold(localThreshold);
+    onUpdateOcrThresholds(localOcrHumanThreshold, localOcrAutoThreshold);
     onShowToast('系统设置已保存');
   };
 
@@ -153,11 +162,32 @@ export default function SystemSettingsPanel({
 
         {activeTab === 'ai' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">作业图像与 OCR 质检</label>
+              <div className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-2 dark:border-zinc-800 dark:bg-zinc-900/60">
+                <div className="space-y-3">
+                  <div className="flex justify-between text-sm font-bold">
+                    <span>人工复核阈值</span>
+                    <span className="font-mono text-rose-700 dark:text-rose-300">{localOcrHumanThreshold.toFixed(2)}</span>
+                  </div>
+                  <input type="range" min="0.50" max="0.80" step="0.05" value={localOcrHumanThreshold} onChange={(event) => setLocalOcrHumanThreshold(Math.min(parseFloat(event.target.value), localOcrAutoThreshold - 0.05))} className="w-full cursor-pointer accent-rose-600" />
+                  <p className="text-xs leading-5 text-slate-500">低于该值，或出现缺页、学号冲突等硬异常，直接交给教师。</p>
+                </div>
+                <div className="space-y-3">
+                  <div className="flex justify-between text-sm font-bold">
+                    <span>自动通过阈值</span>
+                    <span className="font-mono text-emerald-700 dark:text-emerald-300">{localOcrAutoThreshold.toFixed(2)}</span>
+                  </div>
+                  <input type="range" min="0.75" max="0.98" step="0.01" value={localOcrAutoThreshold} onChange={(event) => setLocalOcrAutoThreshold(Math.max(parseFloat(event.target.value), localOcrHumanThreshold + 0.05))} className="w-full cursor-pointer accent-emerald-700" />
+                  <p className="text-xs leading-5 text-slate-500">两个阈值之间先由多模态模型核验，高于该值且无硬异常才自动通过。</p>
+                </div>
+              </div>
+            </div>
             <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">智能拦截阈值</label>
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">AI 评分置信度</label>
               <div className="p-4 bg-slate-50 dark:bg-zinc-900/60 rounded-2xl border border-slate-200 dark:border-zinc-800 space-y-3">
                 <div className="flex justify-between text-sm font-bold">
-                  <span>低置信度拦截</span>
+                  <span>评分异常拦截</span>
                   <span className="text-emerald-700 dark:text-emerald-300 font-mono">{localThreshold.toFixed(2)}</span>
                 </div>
                 <input
