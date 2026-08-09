@@ -17,6 +17,7 @@ import {
   initialSchedule, initialReminders, initialReviewQueue, initialWorkflowState,
   initialKnowledgeNodes
 } from './domain/mockData';
+import { createEmptyWorkflowState } from './domain/gradingTask';
 
 // Import Custom Sub-Components
 import Workbench from './features/workbench/Workbench';
@@ -55,7 +56,14 @@ export default function App() {
   const [schedule, setSchedule] = useState<ScheduleItem[]>(initialSchedule);
   const [reminders, setReminders] = useState<TimerReminder[]>(initialReminders);
   const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>(initialReviewQueue);
-  const [workflowState, setWorkflowState] = useState<WorkflowState>(initialWorkflowState);
+  const [workflowStates, setWorkflowStates] = useState<Record<string, WorkflowState>>(() => Object.fromEntries(
+    initialTasks.map(task => [task.id, {
+      ...initialWorkflowState,
+      taskName: task.name,
+      classId: task.classId,
+      deadline: task.deadline
+    }])
+  ));
 
   // Toast notifications state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -224,10 +232,10 @@ export default function App() {
   };
 
   // Sync Profiles action from Grading step 10
-  const handleSyncToProfiles = () => {
+  const handleSyncToProfiles = (aiResults: WorkflowState['aiResults']) => {
     // Simulate updating students' recent scores & diagnostic status
     setStudents(students.map(s => {
-      const match = workflowState.aiResults.find(r => r.studentName === s.name);
+      const match = aiResults.find(r => r.studentName === s.name);
       if (match) {
         const updatedScores = [...s.recentHomeworkTrend.slice(1), match.score];
         const updatedStatus = match.score < 80 ? ('warning' as const) : (match.score >= 90 ? ('outstanding' as const) : ('good' as const));
@@ -310,12 +318,6 @@ export default function App() {
                 handleToggleTask(taskId);
               }}
               onTriggerTask={(task) => {
-                setWorkflowState({
-                  ...workflowState,
-                  taskName: task.name,
-                  classId: task.classId,
-                  deadline: task.deadline
-                });
                 handleNavigate('grading-workspace');
               }}
             />
@@ -397,34 +399,29 @@ export default function App() {
             <GradingWorkspace
               tasks={tasks}
               classes={classes}
-              workflowState={workflowState}
+              defaultClassId={selectedClassId}
+              workflowStates={workflowStates}
+              knowledgeNodes={initialKnowledgeNodes}
               reviewQueue={reviewQueue}
               lowConfidenceThreshold={lowConfidenceThreshold}
               ocrHumanReviewThreshold={ocrHumanReviewThreshold}
               ocrAutoPassThreshold={ocrAutoPassThreshold}
               onCreateTask={(task) => {
-                setTasks([task, ...tasks]);
+                setTasks(current => [task, ...current]);
+                setWorkflowStates(current => ({ ...current, [task.id]: createEmptyWorkflowState(task) }));
                 triggerToast('批改任务已创建，可进入作业工作流继续配置');
               }}
               onEnterWorkflow={(task) => {
-                setWorkflowState({
-                  ...workflowState,
-                  taskName: task.name,
-                  classId: task.classId,
-                  deadline: task.deadline
-                });
                 setSelectedClassId(task.classId);
               }}
               onSelectTask={(task) => {
-                setWorkflowState({
-                  ...workflowState,
-                  taskName: task.name,
-                  classId: task.classId,
-                  deadline: task.deadline
-                });
                 setSelectedClassId(task.classId);
               }}
-              onUpdateState={(updated) => setWorkflowState({ ...workflowState, ...updated })}
+              onUpdateTask={(updatedTask) => setTasks(current => current.map(task => task.id === updatedTask.id ? updatedTask : task))}
+              onUpdateState={(taskId, updated) => setWorkflowStates(current => ({
+                ...current,
+                [taskId]: { ...current[taskId], ...updated }
+              }))}
               onSyncToProfiles={handleSyncToProfiles}
               onConfirmReview={handleConfirmReview}
               onBounceToOcr={handleBounceToOcr}

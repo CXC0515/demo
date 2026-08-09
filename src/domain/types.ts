@@ -87,9 +87,11 @@ export interface WorkbenchTask {
   name: string;
   classId: string;
   className: string;
-  node: 'upload' | 'ocr' | 'grading' | 'verify' | 'report' | 'sync';
+  node: 'setup' | 'collection' | 'upload' | 'ocr' | 'grading' | 'verify' | 'report' | 'sync';
   nodeName: string;
   deadline: string;
+  createdAt: string;
+  collectionDeadlineAt: string;
   status: 'pending' | 'running' | 'completed' | 'error';
   progress?: number;
 }
@@ -146,6 +148,8 @@ export interface GradingRubricPoint {
 export interface QuestionGradingState {
   questionId: string;
   standardAnswer: string;
+  standardAnswerOcrText?: string;
+  standardAnswerSourceIds?: string[];
   gradingRubric: GradingRubricPoint[];
   teacherRules: string[];
   rubricVersion: number;
@@ -189,6 +193,53 @@ export interface TimerReminder {
   status: 'active' | 'inactive';
 }
 
+export interface DocumentAsset {
+  id: string;
+  taskId: string;
+  kind: 'assignment' | 'reference-answer' | 'student-submission';
+  fileName: string;
+  mimeType: string;
+  pageCount?: number;
+  publicUrl?: string;
+  status: 'uploaded' | 'processing' | 'ready' | 'failed';
+}
+
+export interface SourceEvidence {
+  id: string;
+  assetId: string;
+  assetKind: DocumentAsset['kind'];
+  fileName: string;
+  pageNumber: number;
+  boundingBox: { x: number; y: number; width: number; height: number };
+  ocrText: string;
+  confidence: number;
+  imageUrl?: string;
+  isMock?: boolean;
+}
+
+export interface KnowledgeLink {
+  nodeId: string;
+  nodeName: string;
+  confidence: number;
+  status: 'suggested' | 'confirmed';
+}
+
+export interface GradingQuestion {
+  id: string;
+  displayNo: string;
+  parentId?: string;
+  title: string;
+  score: number;
+  knowledgePoint: string;
+  knowledgeLinks: KnowledgeLink[];
+  desc: string;
+  stem?: string;
+  aiQuestionType?: string;
+  answerRequirement?: string;
+  parseConfidence: number;
+  sourceEvidenceIds: string[];
+}
+
 export interface WorkflowState {
   currentStep: number; // 1-10
   taskName: string;
@@ -196,15 +247,16 @@ export interface WorkflowState {
   deadline: string;
   relatedText: string;
   homeworkType: 'reading' | 'writing' | 'dictation' | 'comprehensive';
-  questions: {
-    id: string;
-    title: string;
-    score: number;
-    knowledgePoint: string;
-    desc: string;
-    stem?: string;
-    aiQuestionType?: string;
-  }[];
+  assignment: {
+    status: 'draft' | 'assigned';
+    analysisStatus: 'idle' | 'uploading' | 'parsing' | 'needs-review' | 'ready' | 'failed';
+    questionFileNames: string[];
+    answerFileNames: string[];
+    note: string;
+    assets: DocumentAsset[];
+  };
+  questions: GradingQuestion[];
+  sourceEvidence: SourceEvidence[];
   standardAnswer: string;
   gradingRubric: GradingRubricPoint[];
   uploadProgress: number;

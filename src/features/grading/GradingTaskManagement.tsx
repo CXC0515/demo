@@ -5,12 +5,13 @@
 
 import { AlertTriangle, ArrowRight, CalendarClock, CheckCircle2, FilePlus2, Plus, Users, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { ReviewItem, SchoolClass, WorkbenchTask, WorkflowState } from '../../domain/types';
+import { formatCollectionDeadline, getDefaultCollectionDeadline, getNextDailyTaskName, toDateTimeInputValue } from '../../domain/gradingTask';
+import { ReviewItem, SchoolClass, WorkbenchTask } from '../../domain/types';
 
 interface GradingTaskManagementProps {
   tasks: WorkbenchTask[];
   classes: SchoolClass[];
-  workflowState: WorkflowState;
+  defaultClassId: string;
   reviewQueue: ReviewItem[];
   onCreateTask: (task: WorkbenchTask) => void;
   onEnterWorkflow: (task: WorkbenchTask) => void;
@@ -25,12 +26,12 @@ const statusLabel: Record<WorkbenchTask['status'], string> = {
   error: '需关注'
 };
 
-export default function GradingTaskManagement({ tasks, classes, workflowState, reviewQueue, onCreateTask, onEnterWorkflow }: GradingTaskManagementProps) {
+export default function GradingTaskManagement({ tasks, classes, defaultClassId, reviewQueue, onCreateTask, onEnterWorkflow }: GradingTaskManagementProps) {
   const [filter, setFilter] = useState<TaskFilter>('all');
   const [showCreate, setShowCreate] = useState(false);
-  const [name, setName] = useState('阅读理解作业');
-  const [classId, setClassId] = useState(workflowState.classId);
-  const [deadline, setDeadline] = useState('明天 18:00');
+  const [name, setName] = useState('');
+  const [classId, setClassId] = useState(defaultClassId);
+  const [deadline, setDeadline] = useState(() => toDateTimeInputValue(getDefaultCollectionDeadline()));
 
   const visibleTasks = useMemo(() => tasks.filter(task => {
     if (filter === 'completed') return task.status === 'completed';
@@ -38,19 +39,36 @@ export default function GradingTaskManagement({ tasks, classes, workflowState, r
     return true;
   }), [filter, tasks]);
 
+  const defaultTaskName = getNextDailyTaskName(tasks);
+
+  const openCreateDialog = () => {
+    setName('');
+    setClassId(defaultClassId);
+    setDeadline(toDateTimeInputValue(getDefaultCollectionDeadline()));
+    setShowCreate(true);
+  };
+
   const createTask = () => {
     const schoolClass = classes.find(item => item.id === classId) ?? classes[0];
-    onCreateTask({
+    const createdAt = new Date();
+    const fallbackDeadline = getDefaultCollectionDeadline(createdAt);
+    const parsedDeadline = deadline ? new Date(deadline) : fallbackDeadline;
+    const collectionDeadline = Number.isNaN(parsedDeadline.getTime()) ? fallbackDeadline : parsedDeadline;
+    const task: WorkbenchTask = {
       id: `task-${Date.now()}`,
-      name: name.trim() || '未命名阅读理解作业',
+      name: name.trim() || getNextDailyTaskName(tasks, createdAt),
       classId: schoolClass.id,
       className: schoolClass.name,
-      node: 'upload',
-      nodeName: '待上传作业',
-      deadline,
+      node: 'setup',
+      nodeName: '待准备作业',
+      deadline: formatCollectionDeadline(collectionDeadline.toISOString()),
+      createdAt: createdAt.toISOString(),
+      collectionDeadlineAt: collectionDeadline.toISOString(),
       status: 'pending'
-    });
+    };
+    onCreateTask(task);
     setShowCreate(false);
+    onEnterWorkflow(task);
   };
 
   return (
@@ -61,7 +79,7 @@ export default function GradingTaskManagement({ tasks, classes, workflowState, r
             <button key={id} type="button" onClick={() => setFilter(id)} className={`rounded-xl px-4 py-2 text-xs font-bold transition-all ${filter === id ? 'bg-white text-slate-900 shadow-sm dark:bg-zinc-800 dark:text-white' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>{label}</button>
           ))}
         </div>
-        <button type="button" onClick={() => setShowCreate(true)} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-emerald-700/10 transition-all hover:bg-emerald-800 active:scale-95"><Plus className="h-4 w-4" />新建批改任务</button>
+        <button type="button" onClick={openCreateDialog} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-emerald-700/10 transition-all hover:bg-emerald-800 active:scale-95"><Plus className="h-4 w-4" />新建批改任务</button>
       </div>
 
       <section className="glass-panel overflow-hidden rounded-[24px]">
@@ -74,7 +92,7 @@ export default function GradingTaskManagement({ tasks, classes, workflowState, r
             <article key={task.id} className="grid gap-3 border-b border-slate-200/60 px-5 py-4 last:border-0 md:grid-cols-[minmax(260px,1.5fr)_150px_130px_110px_120px] md:items-center dark:border-zinc-800/70">
               <div className="min-w-0">
                 <div className="flex items-center gap-2"><FilePlus2 className="h-4 w-4 flex-none text-emerald-700" /><h2 className="truncate text-sm font-black text-slate-900 dark:text-white">{task.name}</h2></div>
-                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500"><span className="flex items-center gap-1"><CalendarClock className="h-3.5 w-3.5" />{task.deadline}</span>{typeof task.progress === 'number' ? <span>{task.progress}%</span> : null}</div>
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500"><span className="flex items-center gap-1"><CalendarClock className="h-3.5 w-3.5" />收作业：{task.deadline}</span>{typeof task.progress === 'number' ? <span>{task.progress}%</span> : null}</div>
               </div>
               <span className="flex items-center gap-1.5 text-sm font-bold text-slate-600 dark:text-slate-300"><Users className="h-4 w-4 text-slate-400" />{task.className}</span>
               <span className={`w-fit rounded-xl px-2.5 py-1.5 text-xs font-bold ${task.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : task.status === 'error' ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-700 dark:bg-zinc-800 dark:text-slate-200'}`}>{statusLabel[task.status]} · {task.nodeName}</span>
@@ -88,11 +106,11 @@ export default function GradingTaskManagement({ tasks, classes, workflowState, r
       {showCreate ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="新建批改任务">
           <div className="glass-panel w-full max-w-lg rounded-[24px] p-6 shadow-2xl">
-            <div className="flex items-center justify-between"><h2 className="text-lg font-black text-slate-900 dark:text-white">新建阅读理解批改任务</h2><button type="button" title="关闭" aria-label="关闭" onClick={() => setShowCreate(false)} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-zinc-800"><X className="h-4 w-4" /></button></div>
+            <div className="flex items-center justify-between"><h2 className="text-lg font-black text-slate-900 dark:text-white">新建作业任务</h2><button type="button" title="关闭" aria-label="关闭" onClick={() => setShowCreate(false)} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-zinc-800"><X className="h-4 w-4" /></button></div>
             <div className="mt-5 space-y-4">
-              <label className="block space-y-1.5"><span className="text-xs font-bold text-slate-500">任务名称</span><input value={name} onChange={event => setName(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-600 dark:border-zinc-800 dark:bg-zinc-900" /></label>
+              <label className="block space-y-1.5"><span className="text-xs font-bold text-slate-500">任务名称</span><input value={name} onChange={event => setName(event.target.value)} placeholder={defaultTaskName} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-600 dark:border-zinc-800 dark:bg-zinc-900" /><span className="block text-[11px] text-slate-400">留空将使用 {defaultTaskName}</span></label>
               <label className="block space-y-1.5"><span className="text-xs font-bold text-slate-500">班级</span><select value={classId} onChange={event => setClassId(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none dark:border-zinc-800 dark:bg-zinc-900">{classes.filter(item => item.status === 'active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-              <label className="block space-y-1.5"><span className="text-xs font-bold text-slate-500">截止时间</span><input value={deadline} onChange={event => setDeadline(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-600 dark:border-zinc-800 dark:bg-zinc-900" /></label>
+              <label className="block space-y-1.5"><span className="text-xs font-bold text-slate-500">收作业时间</span><input type="datetime-local" value={deadline} onChange={event => setDeadline(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-600 dark:border-zinc-800 dark:bg-zinc-900" /><span className="block text-[11px] text-slate-400">用于提醒教师收作业；默认是创建任务的 3 小时后，可输入或打开时间选择器。</span></label>
             </div>
             <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setShowCreate(false)} className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 dark:border-zinc-700 dark:text-slate-300">取消</button><button type="button" onClick={createTask} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800">创建任务</button></div>
           </div>

@@ -456,6 +456,8 @@ export const initialTasks: WorkbenchTask[] = [
     node: 'verify',
     nodeName: '待人工复核',
     deadline: '今天 18:00',
+    createdAt: '2026-08-07T09:00:00+08:00',
+    collectionDeadlineAt: '2026-08-09T18:00:00+08:00',
     status: 'pending',
     progress: 85
   },
@@ -467,6 +469,8 @@ export const initialTasks: WorkbenchTask[] = [
     node: 'upload',
     nodeName: '待上传作业',
     deadline: '明天 12:00',
+    createdAt: '2026-08-06T16:20:00+08:00',
+    collectionDeadlineAt: '2026-08-10T12:00:00+08:00',
     status: 'pending'
   },
   {
@@ -477,6 +481,8 @@ export const initialTasks: WorkbenchTask[] = [
     node: 'ocr',
     nodeName: '待识别校对',
     deadline: '今天 16:30',
+    createdAt: '2026-08-05T14:00:00+08:00',
+    collectionDeadlineAt: '2026-08-09T16:30:00+08:00',
     status: 'running',
     progress: 45
   },
@@ -488,6 +494,8 @@ export const initialTasks: WorkbenchTask[] = [
     node: 'report',
     nodeName: '待生成讲评',
     deadline: '2026-07-03',
+    createdAt: '2026-07-01T10:00:00+08:00',
+    collectionDeadlineAt: '2026-07-03T08:00:00+08:00',
     status: 'completed'
   },
   {
@@ -498,6 +506,8 @@ export const initialTasks: WorkbenchTask[] = [
     node: 'grading',
     nodeName: '待 AI 评分',
     deadline: '今天 20:00',
+    createdAt: '2026-08-08T11:00:00+08:00',
+    collectionDeadlineAt: '2026-08-09T20:00:00+08:00',
     status: 'pending'
   }
 ];
@@ -715,11 +725,32 @@ export const initialWorkflowState: WorkflowState = {
   deadline: '今天 18:00',
   relatedText: '《驿路梨花》课文第14-25段',
   homeworkType: 'reading',
+  assignment: {
+    status: 'assigned',
+    analysisStatus: 'ready',
+    questionFileNames: ['驿路梨花阅读检测.pdf'],
+    answerFileNames: ['驿路梨花参考答案.pdf'],
+    note: '完成全部四道题，答题时结合原文。',
+    assets: [
+      { id: 'asset-assignment-1', taskId: 't1', kind: 'assignment', fileName: '驿路梨花阅读检测.pdf', mimeType: 'application/pdf', pageCount: 2, status: 'ready' },
+      { id: 'asset-answer-1', taskId: 't1', kind: 'reference-answer', fileName: '驿路梨花参考答案.pdf', mimeType: 'application/pdf', pageCount: 1, status: 'ready' }
+    ]
+  },
   questions: [
-    { id: 'q1', title: '注音与词语填空', score: 10, knowledgePoint: '字词默写', desc: '拼音与重点字形纠错。', stem: '根据拼音写出词语，并订正句中的错别字：山路陡qiào，屋内用竹miè编成的器物虽然简lòu，却十分整洁。', aiQuestionType: '基础积累 · 字音字形' },
-    { id: 'q2', title: '现代文叙事概括', score: 30, knowledgePoint: '现代文叙事概括', desc: '理清文章叙事脉络，概括寻访“梨花”的过程。', stem: '阅读全文，按照故事发展的顺序，概括“我”和老余从发现小茅屋到弄清小茅屋主人身份的主要经过。', aiQuestionType: '叙事概括 · 情节梳理' },
-    { id: 'q3', title: '标题含义与作用', score: 30, knowledgePoint: '标题作用题', desc: '理解“驿路梨花”的双关和象征含义。', stem: '结合全文，谈谈标题“驿路梨花”有哪些含义，并分析它在表现文章主题方面的作用。', aiQuestionType: '标题作用 · 主旨理解' },
-    { id: 'q4', title: '梨花的象征手法鉴赏', score: 30, knowledgePoint: '修辞手法鉴赏', desc: '分析文中三处梨花描写在刻画人物和表现雷锋精神时的作用。', stem: '文中三次描写梨花。请分别联系上下文，分析这些描写在营造氛围、刻画人物和深化主题方面的作用。', aiQuestionType: '写法鉴赏 · 象征手法' }
+    { id: 'q1', displayNo: '1', title: '注音与词语填空', score: 10, knowledgePoint: '字词默写', knowledgeLinks: [], desc: '拼音与重点字形纠错。', stem: '根据拼音写出词语，并订正句中的错别字：山路陡qiào，屋内用竹miè编成的器物虽然简lòu，却十分整洁。', aiQuestionType: '基础积累 · 字音字形', answerRequirement: '写出三个正确词语。', parseConfidence: 0.99, sourceEvidenceIds: ['e-q1'] },
+    { id: 'q2', displayNo: '2', title: '现代文叙事概括', score: 30, knowledgePoint: '现代文叙事概括', knowledgeLinks: [{ nodeId: 'n6', nodeName: '结构分析', confidence: 0.81, status: 'suggested' }], desc: '理清文章叙事脉络，概括寻访“梨花”的过程。', stem: '阅读全文，按照故事发展的顺序，概括“我”和老余从发现小茅屋到弄清小茅屋主人身份的主要经过。', aiQuestionType: '叙事概括 · 情节梳理', answerRequirement: '按事件顺序概括主要经过。', parseConfidence: 0.96, sourceEvidenceIds: ['e-q2'] },
+    { id: 'q3', displayNo: '3', title: '标题含义与作用', score: 30, knowledgePoint: '标题作用题', knowledgeLinks: [{ nodeId: 'n5', nodeName: '标题作用题', confidence: 0.98, status: 'confirmed' }, { nodeId: 'n7', nodeName: '主旨理解', confidence: 0.93, status: 'suggested' }], desc: '理解“驿路梨花”的双关和象征含义。', stem: '结合全文，谈谈标题“驿路梨花”有哪些含义，并分析它在表现文章主题方面的作用。', aiQuestionType: '标题作用 · 主旨理解', answerRequirement: '说明标题的多层含义并联系文章主题。', parseConfidence: 0.98, sourceEvidenceIds: ['e-q3'] },
+    { id: 'q4', displayNo: '4', title: '梨花的象征手法鉴赏', score: 30, knowledgePoint: '修辞手法鉴赏', knowledgeLinks: [{ nodeId: 'n6', nodeName: '结构分析', confidence: 0.88, status: 'suggested' }, { nodeId: 'n7', nodeName: '主旨理解', confidence: 0.91, status: 'suggested' }], desc: '分析文中三处梨花描写在刻画人物和表现雷锋精神时的作用。', stem: '文中三次描写梨花。请分别联系上下文，分析这些描写在营造氛围、刻画人物和深化主题方面的作用。', aiQuestionType: '写法鉴赏 · 象征手法', answerRequirement: '分别联系语境说明环境、结构和主题作用。', parseConfidence: 0.95, sourceEvidenceIds: ['e-q4'] }
+  ],
+  sourceEvidence: [
+    { id: 'e-q1', assetId: 'asset-assignment-1', assetKind: 'assignment', fileName: '驿路梨花阅读检测.pdf', pageNumber: 1, boundingBox: { x: 0.08, y: 0.12, width: 0.84, height: 0.16 }, ocrText: '1. 根据拼音写出词语，并订正句中的错别字……', confidence: 0.99, isMock: true },
+    { id: 'e-q2', assetId: 'asset-assignment-1', assetKind: 'assignment', fileName: '驿路梨花阅读检测.pdf', pageNumber: 1, boundingBox: { x: 0.08, y: 0.31, width: 0.84, height: 0.18 }, ocrText: '2. 阅读全文，按照故事发展的顺序，概括主要经过。', confidence: 0.96, isMock: true },
+    { id: 'e-q3', assetId: 'asset-assignment-1', assetKind: 'assignment', fileName: '驿路梨花阅读检测.pdf', pageNumber: 2, boundingBox: { x: 0.08, y: 0.15, width: 0.84, height: 0.2 }, ocrText: '3. 结合全文，谈谈标题“驿路梨花”有哪些含义，并分析其主题作用。', confidence: 0.98, isMock: true },
+    { id: 'e-q4', assetId: 'asset-assignment-1', assetKind: 'assignment', fileName: '驿路梨花阅读检测.pdf', pageNumber: 2, boundingBox: { x: 0.08, y: 0.42, width: 0.84, height: 0.24 }, ocrText: '4. 文中三次描写梨花，请分别联系上下文分析其作用。', confidence: 0.95, isMock: true },
+    { id: 'e-a1', assetId: 'asset-answer-1', assetKind: 'reference-answer', fileName: '驿路梨花参考答案.pdf', pageNumber: 1, boundingBox: { x: 0.09, y: 0.1, width: 0.82, height: 0.12 }, ocrText: '1. 陡峭、竹篾、简陋。', confidence: 0.99, isMock: true },
+    { id: 'e-a2', assetId: 'asset-answer-1', assetKind: 'reference-answer', fileName: '驿路梨花参考答案.pdf', pageNumber: 1, boundingBox: { x: 0.09, y: 0.24, width: 0.82, height: 0.15 }, ocrText: '2. 按“发现小屋—追问主人—揭示建屋人”的顺序概括。', confidence: 0.97, isMock: true },
+    { id: 'e-a3', assetId: 'asset-answer-1', assetKind: 'reference-answer', fileName: '驿路梨花参考答案.pdf', pageNumber: 1, boundingBox: { x: 0.09, y: 0.43, width: 0.82, height: 0.2 }, ocrText: '3. 自然梨花、梨花姑娘、无私奉献的雷锋精神三层含义。', confidence: 0.98, isMock: true },
+    { id: 'e-a4', assetId: 'asset-answer-1', assetKind: 'reference-answer', fileName: '驿路梨花参考答案.pdf', pageNumber: 1, boundingBox: { x: 0.09, y: 0.67, width: 0.82, height: 0.18 }, ocrText: '4. 营造氛围、照应标题并深化雷锋精神主题。', confidence: 0.96, isMock: true }
   ],
   standardAnswer: '第三题标准答案要点：\n1. 交代背景：实指哀牢山路旁的梨花，为故事设置温馨浪漫的背景环境。\n2. 象征哈尼姑娘“梨花”：双关手法，实写景物，虚写人物。\n3. 象征无私奉献的“雷锋精神”：深化主题，说明雷锋精神处处开花、代代相传。',
   gradingRubric: [
@@ -753,6 +784,8 @@ export const initialWorkflowState: WorkflowState = {
     {
       questionId: 'q1',
       standardAnswer: '陡峭、竹篾、简陋。',
+      standardAnswerOcrText: '1. 陡峭、竹篾、简陋。',
+      standardAnswerSourceIds: ['e-a1'],
       gradingRubric: [{ point: '字形准确', score: 10, description: '每个词语字形正确；同音错别字不得分。' }],
       teacherRules: ['“竹篾”的“篾”部件书写清楚即可，不要求印刷体。'],
       rubricVersion: 2,
@@ -763,6 +796,8 @@ export const initialWorkflowState: WorkflowState = {
     {
       questionId: 'q2',
       standardAnswer: '按“发现小屋—追问主人—揭示梨花姑娘与解放军建屋”的顺序概括主要情节。',
+      standardAnswerOcrText: '2. 按“发现小屋—追问主人—揭示建屋人”的顺序概括。',
+      standardAnswerSourceIds: ['e-a2'],
       gradingRubric: [
         { point: '主要事件完整', score: 15, description: '写出发现、追问和揭示三个环节。' },
         { point: '叙事顺序准确', score: 15, description: '人物和事件关系清楚，无关键性错位。' }
@@ -776,6 +811,8 @@ export const initialWorkflowState: WorkflowState = {
     {
       questionId: 'q3',
       standardAnswer: '第三题标准答案要点：\n1. 交代自然环境背景。\n2. 双关哈尼姑娘“梨花”。\n3. 象征无私奉献的雷锋精神。',
+      standardAnswerOcrText: '3. 自然梨花、梨花姑娘、无私奉献的雷锋精神三层含义。',
+      standardAnswerSourceIds: ['e-a3'],
       gradingRubric: [
         { point: '交代自然环境背景', score: 10, description: '回答包含路边梨花及环境作用。' },
         { point: '双关哈尼姑娘梨花', score: 10, description: '回答提到哈尼姑娘梨花及人物品质。' },
@@ -790,6 +827,8 @@ export const initialWorkflowState: WorkflowState = {
     {
       questionId: 'q4',
       standardAnswer: '三处梨花描写由实到虚，照应标题、串联人物，并深化雷锋精神的主题。',
+      standardAnswerOcrText: '4. 营造氛围、照应标题并深化雷锋精神主题。',
+      standardAnswerSourceIds: ['e-a4'],
       gradingRubric: [
         { point: '描写作用', score: 10, description: '说明环境或氛围作用。' },
         { point: '结构作用', score: 10, description: '说明照应标题或推动情节。' },
