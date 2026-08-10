@@ -8,7 +8,7 @@ import path from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
-import { FirstSectionAnalysis } from '../../src/domain/types';
+import { AnalysisEvidenceRef, FirstSectionAnalysis } from '../../src/domain/types';
 import { getModelConfig, isModelConfigured } from '../config/modelConfig';
 import { deleteFirstSectionAnalysis, getFirstSectionAnalysis, saveFirstSectionAnalysis } from '../repositories/analysisRepository';
 import { getMaterials, replaceMaterialsForKind, StoredMaterial, updateMaterial } from '../repositories/materialRepository';
@@ -39,6 +39,41 @@ const knowledgeCatalogSchema = z.array(z.object({
   type: z.string().min(1),
   description: z.string()
 })).max(2000);
+
+const getTopLevelNumber = (value?: string) => value?.match(/^\s*(\d+)/)?.[1];
+
+interface ReferenceAnswerUnit {
+  displayNo: string;
+  standardAnswer: string;
+  answerSource?: AnalysisEvidenceRef | null;
+}
+
+const completeReferenceAnswer = <T extends ReferenceAnswerUnit>(unit: T, materials: StoredMaterial[]): T => {
+  const displayNo = getTopLevelNumber(unit.displayNo);
+  const source = unit.answerSource;
+  if (!displayNo || !source) return unit;
+  const material = materials.find(item => item.id === source.assetId && item.kind === 'reference-answer');
+  const blocks = material?.normalizedDocument?.blocks;
+  if (!material || !blocks?.length) return unit;
+  const start = blocks.findIndex(block => getTopLevelNumber(block.listLabel) === displayNo);
+  if (start < 0) return unit;
+  let end = start + 1;
+  while (end < blocks.length && !getTopLevelNumber(blocks[end].listLabel)) end += 1;
+  const answerBlocks = blocks.slice(start, end);
+  const completeAnswer = answerBlocks.map(block => block.text.trim()).filter(Boolean).join('\n');
+  if (!completeAnswer) return unit;
+  return {
+    ...unit,
+    standardAnswer: completeAnswer,
+    answerSource: {
+      assetKind: 'reference-answer',
+      assetId: material.id,
+      fileName: material.fileName,
+      blockIds: answerBlocks.map(block => block.id),
+      quote: completeAnswer
+    }
+  };
+};
 
 const toPublicAsset = ({ diskPath: _diskPath, normalizedDocument: _normalizedDocument, ...asset }: StoredMaterial) => asset;
 
@@ -144,16 +179,19 @@ router.post('/:taskId/analysis', async (request, response) => {
       points
         .filter(point => point.point?.trim() || point.description?.trim())
         .map(point => ({ point: point.point?.trim() || point.description?.trim() || '', score: point.score ?? null, description: point.description ?? '' }));
-    const questions = rawAnalysis.questions.map(question => ({
-      ...question,
-      rubricPoints: normalizeRubricPoints(question.rubricPoints),
-      knowledgeCandidates: normalizeKnowledgeCandidates(question.knowledgeCandidates),
-      subquestions: question.subquestions.map(subquestion => ({
-        ...subquestion,
-        rubricPoints: normalizeRubricPoints(subquestion.rubricPoints),
-        knowledgeCandidates: normalizeKnowledgeCandidates(subquestion.knowledgeCandidates)
-      }))
-    })) as FirstSectionAnalysis['questions'];
+    const questions = rawAnalysis.questions.map(rawQuestion => {
+      const question = completeReferenceAnswer(rawQuestion, materials);
+      return {
+        ...question,
+        rubricPoints: normalizeRubricPoints(question.rubricPoints),
+        knowledgeCandidates: normalizeKnowledgeCandidates(question.knowledgeCandidates),
+        subquestions: question.subquestions.map(subquestion => ({
+          ...subquestion,
+          rubricPoints: normalizeRubricPoints(subquestion.rubricPoints),
+          knowledgeCandidates: normalizeKnowledgeCandidates(subquestion.knowledgeCandidates)
+        }))
+      };
+    }) as FirstSectionAnalysis['questions'];
     const analysis = saveFirstSectionAnalysis({
       taskId: request.params.taskId,
       scope: rawAnalysis.scope,

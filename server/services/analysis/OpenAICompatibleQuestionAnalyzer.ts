@@ -45,6 +45,7 @@ export class OpenAICompatibleQuestionAnalyzer {
       '必须识别第一部分全部一级题及其明确子题。一级题放在 questions；子题放在对应 subquestions。不要把第二部分内容混入。',
       '题干、答案和证据 quote 必须来自输入原文。无法确定时保留空字符串或 null，并写入 reviewReasons，禁止猜测。',
       'standardAnswer 与答案材料按题号对应；答案为“略”时原样保留。rubricPoints 只能依据明确答案、分值或可直接推出的得分要求生成。',
+      '同一道题的答案若由连续多个段落或多个示例组成，standardAnswer、answerSource.blockIds 和 answerSource.quote 必须包含下一道题开始前的全部内容，不得只取第一段或第一个示例。',
       'questionSource/answerSource 中 assetId、fileName、blockIds 必须引用输入中真实值；无法定位答案时 answerSource 为 null。',
       '知识点只能使用资源库中的真实 nodeId；没有合适节点时返回空数组。所有 confidence 取 0 到 1。',
       '严格返回以下字段结构：{"scope":"第一部分","questions":[{"displayNo":"1","title":"","stem":"","score":0,"questionType":"","answerRequirement":"","standardAnswer":"","explanation":"","rubricPoints":[{"point":"","score":0,"description":""}],"knowledgeCandidates":[],"questionSource":{"assetKind":"assignment","assetId":"","fileName":"","blockIds":[],"quote":""},"answerSource":null,"confidence":0,"reviewReasons":[],"subquestions":[]}]}。',
