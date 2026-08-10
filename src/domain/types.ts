@@ -79,6 +79,19 @@ export interface RosterSnapshot {
   students: RosterStudent[];
 }
 
+export interface ClassroomSeatAssignment {
+  seatIndex: number;
+  studentId: string;
+}
+
+export interface ClassroomLayout {
+  classId: string;
+  rowCount: number;
+  columnCount: number;
+  seats: ClassroomSeatAssignment[];
+  updatedAt?: string;
+}
+
 export interface SubmissionRosterMatch {
   matched: RosterStudent[];
   missing: RosterStudent[];

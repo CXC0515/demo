@@ -12,6 +12,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test:roster": "node --import tsx --test server/repositories/rosterRepository.test.ts",
+    "test:classroom": "node --import tsx --test server/repositories/classroomRepository.test.ts",
     "migrate:roster-json": "node --import tsx server/scripts/migrateRosterJson.ts",
     "backup:roster": "node --import tsx server/scripts/backupRoster.ts"
   },

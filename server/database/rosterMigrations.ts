@@ -62,6 +62,54 @@ const migrations: Migration[] = [
     sql: `
       ALTER TABLE classes ADD COLUMN student_count INTEGER;
     `
+  },
+  {
+    version: 3,
+    sql: `
+      CREATE TABLE classroom_layouts (
+        class_id TEXT PRIMARY KEY REFERENCES classes(id) ON UPDATE CASCADE ON DELETE CASCADE,
+        row_count INTEGER NOT NULL CHECK (row_count BETWEEN 1 AND 10),
+        column_count INTEGER NOT NULL CHECK (column_count BETWEEN 1 AND 12),
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE classroom_seats (
+        class_id TEXT NOT NULL REFERENCES classroom_layouts(class_id) ON UPDATE CASCADE ON DELETE CASCADE,
+        seat_index INTEGER NOT NULL CHECK (seat_index >= 0),
+        student_id TEXT NOT NULL REFERENCES students(id) ON UPDATE CASCADE ON DELETE CASCADE,
+        PRIMARY KEY (class_id, seat_index),
+        UNIQUE (class_id, student_id)
+      );
+
+      CREATE TRIGGER classroom_seat_student_must_be_in_class
+      BEFORE INSERT ON classroom_seats
+      WHEN NOT EXISTS (
+        SELECT 1 FROM class_memberships
+        WHERE class_id = NEW.class_id
+          AND student_id = NEW.student_id
+          AND status IN ('active', 'suspended')
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'CLASSROOM_STUDENT_NOT_IN_CLASS');
+      END;
+
+      CREATE TRIGGER classroom_seat_must_fit_layout
+      BEFORE INSERT ON classroom_seats
+      WHEN NEW.seat_index >= (
+        SELECT row_count * column_count FROM classroom_layouts WHERE class_id = NEW.class_id
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'CLASSROOM_SEAT_OUT_OF_RANGE');
+      END;
+
+      CREATE TRIGGER remove_inactive_student_from_classroom
+      AFTER UPDATE OF status ON class_memberships
+      WHEN OLD.status IN ('active', 'suspended') AND NEW.status NOT IN ('active', 'suspended')
+      BEGIN
+        DELETE FROM classroom_seats
+        WHERE class_id = OLD.class_id AND student_id = OLD.student_id;
+      END;
+    `
   }
 ];
 

@@ -53,6 +53,14 @@ const describeRosterError = (error: unknown) => {
   return code;
 };
 
+const getLocalDate = () => {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const createInitialWorkflowState = (task: WorkbenchTask) => {
   if (task.id === AI_GRADING_TEST_TASK_ID) {
     const state = createEmptyWorkflowState(task);
@@ -295,16 +303,20 @@ export default function App() {
   };
 
   // 6. Observation Note addition
+  const persistObservation = async (studentId: string, note: TeacherObservation) => {
+    const student = students.find(item => item.id === studentId);
+    if (!student) throw new Error('STUDENT_NOT_FOUND');
+    const saved = await updateRosterStudent({
+      ...student,
+      observationHistory: [note, ...student.observationHistory]
+    });
+    setStudents(current => current.map(item => item.id === studentId ? saved : item));
+  };
+
   const handleAddObservation = (studentId: string, note: TeacherObservation) => {
-    setStudents(students.map(s => {
-      if (s.id === studentId) {
-        return {
-          ...s,
-          observationHistory: [note, ...s.observationHistory]
-        };
-      }
-      return s;
-    }));
+    setStudents(current => current.map(student => student.id === studentId
+      ? { ...student, observationHistory: [note, ...student.observationHistory] }
+      : student));
   };
 
   // 7. Review Queue Actions
@@ -471,17 +483,13 @@ export default function App() {
                 handleNavigate('profile');
               }}
               onAddObservation={(studentId, text) => {
-                handleAddObservation(studentId, {
-                  date: '2026-07-02',
+                return persistObservation(studentId, {
+                  date: getLocalDate(),
                   type: 'neutral',
                   category: 'behavior',
                   content: text,
-                  author: '王王老师'
+                  author: '王老师'
                 });
-              }}
-              onSetStudentReminder={(studentId, name) => {
-                const s = students.find(stud => stud.id === studentId);
-                triggerToast(`⏰ 成功为 [${s ? s.name : '学生'}] 创建了个性化督促提醒：${name}`);
               }}
             />
           )}

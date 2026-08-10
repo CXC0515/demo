@@ -1,14 +1,27 @@
-﻿/**
+/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { 
-  User, Award, AlertCircle, TrendingUp, Tag, ShieldAlert, 
-  MessageSquare, Bell, ArrowRight, BookOpen, GraduationCap 
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  AlertCircle,
+  Award,
+  BookOpen,
+  Check,
+  GraduationCap,
+  LoaderCircle,
+  LogOut,
+  Minus,
+  Plus,
+  RotateCcw,
+  Save,
+  Sparkles,
+  User,
+  X
 } from 'lucide-react';
-import { Student, SchoolClass } from '../../domain/types';
+import { ClassroomLayout, SchoolClass, Student } from '../../domain/types';
+import { getClassroomLayout, saveClassroomLayout } from '../../services/classroomApi';
 
 interface VirtualClassroomProps {
   students: Student[];
@@ -17,9 +30,20 @@ interface VirtualClassroomProps {
   onSelectClass: (classId: string) => void;
   onNavigate: (pageId: string, subPageId?: string) => void;
   onViewStudentProfile: (studentId: string) => void;
-  onAddObservation: (studentId: string, text: string) => void;
-  onSetStudentReminder: (studentId: string, reminderName: string) => void;
+  onAddObservation: (studentId: string, text: string) => Promise<void>;
 }
+
+const statusMeta: Record<Student['status'], { label: string; dot: string; badge: string }> = {
+  outstanding: { label: '表现突出', dot: 'bg-blue-500', badge: 'bg-blue-50 text-blue-700 border-blue-200' },
+  good: { label: '状态良好', dot: 'bg-emerald-500', badge: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  warning: { label: '需要关注', dot: 'bg-amber-500', badge: 'bg-amber-50 text-amber-700 border-amber-200' },
+  risk: { label: '近期风险', dot: 'bg-red-500', badge: 'bg-red-50 text-red-700 border-red-200' }
+};
+
+const cloneLayout = (layout: ClassroomLayout): ClassroomLayout => ({
+  ...layout,
+  seats: layout.seats.map(seat => ({ ...seat }))
+});
 
 export default function VirtualClassroom({
   students,
@@ -28,461 +52,415 @@ export default function VirtualClassroom({
   onSelectClass,
   onNavigate,
   onViewStudentProfile,
-  onAddObservation,
-  onSetStudentReminder
+  onAddObservation
 }: VirtualClassroomProps) {
+  const [layout, setLayout] = useState<ClassroomLayout | null>(null);
+  const [draft, setDraft] = useState<ClassroomLayout | null>(null);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
-  const [obsText, setObsText] = useState('');
-  const [remText, setRemText] = useState('');
-  const [showObsInput, setShowObsInput] = useState(false);
-  const [showRemInput, setShowRemInput] = useState(false);
-  const [editMode, setEditMode] = useState(false);
+  const [placementStudentId, setPlacementStudentId] = useState<string | null>(null);
+  const [observationText, setObservationText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [submittingObservation, setSubmittingObservation] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Filter students by selected class
-  const classStudents = students.filter(s => s.classId === selectedClassId);
-  const activeClass = classes.find(c => c.id === selectedClassId) || classes[0];
+  const classStudents = useMemo(
+    () => students
+      .filter(student => student.classId === selectedClassId)
+      .sort((left, right) => left.studentNo.localeCompare(right.studentNo, 'zh-CN', { numeric: true })),
+    [selectedClassId, students]
+  );
+  const studentById = useMemo(() => new Map(classStudents.map(student => [student.id, student])), [classStudents]);
+  const activeClass = classes.find(schoolClass => schoolClass.id === selectedClassId) ?? classes[0];
+  const activeLayout = draft ?? layout;
+  const editMode = Boolean(draft);
+  const seatedStudentIds = useMemo(
+    () => new Set((activeLayout?.seats ?? []).map(seat => seat.studentId)),
+    [activeLayout]
+  );
+  const unassignedStudents = classStudents.filter(student => !seatedStudentIds.has(student.id));
+  const selectedStudent = selectedStudentId ? studentById.get(selectedStudentId) : undefined;
 
-  // Map students into a 6x7 grid (42 seats)
-  // To make it look super neat, we map our real mock students to specific desks, and auto-generate the rest.
-  const gridRows = 6;
-  const gridCols = 7;
-  const desks: (Student | { id: string; name: string; isPlaceholder: boolean; status: 'good' })[] = [];
-
-  // Generate placeholder students for remaining seats
-  const realStudentsMap = new Map(classStudents.map(s => [parseInt(s.studentNo.slice(-2)) || 1, s]));
-
-  let placeholderIndex = 1;
-  for (let seatNum = 1; seatNum <= gridRows * gridCols; seatNum++) {
-    const studentAtSeat = realStudentsMap.get(seatNum);
-    if (studentAtSeat) {
-      desks.push(studentAtSeat);
-    } else {
-      desks.push({
-        id: `placeholder-${seatNum}`,
-        name: `同学${seatNum}`,
-        isPlaceholder: true,
-        status: 'good'
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setLayout(null);
+    setDraft(null);
+    setSelectedStudentId(null);
+    setPlacementStudentId(null);
+    setMessage(null);
+    getClassroomLayout(selectedClassId)
+      .then(nextLayout => {
+        if (active) setLayout(nextLayout);
+      })
+      .catch(error => {
+        if (active) setMessage({ type: 'error', text: `座位表读取失败：${error instanceof Error ? error.message : '未知错误'}` });
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
+    return () => { active = false; };
+  }, [selectedClassId]);
+
+  const updateDraftSeats = (seats: ClassroomLayout['seats']) => {
+    setDraft(current => current ? { ...current, seats } : current);
+  };
+
+  const handleSeatClick = (seatIndex: number) => {
+    if (!activeLayout) return;
+    const occupantId = activeLayout.seats.find(seat => seat.seatIndex === seatIndex)?.studentId;
+    if (!editMode) {
+      if (occupantId) setSelectedStudentId(occupantId);
+      return;
     }
-  }
+    if (!placementStudentId) {
+      if (occupantId) {
+        setPlacementStudentId(occupantId);
+        setSelectedStudentId(occupantId);
+      }
+      return;
+    }
+    if (occupantId === placementStudentId) {
+      setPlacementStudentId(null);
+      return;
+    }
 
-  const selectedStudent = students.find(s => s.id === selectedStudentId);
+    const sourceSeat = activeLayout.seats.find(seat => seat.studentId === placementStudentId);
+    const nextSeats = activeLayout.seats
+      .filter(seat => seat.studentId !== placementStudentId && seat.seatIndex !== seatIndex)
+      .map(seat => ({ ...seat }));
+    if (sourceSeat && occupantId) nextSeats.push({ seatIndex: sourceSeat.seatIndex, studentId: occupantId });
+    nextSeats.push({ seatIndex, studentId: placementStudentId });
+    updateDraftSeats(nextSeats.sort((left, right) => left.seatIndex - right.seatIndex));
+    setSelectedStudentId(placementStudentId);
+    setPlacementStudentId(null);
+    setMessage(null);
+  };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'outstanding': return 'bg-blue-500 text-blue-500 shadow-blue-500/35';
-      case 'good': return 'bg-emerald-500 text-emerald-500 shadow-emerald-500/35';
-      case 'warning': return 'bg-amber-500 text-amber-500 shadow-amber-500/35';
-      case 'risk': return 'bg-red-500 text-red-500 shadow-red-500/35';
-      default: return 'bg-slate-300 text-slate-300 shadow-slate-300/35';
+  const removePlacementStudent = () => {
+    if (!activeLayout || !placementStudentId) return;
+    updateDraftSeats(activeLayout.seats.filter(seat => seat.studentId !== placementStudentId));
+    setPlacementStudentId(null);
+  };
+
+  const resizeLayout = (nextRows: number, nextColumns: number) => {
+    if (!draft || nextRows < 1 || nextRows > 10 || nextColumns < 1 || nextColumns > 12) return;
+    const converted = draft.seats.map(seat => {
+      const row = Math.floor(seat.seatIndex / draft.columnCount);
+      const column = seat.seatIndex % draft.columnCount;
+      return { ...seat, row, column };
+    });
+    if (converted.some(seat => seat.row >= nextRows || seat.column >= nextColumns)) {
+      setMessage({ type: 'error', text: '缩小布局前请先移出边界位置上的学生。' });
+      return;
+    }
+    setDraft({
+      ...draft,
+      rowCount: nextRows,
+      columnCount: nextColumns,
+      seats: converted.map(({ row, column, studentId }) => ({ seatIndex: row * nextColumns + column, studentId }))
+    });
+    setMessage(null);
+  };
+
+  const autoArrange = () => {
+    if (!draft) return;
+    updateDraftSeats(classStudents
+      .slice(0, draft.rowCount * draft.columnCount)
+      .map((student, seatIndex) => ({ seatIndex, studentId: student.id })));
+    setPlacementStudentId(null);
+    if (classStudents.length > draft.rowCount * draft.columnCount) {
+      setMessage({ type: 'error', text: '座位数量不足，部分学生仍在待安排列表中。' });
+    } else {
+      setMessage(null);
     }
   };
 
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'outstanding': return '表现突出';
-      case 'good': return '状态良好';
-      case 'warning': return '需要关注';
-      case 'risk': return '近期风险';
-      default: return '正常';
+  const saveDraft = async () => {
+    if (!draft) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const saved = await saveClassroomLayout(draft);
+      setLayout(saved);
+      setDraft(null);
+      setPlacementStudentId(null);
+      setMessage({ type: 'success', text: '座位表已保存。' });
+    } catch (error) {
+      setMessage({ type: 'error', text: `保存失败：${error instanceof Error ? error.message : '未知错误'}` });
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleAddObservationSubmit = () => {
-    if (!obsText.trim() || !selectedStudentId) return;
-    onAddObservation(selectedStudentId, obsText);
-    setObsText('');
-    setShowObsInput(false);
+  const submitObservation = async () => {
+    if (!selectedStudent || !observationText.trim()) return;
+    setSubmittingObservation(true);
+    setMessage(null);
+    try {
+      await onAddObservation(selectedStudent.id, observationText.trim());
+      setObservationText('');
+      setMessage({ type: 'success', text: `已保存 ${selectedStudent.name} 的课堂观察。` });
+    } catch (error) {
+      setMessage({ type: 'error', text: `观察记录保存失败：${error instanceof Error ? error.message : '未知错误'}` });
+    } finally {
+      setSubmittingObservation(false);
+    }
   };
 
-  const handleAddReminderSubmit = () => {
-    if (!remText.trim() || !selectedStudentId) return;
-    onSetStudentReminder(selectedStudentId, remText);
-    setRemText('');
-    setShowRemInput(false);
-  };
+  const unassignedPanel = (
+    <section className="rounded-md border border-slate-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">待安排学生</h3>
+        <span className="text-xs text-slate-400">{unassignedStudents.length}</span>
+      </div>
+      <div className="max-h-56 space-y-1.5 overflow-y-auto">
+        {unassignedStudents.map(student => (
+          <button
+            type="button"
+            key={student.id}
+            onClick={() => setPlacementStudentId(current => current === student.id ? null : student.id)}
+            className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left ${placementStudentId === student.id ? 'border-amber-400 bg-amber-50' : 'border-slate-100 bg-slate-50'}`}
+          >
+            <span className="truncate text-sm font-semibold text-slate-700">{student.name}</span>
+            <span className="ml-2 text-xs text-slate-400">{student.studentNo}</span>
+          </button>
+        ))}
+        {!unassignedStudents.length && <p className="py-4 text-center text-xs text-slate-400">全部学生已安排</p>}
+      </div>
+      {placementStudentId && seatedStudentIds.has(placementStudentId) && (
+        <button type="button" onClick={removePlacementStudent} className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-red-200 px-3 py-2 text-xs font-semibold text-red-700">
+          <LogOut className="h-4 w-4" />移出座位
+        </button>
+      )}
+      {placementStudentId && (
+        <button type="button" onClick={() => setPlacementStudentId(null)} className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-semibold text-slate-500">
+          <RotateCcw className="h-4 w-4" />取消选择
+        </button>
+      )}
+    </section>
+  );
+
+  if (!activeClass) return null;
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 h-full animate-fade-in" id="classroom-page">
-      
-      {/* Left: Interactive Classroom Grid */}
-      <div className="flex-1 flex flex-col space-y-4 min-w-0">
-        
-        {/* Classroom Header Controls */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 glass-panel rounded-2xl p-4">
-          <div className="space-y-1">
-            <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-              <GraduationCap className="w-5 h-5 text-emerald-700 dark:text-emerald-400" />
-              班级可视化：{activeClass.name}
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              点击课桌即可查看对应学生近期听写、作业、课堂观察以及多维度家校学情。
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setEditMode(!editMode)}
-              className={`px-3 py-1.5 text-xs rounded-xl font-bold transition-all ${editMode ? 'bg-emerald-700 text-white' : 'bg-white/80 dark:bg-zinc-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-zinc-700'}`}
-            >
-              {editMode ? '完成编辑' : '编辑座位'}
-            </button>
-            <span className="text-xs text-slate-400">切换班级:</span>
-            <select
-              id="cr-class-select"
-              value={selectedClassId}
-              onChange={(e) => {
-                onSelectClass(e.target.value);
-                setSelectedStudentId(null);
-              }}
-              className="px-3 py-1.5 bg-white/80 dark:bg-zinc-800 text-xs rounded-xl border border-slate-200 dark:border-zinc-700 font-medium text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer"
-            >
-              {classes.filter(c => c.status === 'active').map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
+    <div className="space-y-4 animate-fade-in" id="classroom-page">
+      <header className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100">
+            <GraduationCap className="h-5 w-5 text-emerald-700" />
+            {activeClass.name}座位图
+          </h2>
+          <p className="mt-1 text-xs text-slate-500">已安排 {activeLayout?.seats.length ?? 0} 人 · 待安排 {unassignedStudents.length} 人</p>
         </div>
-
-        {/* Flat Classroom Floor Plan */}
-        <div className="flex-1 glass-panel rounded-3xl p-6 flex flex-col overflow-hidden relative min-h-[560px] bg-slate-50/70 dark:bg-zinc-900/40">
-
-          {/* Front teaching area */}
-          <div className="shrink-0 space-y-3 border-b border-slate-200/70 dark:border-zinc-800/80 pb-5">
-            <div className="w-full h-12 rounded-2xl bg-slate-800 dark:bg-zinc-950 text-slate-100 shadow-inner flex items-center justify-center text-xs tracking-[0.28em] font-mono">
-              黑板 · 统编版七下语文
-            </div>
-            <div className="mx-auto w-80 max-w-full h-12 rounded-2xl bg-amber-100 dark:bg-zinc-800 border border-amber-200/80 dark:border-zinc-700 shadow-sm flex items-center justify-center">
-              <span className="text-xs font-black text-amber-900 dark:text-zinc-200 tracking-[0.32em]">讲台</span>
-            </div>
-          </div>
-
-          {/* Student Desk Area */}
-          <div className="classroom-grid flex-1 flex items-center justify-center py-7">
-            <div className="classroom-desk-area grid grid-cols-7 gap-x-3 gap-y-4 max-w-5xl mx-auto w-full px-2">
-              {desks.map((desk, idx) => {
-                const isReal = !('isPlaceholder' in desk);
-                const isSelected = selectedStudentId === desk.id;
-                const isAisleAfterThirdCol = (idx % gridCols) === 2;
-                
-                return (
-                  <div
-                    key={desk.id}
-                    id={`student-desk-${desk.id}`}
-                    onClick={() => {
-                      if (isReal) {
-                        setSelectedStudentId(desk.id);
-                      }
-                    }}
-                    className={`student-desk min-h-[86px] p-2.5 rounded-xl border flex flex-col items-center justify-between text-center cursor-pointer transition-all relative ${isAisleAfterThirdCol ? 'mr-5' : ''} ${
-                      isReal 
-                        ? isSelected
-                          ? 'bg-emerald-600/10 border-emerald-500 shadow-md ring-2 ring-emerald-500/20'
-                          : 'bg-white dark:bg-zinc-800/80 hover:bg-slate-50 border-slate-200 dark:border-zinc-700 shadow-sm'
-                        : 'bg-slate-100/50 dark:bg-zinc-800/20 border-slate-200/60 dark:border-zinc-900 opacity-35 cursor-not-allowed pointer-events-none'
-                    }`}
-                  >
-                    {/* Status Indicator Dot at corner */}
-                    {isReal && (
-                      <span className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full shadow-sm ${getStatusColor(desk.status)}`}></span>
-                    )}
-
-                    {/* Small visual Avatar */}
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center mb-1 text-xs font-semibold ${
-                      isReal 
-                        ? isSelected
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-slate-100 dark:bg-zinc-700 text-slate-700 dark:text-slate-300'
-                        : 'bg-slate-100 dark:bg-zinc-800 text-slate-400'
-                    }`}>
-                      {isReal ? (
-                        desk.isRepresentative ? (
-                          <Award className="w-4 h-4 text-amber-500" />
-                        ) : (
-                          desk.name[0]
-                        )
-                      ) : (
-                        <User className="w-3.5 h-3.5" />
-                      )}
-                    </div>
-
-                    <span className={`text-[11px] font-medium truncate max-w-full ${
-                      isReal 
-                        ? isSelected 
-                          ? 'text-emerald-700 dark:text-emerald-400 font-bold' 
-                          : 'text-slate-700 dark:text-slate-300' 
-                        : 'text-slate-400'
-                    }`}>
-                      {desk.name}
-                    </span>
-
-                    {/* Simple compact duty tag */}
-                    {isReal && desk.isRepresentative && (
-                      <span className="text-[8px] scale-90 px-1 py-0.2 bg-amber-100 text-amber-800 rounded mt-0.5 whitespace-nowrap">
-                        课代表
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {editMode && (
-            <div className="mt-4 p-3 rounded-2xl bg-emerald-500/5 border border-emerald-500/10 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-              <div>
-                <span className="font-black text-emerald-800 dark:text-emerald-300">座位编辑模式</span>
-                <p className="text-slate-500 mt-1">可切换“排课桌 / 排座位”。当前为原型模式：点击学生卡片查看，后续接入拖拽换座。</p>
-              </div>
-              <div className="flex gap-2">
-                <button className="px-3 py-1.5 rounded-xl bg-white/80 dark:bg-zinc-800 text-slate-600 dark:text-slate-300 font-bold">排课桌</button>
-                <button className="px-3 py-1.5 rounded-xl bg-emerald-700 text-white font-bold">排座位</button>
-              </div>
-            </div>
-          )}
-
-          {/* Status Legends at bottom */}
-          <div className="mt-6 pt-4 border-t border-slate-200/40 dark:border-zinc-800/40 flex flex-wrap justify-center gap-6 text-[11px] text-slate-500">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-              <span>状态良好 ({classStudents.filter(s => s.status === 'good').length})</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
-              <span>表现突出 ({classStudents.filter(s => s.status === 'outstanding').length})</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-              <span>需要关注 ({classStudents.filter(s => s.status === 'warning').length})</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
-              <span>近期风险 ({classStudents.filter(s => s.status === 'risk').length})</span>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      {/* Right: Selected Student Details Draw/Panel */}
-      <div className={`w-full lg:w-[380px] flex-shrink-0 flex flex-col ${selectedStudent ? '' : 'hidden lg:flex'}`}>
-        <div className="flex-1 glass-panel rounded-3xl p-6 flex flex-col justify-between overflow-y-auto space-y-6 min-h-[500px]">
-          {selectedStudent ? (
-            <div className="space-y-6 animate-fade-in" id="student-detail-panel">
-              
-              {/* Profile Card Header */}
-              <div className="flex items-start justify-between">
-                <div className="flex gap-3">
-                  <div className="w-12 h-12 bg-emerald-600/10 text-emerald-800 dark:text-emerald-300 rounded-2xl flex items-center justify-center font-bold text-lg">
-                    {selectedStudent.name[0]}
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                      {selectedStudent.name}
-                      {selectedStudent.isRepresentative && (
-                        <span className="px-1.5 py-0.5 text-[9px] bg-amber-100 text-amber-800 rounded font-semibold flex items-center gap-0.5">
-                          <Award className="w-2.5 h-2.5 text-amber-600" />
-                          语文课代表
-                        </span>
-                      )}
-                    </h3>
-                    <p className="text-xs text-slate-400">学号：{selectedStudent.studentNo} · {selectedStudent.className}</p>
-                  </div>
-                </div>
-
-                {/* Status indicator pill */}
-                <div className="text-right">
-                  <span className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-full ${
-                    selectedStudent.status === 'good' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' :
-                    selectedStudent.status === 'outstanding' ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300' :
-                    selectedStudent.status === 'warning' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' :
-                    'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300'
-                  }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${
-                      selectedStudent.status === 'good' ? 'bg-emerald-500' :
-                      selectedStudent.status === 'outstanding' ? 'bg-blue-500' :
-                      selectedStudent.status === 'warning' ? 'bg-amber-500' :
-                      'bg-red-500'
-                    }`}></span>
-                    {getStatusLabel(selectedStudent.status)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Behavior & Home-School Link Tags */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                  <Tag className="w-3 h-3" />
-                  日常表现标签
-                </h4>
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedStudent.behaviorTags.map((tag, idx) => (
-                    <span key={idx} className="px-2 py-0.5 text-[10px] rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-slate-400 font-medium">
-                      {tag}
-                    </span>
-                  ))}
-                  {selectedStudent.familyStatusTag && (
-                    <span className="px-2 py-0.5 text-[10px] rounded-full bg-rose-500/10 text-rose-800 dark:text-rose-400 font-semibold border border-rose-500/20">
-                      家校：{selectedStudent.familyStatusTag}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Strengths & Weaknesses Knowledge Points */}
-              <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-150 dark:border-zinc-800">
-                <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">优势知识点</span>
-                  <div className="space-y-1">
-                    {selectedStudent.strongKnowledge.map((k, idx) => (
-                      <span key={idx} className="block text-xs text-emerald-700 dark:text-emerald-400 font-medium truncate">
-                        ✓ {k}
-                      </span>
-                    ))}
-                    {selectedStudent.strongKnowledge.length === 0 && <span className="text-xs text-slate-400">暂无评估</span>}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">薄弱知识点</span>
-                  <div className="space-y-1">
-                    {selectedStudent.weakKnowledge.map((k, idx) => (
-                      <span key={idx} className="block text-xs text-red-700 dark:text-red-400 font-medium truncate">
-                        ✗ {k}
-                      </span>
-                    ))}
-                    {selectedStudent.weakKnowledge.length === 0 && <span className="text-xs text-slate-400">暂无评估</span>}
-                  </div>
-                </div>
-              </div>
-
-              {/* Parent communication summary */}
-              <div className="space-y-2 p-3 rounded-xl bg-slate-50 dark:bg-zinc-800/40 border border-slate-100 dark:border-zinc-800">
-                <h4 className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
-                  <MessageSquare className="w-3.5 h-3.5 text-slate-500" />
-                  家校关注：{selectedStudent.parent.relation} ({selectedStudent.parent.name})
-                </h4>
-                <p className="text-xs text-slate-500 dark:text-slate-400 italic">
-                  “{selectedStudent.parent.remark}”
-                </p>
-              </div>
-
-              {/* Recent Homework Trend (visual mock with tiny blocks) */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                  <TrendingUp className="w-3 h-3" />
-                  近期作业质量趋势 (最后 5 次)
-                </h4>
-                <div className="flex items-end gap-2 h-14 pt-2">
-                  {selectedStudent.recentHomeworkTrend.map((score, idx) => (
-                    <div key={idx} className="flex-1 flex flex-col items-center gap-1">
-                      <span className="text-[9px] text-slate-400 font-mono">{score}</span>
-                      <div 
-                        className={`w-full rounded-t-sm transition-all duration-300 ${
-                          score >= 90 ? 'bg-emerald-500/80 dark:bg-emerald-500/60' :
-                          score >= 80 ? 'bg-blue-500/80' :
-                          score >= 70 ? 'bg-amber-500/80' : 'bg-red-500/80'
-                        }`}
-                        style={{ height: `${(score / 100) * 40}px` }}
-                      ></div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Dynamic Add Observation Input */}
-              <div className="space-y-2 pt-2 border-t border-slate-150 dark:border-zinc-800">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-slate-400">课堂随手记</span>
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={() => { setShowObsInput(!showObsInput); setShowRemInput(false); }}
-                      className="text-xs text-emerald-700 hover:underline cursor-pointer"
-                    >
-                      {showObsInput ? '取消' : '添加记录'}
-                    </button>
-                    <button 
-                      onClick={() => { setShowRemInput(!showRemInput); setShowObsInput(false); }}
-                      className="text-xs text-indigo-700 hover:underline cursor-pointer"
-                    >
-                      {showRemInput ? '取消' : '设提醒'}
-                    </button>
-                  </div>
-                </div>
-
-                {showObsInput && (
-                  <div className="space-y-2 bg-emerald-500/5 p-3 rounded-xl border border-emerald-500/10">
-                    <textarea
-                      value={obsText}
-                      onChange={(e) => setObsText(e.target.value)}
-                      placeholder="记录该学生今日表现，如课堂提问、背诵情况等..."
-                      className="w-full h-16 text-xs p-2 bg-white dark:bg-zinc-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-zinc-700 rounded-lg focus:outline-none"
-                    />
-                    <button
-                      onClick={handleAddObservationSubmit}
-                      className="w-full py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-semibold rounded-lg cursor-pointer"
-                    >
-                      保存观察日志
-                    </button>
-                  </div>
-                )}
-
-                {showRemInput && (
-                  <div className="space-y-2 bg-indigo-500/5 p-3 rounded-xl border border-indigo-500/10">
-                    <input
-                      type="text"
-                      value={remText}
-                      onChange={(e) => setRemText(e.target.value)}
-                      placeholder="例如：周五放学后抽查该生《陋室铭》背诵"
-                      className="w-full text-xs p-2 bg-white dark:bg-zinc-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-zinc-700 rounded-lg focus:outline-none"
-                    />
-                    <button
-                      onClick={handleAddReminderSubmit}
-                      className="w-full py-1.5 bg-indigo-700 hover:bg-indigo-800 text-white text-[11px] font-semibold rounded-lg cursor-pointer"
-                    >
-                      创建定时提醒
-                    </button>
-                  </div>
-                )}
-
-                {/* Show last observation log if any */}
-                {selectedStudent.observationHistory.length > 0 && !showObsInput && (
-                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-zinc-800/20 text-[11px] text-slate-500 dark:text-slate-400 space-y-1">
-                    <span className="font-semibold block text-slate-600 dark:text-slate-300">
-                      最新观察 ({selectedStudent.observationHistory[selectedStudent.observationHistory.length - 1].date}):
-                    </span>
-                    <p>“{selectedStudent.observationHistory[selectedStudent.observationHistory.length - 1].content}”</p>
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => onViewStudentProfile(selectedStudent.id)}
-                  className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-1 transition-all active:scale-98 cursor-pointer"
-                >
-                  学生画像
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => onNavigate('student-mgmt')}
-                  className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl flex items-center justify-center gap-1 transition-all active:scale-98 cursor-pointer"
-                >
-                  编辑档案
-                </button>
-              </div>
-
-            </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={selectedClassId}
+            onChange={event => onSelectClass(event.target.value)}
+            className="h-9 min-w-32 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-200"
+            aria-label="切换班级"
+          >
+            {classes.filter(schoolClass => schoolClass.status === 'active').map(schoolClass => (
+              <option key={schoolClass.id} value={schoolClass.id}>{schoolClass.name}</option>
+            ))}
+          </select>
+          {editMode ? (
+            <>
+              <button
+                type="button"
+                onClick={() => { setDraft(null); setPlacementStudentId(null); setMessage(null); }}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-300"
+              >
+                <X className="h-4 w-4" />取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveDraft()}
+                disabled={saving}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                保存座位
+              </button>
+            </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400 space-y-2 h-full">
-              <User className="w-12 h-12 stroke-1 text-slate-300" />
-              <p className="text-sm">未选择学生</p>
-              <p className="text-xs max-w-[200px]">点击左侧座位的任意学生课桌，在此处显示该学生深度多维度学情分析。</p>
-            </div>
+            <button
+              type="button"
+              onClick={() => layout && setDraft(cloneLayout(layout))}
+              disabled={!layout}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              <BookOpen className="h-4 w-4" />编辑座位
+            </button>
           )}
         </div>
-      </div>
+      </header>
 
+      {message && (
+        <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+          {message.type === 'error' ? <AlertCircle className="h-4 w-4 shrink-0" /> : <Check className="h-4 w-4 shrink-0" />}
+          {message.text}
+        </div>
+      )}
+
+      {loading || !activeLayout ? (
+        <div className="flex min-h-96 items-center justify-center text-sm text-slate-500">
+          <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />读取座位表
+        </div>
+      ) : (
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+          {editMode && <div className="xl:hidden">{unassignedPanel}</div>}
+          <section className="min-w-0 space-y-4">
+            {editMode && (
+              <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 pb-3">
+                <span className="text-xs font-semibold text-slate-500">行数</span>
+                <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
+                  <button type="button" title="减少一行" onClick={() => resizeLayout(draft.rowCount - 1, draft.columnCount)} className="p-2 text-slate-600"><Minus className="h-4 w-4" /></button>
+                  <span className="min-w-8 border-x border-slate-200 px-2 py-2 text-center text-xs font-bold">{draft.rowCount}</span>
+                  <button type="button" title="增加一行" onClick={() => resizeLayout(draft.rowCount + 1, draft.columnCount)} className="p-2 text-slate-600"><Plus className="h-4 w-4" /></button>
+                </div>
+                <span className="text-xs font-semibold text-slate-500">列数</span>
+                <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
+                  <button type="button" title="减少一列" onClick={() => resizeLayout(draft.rowCount, draft.columnCount - 1)} className="p-2 text-slate-600"><Minus className="h-4 w-4" /></button>
+                  <span className="min-w-8 border-x border-slate-200 px-2 py-2 text-center text-xs font-bold">{draft.columnCount}</span>
+                  <button type="button" title="增加一列" onClick={() => resizeLayout(draft.rowCount, draft.columnCount + 1)} className="p-2 text-slate-600"><Plus className="h-4 w-4" /></button>
+                </div>
+                <button type="button" onClick={autoArrange} className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
+                  <Sparkles className="h-4 w-4 text-amber-500" />按学号排列
+                </button>
+              </div>
+            )}
+
+            <div className="overflow-x-auto rounded-md border border-slate-200 bg-slate-50 p-3 sm:p-5 dark:border-zinc-800 dark:bg-zinc-950/40">
+              <div className="mx-auto mb-5 flex h-11 min-w-80 max-w-3xl items-center justify-center rounded-sm bg-slate-800 text-xs font-semibold text-white">黑板</div>
+              <div className="mx-auto mb-6 flex h-9 w-36 items-center justify-center rounded-sm border border-amber-200 bg-amber-50 text-xs font-semibold text-amber-900">讲台</div>
+              <div
+                className="grid gap-2.5"
+                style={{
+                  gridTemplateColumns: `repeat(${activeLayout.columnCount}, minmax(74px, 1fr))`,
+                  minWidth: `${activeLayout.columnCount * 82}px`
+                }}
+              >
+                {Array.from({ length: activeLayout.rowCount * activeLayout.columnCount }, (_, seatIndex) => {
+                  const assignment = activeLayout.seats.find(seat => seat.seatIndex === seatIndex);
+                  const student = assignment ? studentById.get(assignment.studentId) : undefined;
+                  const isPlacement = student?.id === placementStudentId;
+                  return (
+                    <button
+                      type="button"
+                      key={seatIndex}
+                      onClick={() => handleSeatClick(seatIndex)}
+                      className={`relative flex aspect-[1.12] min-h-18 flex-col items-center justify-center rounded-md border p-1.5 text-center transition-colors ${
+                        student
+                          ? isPlacement
+                            ? 'border-amber-500 bg-amber-50 ring-2 ring-amber-200'
+                            : 'border-slate-200 bg-white hover:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900'
+                          : editMode
+                            ? 'border-dashed border-slate-300 bg-white/60 hover:border-emerald-400 hover:bg-emerald-50/50'
+                            : 'cursor-default border-dashed border-slate-200 bg-transparent'
+                      }`}
+                      aria-label={student ? `${student.name}，${student.studentNo}` : `空位 ${seatIndex + 1}`}
+                    >
+                      <span className="absolute left-1.5 top-1 text-[9px] text-slate-400">{seatIndex + 1}</span>
+                      {student ? (
+                        <>
+                          <span className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full ${statusMeta[student.status].dot}`} />
+                          <span className="max-w-full truncate text-xs font-bold text-slate-800 dark:text-slate-100">{student.name}</span>
+                          <span className="mt-0.5 text-[10px] text-slate-400">{student.studentNo}</span>
+                          {student.isRepresentative && <Award className="mt-1 h-3.5 w-3.5 text-amber-500" aria-label="课代表" />}
+                        </>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">空位</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-500">
+              {(Object.keys(statusMeta) as Student['status'][]).map(status => (
+                <span key={status} className="inline-flex items-center gap-1.5">
+                  <span className={`h-2.5 w-2.5 rounded-full ${statusMeta[status].dot}`} />
+                  {statusMeta[status].label} {classStudents.filter(student => student.status === status).length}
+                </span>
+              ))}
+            </div>
+          </section>
+
+          <aside className="min-w-0 space-y-4">
+            {editMode && <div className="hidden xl:block">{unassignedPanel}</div>}
+
+            <section className="rounded-md border border-slate-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+              {selectedStudent ? (
+                <div className="space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 font-bold text-emerald-800">{selectedStudent.name[0]}</div>
+                      <div className="min-w-0">
+                        <h3 className="flex items-center gap-1.5 truncate text-base font-bold text-slate-900 dark:text-slate-100">
+                          {selectedStudent.name}
+                          {selectedStudent.isRepresentative && <Award className="h-4 w-4 shrink-0 text-amber-500" />}
+                        </h3>
+                        <p className="text-xs text-slate-400">{selectedStudent.studentNo}</p>
+                      </div>
+                    </div>
+                    <button type="button" title="关闭学生详情" onClick={() => setSelectedStudentId(null)} className="p-1 text-slate-400"><X className="h-4 w-4" /></button>
+                  </div>
+
+                  <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${statusMeta[selectedStudent.status].badge}`}>{statusMeta[selectedStudent.status].label}</span>
+
+                  <div>
+                    <h4 className="mb-2 text-xs font-bold text-slate-500">日常表现</h4>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedStudent.behaviorTags.map(tag => <span key={tag} className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">{tag}</span>)}
+                      {!selectedStudent.behaviorTags.length && <span className="text-xs text-slate-400">暂无记录</span>}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="mb-2 text-xs font-bold text-slate-500">最新课堂观察</h4>
+                    {selectedStudent.observationHistory[0] ? (
+                      <div className="rounded-md bg-slate-50 p-3 text-xs text-slate-600">
+                        <p>{selectedStudent.observationHistory[0].content}</p>
+                        <p className="mt-1 text-[10px] text-slate-400">{selectedStudent.observationHistory[0].date} · {selectedStudent.observationHistory[0].author}</p>
+                      </div>
+                    ) : <p className="text-xs text-slate-400">暂无观察记录</p>}
+                  </div>
+
+                  <div className="space-y-2 border-t border-slate-100 pt-4">
+                    <textarea
+                      value={observationText}
+                      onChange={event => setObservationText(event.target.value)}
+                      placeholder="课堂观察"
+                      className="h-20 w-full resize-none rounded-md border border-slate-200 p-2.5 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void submitObservation()}
+                      disabled={!observationText.trim() || submittingObservation}
+                      className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                    >
+                      {submittingObservation && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                      保存观察
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => onViewStudentProfile(selectedStudent.id)} className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white">学生画像</button>
+                    <button type="button" onClick={() => onNavigate('student-mgmt')} className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">编辑档案</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex min-h-48 flex-col items-center justify-center text-center text-slate-400">
+                  <User className="mb-2 h-9 w-9 stroke-1" />
+                  <p className="text-sm">未选择学生</p>
+                </div>
+              )}
+            </section>
+          </aside>
+        </div>
+      )}
     </div>
   );
 }
-
