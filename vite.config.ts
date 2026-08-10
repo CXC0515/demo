@@ -4,6 +4,7 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const apiTarget = process.env.API_PROXY_TARGET ?? 'http://localhost:3001';
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
@@ -18,8 +19,8 @@ export default defineConfig(() => {
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
-        '/api': 'http://localhost:3001',
-        '/uploads': 'http://localhost:3001',
+        '/api': apiTarget,
+        '/uploads': apiTarget,
       },
     },
   };

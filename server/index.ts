@@ -8,6 +8,7 @@ import express from 'express';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import gradingTasksRouter from './routes/gradingTasks';
+import rosterRouter from './routes/roster';
 import { getModelConfig, isModelConfigured } from './config/modelConfig';
 
 const app = express();
@@ -18,6 +19,7 @@ mkdirSync(uploadDirectory, { recursive: true });
 app.use(express.json({ limit: '1mb' }));
 app.use('/uploads', express.static(uploadDirectory, { index: false, fallthrough: false }));
 app.get('/api/health', (_request, response) => response.json({ ok: true, multimodalConfigured: isModelConfigured(getModelConfig()) }));
+app.use('/api', rosterRouter);
 app.use('/api/grading-tasks', gradingTasksRouter);
 
 app.listen(port, () => {

@@ -4,6 +4,7 @@ dist/
 coverage/
 var/uploads/
 var/data/
+var/backups/
 var/test-fixtures/
 .DS_Store
 *.log
