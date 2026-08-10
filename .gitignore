@@ -2,6 +2,9 @@ node_modules/
 build/
 dist/
 coverage/
+var/uploads/
+var/data/
+var/test-fixtures/
 .DS_Store
 *.log
 .env*

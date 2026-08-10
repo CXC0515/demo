@@ -87,9 +87,11 @@ export interface WorkbenchTask {
   name: string;
   classId: string;
   className: string;
-  node: 'upload' | 'ocr' | 'grading' | 'verify' | 'report' | 'sync';
+  node: 'setup' | 'collection' | 'upload' | 'ocr' | 'grading' | 'verify' | 'report' | 'sync';
   nodeName: string;
   deadline: string;
+  createdAt: string;
+  collectionDeadlineAt: string;
   status: 'pending' | 'running' | 'completed' | 'error';
   progress?: number;
 }
@@ -146,6 +148,8 @@ export interface GradingRubricPoint {
 export interface QuestionGradingState {
   questionId: string;
   standardAnswer: string;
+  standardAnswerOcrText?: string;
+  standardAnswerSourceIds?: string[];
   gradingRubric: GradingRubricPoint[];
   teacherRules: string[];
   rubricVersion: number;
@@ -189,6 +193,133 @@ export interface TimerReminder {
   status: 'active' | 'inactive';
 }
 
+export interface DocumentAsset {
+  id: string;
+  taskId: string;
+  kind: 'assignment' | 'reference-answer' | 'student-submission';
+  fileName: string;
+  mimeType: string;
+  pageCount?: number;
+  publicUrl?: string;
+  status: 'uploaded' | 'processing' | 'ready' | 'needs-review' | 'failed';
+  parseErrorCode?: string;
+}
+
+export type MaterialSourceFormat = 'docx' | 'pdf' | 'image' | 'text';
+
+export interface NormalizedDocumentBlock {
+  id: string;
+  order: number;
+  type: 'heading' | 'paragraph' | 'list-item' | 'table' | 'image' | 'formula' | 'page';
+  text: string;
+  markdown?: string;
+  listLabel?: string;
+  level?: number;
+  pageNumber?: number;
+  confidence?: number;
+}
+
+export interface NormalizedDocumentResource {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  publicUrl: string;
+}
+
+export interface MaterialParseWarning {
+  code: string;
+  message: string;
+  blockId?: string;
+}
+
+export interface NormalizedDocument {
+  assetId: string;
+  sourceFormat: MaterialSourceFormat;
+  markdown: string;
+  sourceMarkdown?: string;
+  sourcePreviewUrl?: string;
+  blocks: NormalizedDocumentBlock[];
+  resources: NormalizedDocumentResource[];
+  warnings: MaterialParseWarning[];
+  pageCount?: number;
+  parsedAt: string;
+}
+
+export interface AnalysisEvidenceRef {
+  assetKind: 'assignment' | 'reference-answer';
+  assetId: string;
+  fileName: string;
+  blockIds: string[];
+  quote: string;
+}
+
+export interface AnalyzedQuestionUnit {
+  displayNo: string;
+  title: string;
+  stem: string;
+  score: number | null;
+  questionType: string;
+  answerRequirement: string;
+  standardAnswer: string;
+  explanation: string;
+  rubricPoints: { point: string; score: number | null; description: string }[];
+  knowledgeCandidates: { nodeId: string; nodeName: string; confidence: number }[];
+  questionSource: AnalysisEvidenceRef;
+  answerSource: AnalysisEvidenceRef | null;
+  confidence: number;
+  reviewReasons: string[];
+}
+
+export interface AnalyzedQuestion extends AnalyzedQuestionUnit {
+  subquestions: AnalyzedQuestionUnit[];
+}
+
+export interface FirstSectionAnalysis {
+  taskId: string;
+  scope: string;
+  status: 'needs-review' | 'confirmed';
+  model: string;
+  materialAssetIds: string[];
+  questions: AnalyzedQuestion[];
+  createdAt: string;
+}
+
+export interface SourceEvidence {
+  id: string;
+  assetId: string;
+  assetKind: DocumentAsset['kind'];
+  fileName: string;
+  pageNumber: number;
+  boundingBox: { x: number; y: number; width: number; height: number };
+  ocrText: string;
+  confidence: number;
+  imageUrl?: string;
+  isMock?: boolean;
+}
+
+export interface KnowledgeLink {
+  nodeId: string;
+  nodeName: string;
+  confidence: number;
+  status: 'suggested' | 'confirmed';
+}
+
+export interface GradingQuestion {
+  id: string;
+  displayNo: string;
+  parentId?: string;
+  title: string;
+  score: number;
+  knowledgePoint: string;
+  knowledgeLinks: KnowledgeLink[];
+  desc: string;
+  stem?: string;
+  aiQuestionType?: string;
+  answerRequirement?: string;
+  parseConfidence: number;
+  sourceEvidenceIds: string[];
+}
+
 export interface WorkflowState {
   currentStep: number; // 1-10
   taskName: string;
@@ -196,15 +327,18 @@ export interface WorkflowState {
   deadline: string;
   relatedText: string;
   homeworkType: 'reading' | 'writing' | 'dictation' | 'comprehensive';
-  questions: {
-    id: string;
-    title: string;
-    score: number;
-    knowledgePoint: string;
-    desc: string;
-    stem?: string;
-    aiQuestionType?: string;
-  }[];
+  assignment: {
+    status: 'draft' | 'assigned';
+    analysisStatus: 'idle' | 'uploading' | 'parsing' | 'needs-review' | 'ready' | 'failed';
+    questionFileNames: string[];
+    answerFileNames: string[];
+    note: string;
+    assets: DocumentAsset[];
+    documents?: NormalizedDocument[];
+    firstSectionAnalysis?: FirstSectionAnalysis;
+  };
+  questions: GradingQuestion[];
+  sourceEvidence: SourceEvidence[];
   standardAnswer: string;
   gradingRubric: GradingRubricPoint[];
   uploadProgress: number;

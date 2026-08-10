@@ -4,14 +4,16 @@
  */
 
 import { useState } from 'react';
-import { ReviewItem, SchoolClass, WorkbenchTask, WorkflowState } from '../../domain/types';
+import { KnowledgeNode, ReviewItem, SchoolClass, WorkbenchTask, WorkflowState } from '../../domain/types';
 import GradingTaskManagement from './GradingTaskManagement';
 import GradingWorkflow from './GradingWorkflow';
 
 interface GradingWorkspaceProps {
   tasks: WorkbenchTask[];
   classes: SchoolClass[];
-  workflowState: WorkflowState;
+  defaultClassId: string;
+  workflowStates: Record<string, WorkflowState>;
+  knowledgeNodes: KnowledgeNode[];
   reviewQueue: ReviewItem[];
   lowConfidenceThreshold: number;
   ocrHumanReviewThreshold: number;
@@ -19,8 +21,9 @@ interface GradingWorkspaceProps {
   onCreateTask: (task: WorkbenchTask) => void;
   onEnterWorkflow: (task: WorkbenchTask) => void;
   onSelectTask: (task: WorkbenchTask) => void;
-  onUpdateState: (updated: Partial<WorkflowState>) => void;
-  onSyncToProfiles: () => void;
+  onUpdateTask: (task: WorkbenchTask) => void;
+  onUpdateState: (taskId: string, updated: Partial<WorkflowState>) => void;
+  onSyncToProfiles: (aiResults: WorkflowState['aiResults']) => void;
   onConfirmReview: (reviewId: string, finalScore: number, changeReason: string) => void;
   onBounceToOcr: (reviewId: string) => void;
   onMarkAsSample: (studentName: string) => void;
@@ -30,7 +33,9 @@ interface GradingWorkspaceProps {
 export default function GradingWorkspace({
   tasks,
   classes,
-  workflowState,
+  defaultClassId,
+  workflowStates,
+  knowledgeNodes,
   reviewQueue,
   lowConfidenceThreshold,
   ocrHumanReviewThreshold,
@@ -38,6 +43,7 @@ export default function GradingWorkspace({
   onCreateTask,
   onEnterWorkflow,
   onSelectTask,
+  onUpdateTask,
   onUpdateState,
   onSyncToProfiles,
   onConfirmReview,
@@ -64,7 +70,7 @@ export default function GradingWorkspace({
         <GradingTaskManagement
           tasks={tasks}
           classes={classes}
-          workflowState={workflowState}
+          defaultClassId={defaultClassId}
           reviewQueue={reviewQueue}
           onCreateTask={onCreateTask}
           onEnterWorkflow={enterTask}
@@ -74,6 +80,9 @@ export default function GradingWorkspace({
   }
 
   const taskReviews = reviewQueue.filter(item => item.taskId === selectedTask.id || item.taskName === selectedTask.name);
+  const workflowState = workflowStates[selectedTask.id];
+
+  if (!workflowState) return null;
 
   return (
     <section className="animate-fade-in" id="grading-workspace-page">
@@ -82,13 +91,15 @@ export default function GradingWorkspace({
         classes={classes}
         tasks={tasks}
         selectedTask={selectedTask}
+        knowledgeNodes={knowledgeNodes}
         reviewQueue={taskReviews}
         lowConfidenceThreshold={lowConfidenceThreshold}
         ocrHumanReviewThreshold={ocrHumanReviewThreshold}
         ocrAutoPassThreshold={ocrAutoPassThreshold}
         onBack={() => setSelectedTaskId(null)}
         onSelectTask={selectTask}
-        onUpdateState={onUpdateState}
+        onUpdateTask={onUpdateTask}
+        onUpdateState={(updated) => onUpdateState(selectedTask.id, updated)}
         onSyncToProfiles={onSyncToProfiles}
         onConfirmReview={onConfirmReview}
         onBounceToOcr={onBounceToOcr}
