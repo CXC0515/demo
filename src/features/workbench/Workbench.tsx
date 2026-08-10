@@ -123,7 +123,7 @@ export default function Workbench({
               进入虚拟教室
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              通过 2D/3D 固定视角，直观浏览班级学生座位排布与最新学习状态警报，实时关注班级氛围。
+              查看班级真实座位安排和学生近期状态，快速进入学生档案与课堂观察。
             </p>
           </div>
           <button 

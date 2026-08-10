@@ -41,7 +41,7 @@ export default function ClassManagement({
     headTeacher: '',
     chineseTeacher: '王老师',
     textbookVersion: '统编版七年级下册',
-    studentCount: 40,
+    studentCount: 0,
     representatives: [],
     defaultSubmitTime: '08:00',
     status: 'active'
@@ -59,7 +59,7 @@ export default function ClassManagement({
       headTeacher: '',
       chineseTeacher: '王老师',
       textbookVersion: '统编版七年级下册',
-      studentCount: 40,
+      studentCount: 0,
       representatives: [],
       defaultSubmitTime: '08:00',
       status: 'active'
@@ -102,7 +102,7 @@ export default function ClassManagement({
   };
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 h-full animate-fade-in" id="class-mgmt-page">
+    <div className="flex flex-col 2xl:flex-row gap-6 h-full animate-fade-in" id="class-mgmt-page">
       
       {/* Main Table */}
       <div className="flex-1 flex flex-col space-y-4 min-w-0">
@@ -195,7 +195,7 @@ export default function ClassManagement({
       </div>
 
       {/* Right Details Drawer */}
-      <div className={`w-full lg:w-[340px] flex-shrink-0 flex flex-col ${selectedClass ? '' : 'hidden lg:flex'}`}>
+      <div className={`w-full 2xl:w-[340px] flex-shrink-0 flex flex-col ${selectedClass ? '' : 'hidden 2xl:flex'}`}>
         <div className="flex-1 glass-panel rounded-3xl p-6 flex flex-col justify-between space-y-6 min-h-[460px]">
           {selectedClass ? (
             <div className="space-y-6 animate-fade-in">
@@ -370,13 +370,11 @@ export default function ClassManagement({
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">预计学生人数</label>
-                  <input
-                    type="number"
-                    value={formData.studentCount || 40}
-                    onChange={(e) => setFormData({ ...formData, studentCount: parseInt(e.target.value) || 40 })}
-                    className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-zinc-700 focus:outline-none"
-                  />
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">当前名册人数</label>
+                  <div className="w-full px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-zinc-700 text-sm font-semibold">
+                    {formData.studentCount ?? 0} 人
+                  </div>
+                  <p className="text-[11px] text-slate-400">由在班学生名册自动统计</p>
                 </div>
               </div>
 

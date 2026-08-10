@@ -3,22 +3,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { 
-  Users, UserPlus, Upload, FileSpreadsheet, Edit, Trash2, Tag, 
-  ArrowLeftRight, Filter, Search, X, Check, Eye, HelpCircle, Award, Sparkles 
+import React, { useEffect, useState } from 'react';
+import {
+  Users, UserPlus, FileSpreadsheet, Edit, Trash2, Tag,
+  ArrowLeftRight, Filter, Search, X, Eye, HelpCircle, Award, Sparkles
 } from 'lucide-react';
-import { Student, SchoolClass, StudentStatus, ParentInfo } from '../../domain/types';
+import { Student, SchoolClass, StudentStatus, ParentInfo, RosterStudent } from '../../domain/types';
+import { RosterImportResult } from '../../services/rosterApi';
 
 interface StudentManagementProps {
-  students: Student[];
+  students: RosterStudent[];
   classes: SchoolClass[];
-  onAddStudent: (newStudent: Student) => void;
-  onUpdateStudent: (updatedStudent: Student) => void;
+  onAddStudent: (newStudent: Student) => Promise<boolean>;
+  onUpdateStudent: (updatedStudent: Student) => Promise<boolean>;
   onDeleteStudent: (studentId: string) => void;
-  onBulkImport: (importedStudents: Student[]) => void;
+  onBulkImport: (
+    classId: string,
+    rows: { studentNo: string; name: string; gender?: 'male' | 'female' }[]
+  ) => Promise<RosterImportResult>;
   onBulkMoveClass: (studentIds: string[], targetClassId: string) => void;
   onBulkAddTags: (studentIds: string[], tags: string[]) => void;
+  targetStudentId?: string | null;
+  onTargetStudentHandled?: () => void;
 }
 
 export default function StudentManagement({
@@ -29,7 +35,9 @@ export default function StudentManagement({
   onDeleteStudent,
   onBulkImport,
   onBulkMoveClass,
-  onBulkAddTags
+  onBulkAddTags,
+  targetStudentId,
+  onTargetStudentHandled
 }: StudentManagementProps) {
   const [selectedClassId, setSelectedClassId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -39,8 +47,14 @@ export default function StudentManagement({
   const [isEditMode, setIsEditMode] = useState(false);
   const [showBulkMoveModal, setShowBulkMoveModal] = useState(false);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [showImportToast, setShowImportToast] = useState(false);
   const [importCount, setImportCount] = useState(0);
+  const [importRejectedCount, setImportRejectedCount] = useState(0);
+  const [importClassId, setImportClassId] = useState('c5');
+  const [importText, setImportText] = useState('');
+  const [importError, setImportError] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
   const [otherRelation, setOtherRelation] = useState('');
 
   // Form states for Student add/edit
@@ -68,6 +82,17 @@ export default function StudentManagement({
   const dailyBehaviorTags = ['课堂积极', '注意力易分散', '作业拖延', '书写认真', '情绪敏感', '同伴关系良好'];
   const selectedFamilyTags = (formData.familyStatusTag || '').split('、').filter(Boolean);
   const selectedBehaviorTags = formData.behaviorTags || [];
+
+  useEffect(() => {
+    if (!targetStudentId) return;
+    const targetStudent = students.find(student => student.id === targetStudentId);
+    if (!targetStudent) return;
+
+    setSelectedClassId(targetStudent.classId);
+    setSearchQuery('');
+    setSelectedStudentId(targetStudent.id);
+    onTargetStudentHandled?.();
+  }, [onTargetStudentHandled, students, targetStudentId]);
 
   // Filter students
   const filteredStudents = students.filter(s => {
@@ -109,13 +134,16 @@ export default function StudentManagement({
   };
 
   const handleOpenAdd = () => {
+    const defaultClassId = selectedClassId === 'all'
+      ? classes.find(item => item.id === 'c5' && item.status === 'active')?.id ?? classes.find(item => item.status === 'active')?.id ?? ''
+      : selectedClassId;
     setIsEditMode(false);
     setOtherRelation('');
     setFormData({
       id: 's' + (students.length + 1),
       name: '',
-      studentNo: '20260703' + String(students.length + 1).padStart(2, '0'),
-      classId: selectedClassId === 'all' ? 'c1' : selectedClassId,
+      studentNo: '',
+      classId: defaultClassId,
       gender: 'male',
       isRepresentative: false,
       status: 'good',
@@ -138,9 +166,9 @@ export default function StudentManagement({
     setShowAddEditModal(true);
   };
 
-  const handleSaveStudent = () => {
-    if (!formData.name || !formData.studentNo || !formData.parent?.name || !formData.parent?.phone) {
-      alert('请填写完整的学生姓名、学号以及家长联系方式！');
+  const handleSaveStudent = async () => {
+    if (!formData.name || !formData.studentNo || !formData.classId) {
+      alert('请填写学生姓名、班内学号并选择班级。');
       return;
     }
     const currentClass = classes.find(c => c.id === formData.classId);
@@ -156,61 +184,58 @@ export default function StudentManagement({
       className: currentClass ? currentClass.name : ''
     } as Student;
 
-    if (isEditMode) {
-      onUpdateStudent(updated);
-    } else {
-      onAddStudent(updated);
-    }
-    setShowAddEditModal(false);
+    const saved = isEditMode
+      ? await onUpdateStudent(updated)
+      : await onAddStudent(updated);
+    if (saved) setShowAddEditModal(false);
   };
 
-  const handleSimulateBulkImport = () => {
-    // Simulated bulk import from an Excel worksheet of 5 new students for Class 1
-    const importPayload: Student[] = [
-      {
-        id: 's_imp1',
-        name: '董小宛',
-        studentNo: '2026070311',
-        classId: 'c1',
-        className: '七年级 3 班',
-        gender: 'female',
-        isRepresentative: false,
-        status: 'good',
-        behaviorTags: ['思维敏捷', '写作新颖'],
-        parent: { name: '董国昌', phone: '13911112222', relation: '父亲', remark: '关心孩子古诗词素养。' },
-        familyStatus: 'normal',
-        observationHistory: [],
-        strongKnowledge: ['主旨理解', '想象作文'],
-        weakKnowledge: ['字词默写'],
-        recentHomeworkTrend: [90, 88, 92, 95, 94],
-        homeworkHistory: []
-      },
-      {
-        id: 's_imp2',
-        name: '李修齐',
-        studentNo: '2026070312',
-        classId: 'c1',
-        className: '七年级 3 班',
-        gender: 'male',
-        isRepresentative: false,
-        status: 'good',
-        behaviorTags: ['课堂勤勉', '背诵迅速'],
-        parent: { name: '李瑞', phone: '13633334444', relation: '母亲', remark: '希望语文成绩保持前十。' },
-        familyStatus: 'normal',
-        observationHistory: [],
-        strongKnowledge: ['字词默写', '说明文阅读'],
-        weakKnowledge: ['修辞手法鉴赏'],
-        recentHomeworkTrend: [85, 88, 87, 89, 91],
-        homeworkHistory: []
-      }
-    ];
+  const handleOpenImport = () => {
+    const targetClassId = selectedClassId === 'all'
+      ? classes.find(item => item.id === 'c5' && item.status === 'active')?.id ?? classes.find(item => item.status === 'active')?.id ?? ''
+      : selectedClassId;
+    setImportClassId(targetClassId);
+    setImportText('');
+    setImportError(null);
+    setShowImportModal(true);
+  };
 
-    onBulkImport(importPayload);
-    setImportCount(importPayload.length);
-    setShowImportToast(true);
-    setTimeout(() => {
-      setShowImportToast(false);
-    }, 4000);
+  const handleImport = async () => {
+    const lines = importText.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
+    const dataLines = lines[0]?.includes('学号') ? lines.slice(1) : lines;
+    const rows: { studentNo: string; name: string; gender?: 'male' | 'female' }[] = [];
+    for (let index = 0; index < dataLines.length; index += 1) {
+      const line = dataLines[index];
+      const columns = line.split(line.includes('\t') ? '\t' : ',').map(item => item.trim());
+      if (columns.length < 2 || !columns[0] || !columns[1]) {
+        setImportError(`第 ${index + 1} 行缺少学号或姓名`);
+        return;
+      }
+      const gender = columns[2] === '女' || columns[2]?.toLowerCase() === 'female'
+        ? 'female' as const
+        : columns[2] === '男' || columns[2]?.toLowerCase() === 'male'
+          ? 'male' as const
+          : undefined;
+      rows.push({ studentNo: columns[0], name: columns[1], gender });
+    }
+    if (!rows.length) {
+      setImportError('请至少输入一名学生。');
+      return;
+    }
+    setIsImporting(true);
+    setImportError(null);
+    try {
+      const result = await onBulkImport(importClassId, rows);
+      setImportCount(result.imported.length);
+      setImportRejectedCount(result.rejected.length);
+      setShowImportModal(false);
+      setShowImportToast(true);
+      setTimeout(() => setShowImportToast(false), 4000);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : '名册导入失败');
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   const handleApplyBulkMove = () => {
@@ -228,21 +253,21 @@ export default function StudentManagement({
   };
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 h-full animate-fade-in" id="student-mgmt-page">
+    <div className="flex flex-col gap-4 min-h-full" id="student-mgmt-page">
       
       {/* Table Section */}
       <div className="flex-1 flex flex-col space-y-4 min-w-0">
         
         {/* Header toolbar */}
-        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 glass-panel rounded-2xl p-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+        <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3 glass-panel rounded-2xl p-4">
+          <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 min-w-0">
             <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
               <Users className="w-5 h-5 text-emerald-700 dark:text-emerald-400" />
               学生管理
             </h2>
             
             {/* Search Input */}
-            <div className="relative w-48">
+            <div className="relative flex-1 min-w-0">
               <input
                 id="student-search-input"
                 type="text"
@@ -255,7 +280,7 @@ export default function StudentManagement({
             </div>
 
             {/* Class Filter */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 shrink-0">
               <Filter className="w-3.5 h-3.5 text-slate-400" />
               <select
                 id="student-class-filter"
@@ -263,7 +288,7 @@ export default function StudentManagement({
                 onChange={(e) => setSelectedClassId(e.target.value)}
                 className="px-2.5 py-1.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs text-slate-600 dark:text-slate-300 font-medium focus:outline-none cursor-pointer"
               >
-                <option value="all">全班级</option>
+                <option value="all">所有班级</option>
                 {classes.filter(c => c.status === 'active').map(c => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
@@ -271,13 +296,13 @@ export default function StudentManagement({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={handleSimulateBulkImport}
+              onClick={handleOpenImport}
               className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-850 dark:hover:bg-zinc-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer border border-slate-200 dark:border-zinc-700"
             >
               <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-              批量导入 Excel
+              批量导入名册
             </button>
             <button
               id="add-student-btn"
@@ -321,221 +346,246 @@ export default function StudentManagement({
           </div>
         )}
 
-        {/* Students list Table */}
-        <div className="glass-panel rounded-3xl overflow-hidden flex-1">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-600 dark:text-slate-300">
-              <thead className="bg-slate-50 dark:bg-zinc-800/50 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-zinc-800">
-                <tr>
-                  <th className="px-5 py-4 w-10">
-                    <input
-                      type="checkbox"
-                      checked={selectedRows.length === filteredStudents.length && filteredStudents.length > 0}
-                      onChange={handleSelectAll}
-                      className="accent-emerald-750"
-                    />
-                  </th>
-                  <th className="px-5 py-4">学生姓名</th>
-                  <th className="px-5 py-4 font-mono">学号</th>
-                  <th className="px-5 py-4">班级</th>
-                  <th className="px-5 py-4">性别</th>
-                  <th className="px-5 py-4">学情状态</th>
-                  <th className="px-5 py-4">日常表现标签</th>
-                  <th className="px-5 py-4">家长联系人</th>
-                  <th className="px-5 py-4 text-right">家庭关注</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/40 text-xs">
-                {filteredStudents.map(s => {
-                  const isSelected = selectedStudentId === s.id;
-                  const isRowChecked = selectedRows.includes(s.id);
-
-                  return (
-                    <tr 
-                      key={s.id}
-                      onClick={() => setSelectedStudentId(s.id)}
-                      className={`hover:bg-slate-50/50 dark:hover:bg-zinc-800/30 transition-all cursor-pointer ${
-                        isSelected ? 'bg-emerald-600/5 dark:bg-emerald-500/5' : ''
-                      }`}
-                    >
-                      <td className="px-5 py-3" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={isRowChecked}
-                          onChange={() => handleSelectRow(s.id)}
-                          className="accent-emerald-700"
-                        />
-                      </td>
-                      <td className="px-5 py-3 font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                        {s.name}
-                        {s.isRepresentative && (
-                          <span className="px-1 bg-amber-100 text-amber-800 text-[9px] font-medium rounded">课代</span>
+        {/* Desktop and tablet roster */}
+        <div className="hidden md:block glass-panel rounded-2xl overflow-hidden flex-1">
+          <table className="w-full table-auto text-left text-sm text-slate-600 dark:text-slate-300">
+            <thead className="bg-slate-50 dark:bg-zinc-800/50 text-[11px] font-bold text-slate-400 border-b border-slate-100 dark:border-zinc-800">
+              <tr>
+                <th className="px-3 py-3">
+                  <input
+                    type="checkbox"
+                    checked={selectedRows.length === filteredStudents.length && filteredStudents.length > 0}
+                    onChange={handleSelectAll}
+                    className="accent-emerald-700"
+                    aria-label="选择当前列表全部学生"
+                  />
+                </th>
+                <th className="px-3 py-3 whitespace-nowrap">学生</th>
+                <th className="px-3 py-3 whitespace-nowrap">班级</th>
+                <th className="px-3 py-3 whitespace-nowrap">性别</th>
+                <th className="px-3 py-3 whitespace-nowrap">在班状态</th>
+                <th className="px-3 py-3 whitespace-nowrap">学情状态</th>
+                <th className="px-3 py-3">日常表现</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/40 text-xs">
+              {filteredStudents.map(student => {
+                const isSelected = selectedStudentId === student.id;
+                const isRowChecked = selectedRows.includes(student.id);
+                return (
+                  <tr
+                    key={student.id}
+                    onClick={() => setSelectedStudentId(student.id)}
+                    className={`hover:bg-slate-50/70 dark:hover:bg-zinc-800/30 transition-colors cursor-pointer ${isSelected ? 'bg-emerald-600/5 dark:bg-emerald-500/5' : ''}`}
+                  >
+                    <td className="px-3 py-3" onClick={(event) => event.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isRowChecked}
+                        onChange={() => handleSelectRow(student.id)}
+                        className="accent-emerald-700"
+                        aria-label={`选择 ${student.name}`}
+                      />
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-2 whitespace-nowrap">
+                        <span className="font-semibold text-slate-800 dark:text-slate-100">{student.name}</span>
+                        {student.isRepresentative && (
+                          <span className="shrink-0 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-semibold rounded">课代表</span>
                         )}
-                      </td>
-                      <td className="px-5 py-3 font-mono text-slate-400">{s.studentNo}</td>
-                      <td className="px-5 py-3">{s.className}</td>
-                      <td className="px-5 py-3">{s.gender === 'male' ? '男' : '女'}</td>
-                      <td className="px-5 py-3">{getStatusBadge(s.status)}</td>
-                      <td className="px-5 py-3">
-                        <div className="flex flex-wrap gap-1 max-w-[180px]">
-                          {s.behaviorTags.slice(0, 2).map((t, idx) => (
-                            <span key={idx} className="px-1.5 py-0.2 bg-slate-100 dark:bg-zinc-800 rounded text-slate-500 text-[10px] whitespace-nowrap">
-                              {t}
-                            </span>
-                          ))}
-                          {s.behaviorTags.length > 2 && (
-                            <span className="text-[10px] text-slate-400">+{s.behaviorTags.length - 2}</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-5 py-3">{s.parent.name} ({s.parent.relation})</td>
-                      <td className="px-5 py-3 text-right">
-                        {s.familyStatusTag ? (
-                          <span className="px-1.5 py-0.5 bg-rose-100 text-rose-800 dark:bg-rose-950/20 dark:text-rose-400 rounded font-semibold text-[10px]">
-                            {s.familyStatusTag}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">普通</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-
-                {filteredStudents.length === 0 && (
-                  <tr>
-                    <td colSpan={9} className="px-6 py-12 text-center text-slate-400">
-                      未找到符合筛选条件的学生。
+                      </div>
+                      <span className="block mt-0.5 font-mono text-[11px] text-slate-400 whitespace-nowrap">{student.studentNo}</span>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">{student.className}</td>
+                    <td className="px-3 py-3 whitespace-nowrap">{student.gender === 'male' ? '男' : '女'}</td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-semibold">
+                        {student.enrollmentStatus === 'active' ? '在班' : student.enrollmentStatus === 'suspended' ? '暂缓' : '已离班'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">{getStatusBadge(student.status)}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {student.behaviorTags.slice(0, 2).map(tag => (
+                          <span key={tag} className="px-1.5 py-0.5 bg-slate-100 dark:bg-zinc-800 rounded text-slate-500 text-[10px] whitespace-nowrap">{tag}</span>
+                        ))}
+                        {student.behaviorTags.length > 2 && <span className="text-[10px] text-slate-400">+{student.behaviorTags.length - 2}</span>}
+                      </div>
                     </td>
                   </tr>
-                )}
-              </tbody>
-            </table>
+                );
+              })}
+              {filteredStudents.length === 0 && (
+                <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-400">未找到符合筛选条件的学生。</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile roster */}
+        <div className="md:hidden glass-panel rounded-2xl overflow-hidden divide-y divide-slate-100 dark:divide-zinc-800">
+          {filteredStudents.map(student => (
+            <div key={student.id} className="flex items-start gap-3 p-4">
+              <input
+                type="checkbox"
+                checked={selectedRows.includes(student.id)}
+                onChange={() => handleSelectRow(student.id)}
+                className="mt-1 accent-emerald-700"
+                aria-label={`选择 ${student.name}`}
+              />
+              <button type="button" onClick={() => setSelectedStudentId(student.id)} className="flex-1 min-w-0 text-left">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0 whitespace-nowrap">
+                    <span className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">{student.name}</span>
+                    {student.isRepresentative && <span className="shrink-0 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-semibold rounded">课代表</span>}
+                  </div>
+                  <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-semibold">
+                    {student.enrollmentStatus === 'active' ? '在班' : student.enrollmentStatus === 'suspended' ? '暂缓' : '已离班'}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+                  <span className="font-mono">{student.studentNo}</span>
+                  <span>{student.className}</span>
+                  <span>{student.gender === 'male' ? '男' : '女'}</span>
+                  <span>{student.status === 'outstanding' ? '表现突出' : student.status === 'warning' ? '需要关注' : student.status === 'risk' ? '近期风险' : '状态良好'}</span>
+                </div>
+              </button>
+            </div>
+          ))}
+          {filteredStudents.length === 0 && <div className="px-6 py-12 text-center text-sm text-slate-400">未找到符合筛选条件的学生。</div>}
+        </div>
+      </div>
+
+      {selectedStudent && (
+        <>
+          <button type="button" className="fixed inset-0 z-40 bg-black/30" onClick={() => setSelectedStudentId(null)} aria-label="关闭学生详情" />
+          <aside role="dialog" aria-modal="true" aria-label={`${selectedStudent.name}的学生详情`} className="fixed inset-y-0 right-0 z-50 w-full sm:max-w-md bg-white dark:bg-zinc-900 shadow-2xl flex flex-col animate-fade-in">
+            <div className="shrink-0 flex items-start justify-between gap-4 p-5 border-b border-slate-100 dark:border-zinc-800">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 whitespace-nowrap">
+                  <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 truncate">{selectedStudent.name}</h3>
+                  {selectedStudent.isRepresentative && <span className="shrink-0 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-semibold rounded">课代表</span>}
+                </div>
+                <p className="mt-1 text-xs font-mono text-slate-400">{selectedStudent.studentNo}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedStudentId(null)} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-zinc-800" aria-label="关闭">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-5" id="student-mgmt-drawer">
+              <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 dark:bg-zinc-800/40 rounded-lg text-xs text-slate-600 dark:text-slate-300">
+                <div><span className="text-slate-400">所属班级</span><p className="mt-1 font-semibold">{selectedStudent.className}</p></div>
+                <div><span className="text-slate-400">性别</span><p className="mt-1 font-semibold">{selectedStudent.gender === 'male' ? '男' : '女'}</p></div>
+                <div><span className="text-slate-400">在班状态</span><p className="mt-1 font-semibold">{selectedStudent.enrollmentStatus === 'active' ? '在班' : selectedStudent.enrollmentStatus === 'suspended' ? '暂缓' : '已离班'}</p></div>
+                <div><span className="text-slate-400">学情状态</span><div className="mt-1">{getStatusBadge(selectedStudent.status)}</div></div>
+              </div>
+
+              <section className="space-y-2">
+                <h4 className="text-xs font-bold text-slate-400">家长联系信息</h4>
+                {selectedStudent.parent.name || selectedStudent.parent.phone || selectedStudent.parent.remark ? (
+                  <div className="p-3 border border-slate-200 dark:border-zinc-800 rounded-lg space-y-2 text-xs">
+                    <div className="flex flex-wrap justify-between gap-2 font-medium text-slate-700 dark:text-slate-300">
+                      <span>{selectedStudent.parent.name || '未填写姓名'}{selectedStudent.parent.relation ? `（${selectedStudent.parent.relation}）` : ''}</span>
+                      <span className="font-mono text-slate-500">{selectedStudent.parent.phone || '未填写电话'}</span>
+                    </div>
+                    {selectedStudent.parent.remark && <p className="p-2 bg-amber-500/5 rounded text-[11px] text-slate-500">{selectedStudent.parent.remark}</p>}
+                  </div>
+                ) : <p className="p-3 bg-slate-50 dark:bg-zinc-800/40 rounded-lg text-xs text-slate-400">尚未录入家长联系信息</p>}
+              </section>
+
+              <section className="space-y-2">
+                <h4 className="text-xs font-bold text-slate-400">日常表现标签</h4>
+                <div className="flex flex-wrap gap-2">
+                  {selectedStudent.behaviorTags.length
+                    ? selectedStudent.behaviorTags.map(tag => <span key={tag} className="px-2 py-1 rounded bg-slate-100 dark:bg-zinc-800 text-xs text-slate-600 dark:text-slate-300">{tag}</span>)
+                    : <span className="text-xs text-slate-400">暂无标签</span>}
+                </div>
+              </section>
+
+              <section className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 rounded-lg bg-emerald-50/70 dark:bg-emerald-950/20"><h4 className="font-bold text-emerald-800 dark:text-emerald-300">学科优势</h4><p className="mt-2 text-slate-600 dark:text-slate-300">{selectedStudent.strongKnowledge.join('、') || '暂无记录'}</p></div>
+                <div className="p-3 rounded-lg bg-rose-50/70 dark:bg-rose-950/20"><h4 className="font-bold text-rose-800 dark:text-rose-300">学科短板</h4><p className="mt-2 text-slate-600 dark:text-slate-300">{selectedStudent.weakKnowledge.join('、') || '暂无记录'}</p></div>
+              </section>
+            </div>
+            <div className="shrink-0 grid grid-cols-2 gap-2 p-4 border-t border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+              <button
+                type="button"
+                onClick={() => { handleOpenEdit(selectedStudent); setSelectedStudentId(null); }}
+                className="py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5"
+              >
+                <Edit className="w-4 h-4" />修改档案
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm(`确定要归档/删除学生 ${selectedStudent.name} 吗？`)) {
+                    onDeleteStudent(selectedStudent.id);
+                    setSelectedStudentId(null);
+                  }
+                }}
+                className="py-2.5 bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-950/20 dark:text-red-400 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5"
+              >
+                <Trash2 className="w-4 h-4" />移出名册
+              </button>
+            </div>
+          </aside>
+        </>
+      )}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl border border-slate-100 dark:border-zinc-800">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">批量导入学生名册</h3>
+              <button type="button" onClick={() => setShowImportModal(false)} className="p-1 text-slate-400 hover:text-slate-600" aria-label="关闭">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-500">目标班级</label>
+              <select
+                value={importClassId}
+                onChange={(event) => setImportClassId(event.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-sm"
+              >
+                {classes.filter(item => item.status === 'active').map(item => (
+                  <option key={item.id} value={item.id}>{item.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-500">名册内容</label>
+              <textarea
+                value={importText}
+                onChange={(event) => setImportText(event.target.value)}
+                placeholder={'学号\t姓名\t性别\n05\t张三\t男\n06\t李四\t女'}
+                rows={10}
+                className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 font-mono text-sm resize-y"
+              />
+              <p className="text-[11px] text-slate-400">可直接粘贴 Excel 三列，也支持逗号分隔；性别列可省略。</p>
+            </div>
+            {importError && <p className="text-xs font-semibold text-red-600">{importError}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setShowImportModal(false)} className="px-4 py-2 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold">取消</button>
+              <button
+                type="button"
+                onClick={() => void handleImport()}
+                disabled={isImporting || !importClassId}
+                className="px-4 py-2 rounded-lg bg-emerald-700 text-white text-xs font-semibold disabled:opacity-50"
+              >
+                {isImporting ? '正在导入...' : '确认导入'}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Right Details Drawer */}
-      <div className={`w-full lg:w-[350px] flex-shrink-0 flex flex-col ${selectedStudent ? '' : 'hidden lg:flex'}`}>
-        <div className="flex-1 glass-panel rounded-3xl p-5 flex flex-col justify-between space-y-5 overflow-y-auto max-h-[85vh]">
-          {selectedStudent ? (
-            <div className="space-y-5 animate-fade-in" id="student-mgmt-drawer">
-              
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">
-                    {selectedStudent.name}
-                  </h3>
-                  <p className="text-xs text-slate-400">学号：{selectedStudent.studentNo}</p>
-                </div>
-                <div className="text-right">
-                  {getStatusBadge(selectedStudent.status)}
-                </div>
-              </div>
-
-              {/* Class & gender */}
-              <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 dark:bg-zinc-800/40 rounded-xl text-xs text-slate-600 dark:text-slate-300">
-                <div>
-                  <span className="text-slate-400">所属班级：</span>
-                  <p className="font-semibold">{selectedStudent.className}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400">生理性别：</span>
-                  <p className="font-medium">{selectedStudent.gender === 'male' ? '男生 (Male)' : '女生 (Female)'}</p>
-                </div>
-              </div>
-
-              {/* Parent Details section */}
-              <div className="space-y-1.5">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">家长联系信息</span>
-                <div className="p-3 border border-slate-150 dark:border-zinc-800 rounded-xl space-y-2 text-xs">
-                  <div className="flex justify-between font-medium text-slate-700 dark:text-slate-300">
-                    <span>{selectedStudent.parent.name} ({selectedStudent.parent.relation})</span>
-                    <span className="font-mono text-slate-500">{selectedStudent.parent.phone}</span>
-                  </div>
-                  <div className="p-2 bg-amber-500/5 rounded-lg text-slate-500 text-[11px]">
-                    <span className="font-semibold block">沟通备注:</span>
-                    <p className="italic">“{selectedStudent.parent.remark}”</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Daily Performance parameters */}
-              <div className="space-y-2">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">日常表现评估</span>
-                <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300">
-                  <div className="flex items-center justify-between">
-                    <span>课堂参与：</span>
-                    <span className="font-medium px-2 py-0.5 bg-emerald-50 text-emerald-800 rounded">活跃/高频发言</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>作业完成习惯：</span>
-                    <span className={`font-medium px-2 py-0.5 rounded ${
-                      selectedStudent.status === 'risk' ? 'bg-red-50 text-red-800' : 'bg-emerald-50 text-emerald-800'
-                    }`}>
-                      {selectedStudent.status === 'risk' ? '时常滞后、漏交' : '良好/准时'}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>情绪表现：</span>
-                    <span className="font-medium">稳定 / 平稳</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Strengths & Weaknesses */}
-              <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 dark:bg-zinc-800/20 text-xs">
-                <div>
-                  <span className="text-slate-400 font-bold block mb-1">学科优势：</span>
-                  <p className="text-slate-700 dark:text-slate-300 font-medium">✓ {selectedStudent.strongKnowledge.join('、') || '无明显优势'}</p>
-                </div>
-                <div className="mt-2">
-                  <span className="text-slate-400 font-bold block mb-1">学科短板：</span>
-                  <p className="text-red-700 dark:text-red-400 font-medium">✗ {selectedStudent.weakKnowledge.join('、') || '无明显短板'}</p>
-                </div>
-              </div>
-
-              {/* Actions drawer */}
-              <div className="space-y-2 pt-4 border-t border-slate-150 dark:border-zinc-800">
-                <button
-                  onClick={() => handleOpenEdit(selectedStudent)}
-                  className="w-full py-2 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl flex items-center justify-center gap-1 active:scale-98 cursor-pointer"
-                >
-                  <Edit className="w-4 h-4" />
-                  修改学生档案
-                </button>
-                <button
-                  onClick={() => {
-                    if (confirm(`确定要归档/删除学生 ${selectedStudent.name} 吗？`)) {
-                      onDeleteStudent(selectedStudent.id);
-                      setSelectedStudentId(null);
-                    }
-                  }}
-                  className="w-full py-2 bg-red-500/10 hover:bg-red-500 hover:text-white text-red-700 dark:text-red-400 text-xs font-semibold rounded-xl flex items-center justify-center gap-1 active:scale-98 cursor-pointer"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  删除该生记录
-                </button>
-              </div>
-
-            </div>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400 space-y-2 h-full">
-              <Users className="w-12 h-12 stroke-1 text-slate-300" />
-              <p className="text-sm">未选择学生</p>
-              <p className="text-xs">点击左侧表格中的一行学生，在此处查看完整的家校沟通、各维度日常表现，以及学习瓶颈等信息。</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Excel Import Toast Notification */}
+      {/* Roster Import Toast Notification */}
       {showImportToast && (
         <div className="fixed bottom-6 right-6 bg-slate-900/90 dark:bg-emerald-950/90 text-white backdrop-blur-md px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2 z-50 animate-fade-in border border-emerald-500/20">
           <Sparkles className="w-5 h-5 text-emerald-400" />
           <div className="text-xs">
-            <span className="font-bold block text-emerald-400">批量导入 Excel 成功！</span>
-            <span>成功解析并导入了 <b>{importCount}</b> 位学生档案至七年级 3 班。</span>
+            <span className="font-bold block text-emerald-400">名册导入完成</span>
+            <span>成功导入 <b>{importCount}</b> 人{importRejectedCount ? `，${importRejectedCount} 行未导入` : ''}。</span>
           </div>
           <button onClick={() => setShowImportToast(false)} className="text-white/60 hover:text-white ml-3">
             <X className="w-4 h-4" />
@@ -545,20 +595,20 @@ export default function StudentManagement({
 
       {/* Add / Edit Student Modal */}
       {showAddEditModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl max-w-3xl w-full p-6 space-y-4 shadow-2xl border border-slate-150 dark:border-zinc-800 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-zinc-800">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4">
+          <div role="dialog" aria-modal="true" aria-label={isEditMode ? '修改学生档案' : '录入新学生档案'} className="bg-white dark:bg-zinc-900 rounded-2xl max-w-3xl w-full shadow-2xl border border-slate-150 dark:border-zinc-800 max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden">
+            <div className="shrink-0 flex justify-between items-center p-5 border-b border-slate-100 dark:border-zinc-800">
               <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">
                 {isEditMode ? '修改学生档案' : '录入新学生档案'}
               </h3>
-              <button onClick={() => setShowAddEditModal(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setShowAddEditModal(false)} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-zinc-800" aria-label="关闭编辑弹窗">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Fields */}
-            <div className="space-y-4 text-sm">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-sm">
+              <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-400 block">学生姓名</label>
                   <input
@@ -573,7 +623,11 @@ export default function StudentManagement({
                   <label className="text-xs font-bold text-slate-400 block">所属班级</label>
                   <select
                     value={formData.classId || 'c1'}
-                    onChange={(e) => setFormData({ ...formData, classId: e.target.value })}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      classId: e.target.value,
+                      isRepresentative: e.target.value === formData.classId ? formData.isRepresentative : false
+                    })}
                     className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-zinc-700 focus:outline-none"
                   >
                     {classes.filter(c => c.status === 'active').map(c => (
@@ -583,7 +637,7 @@ export default function StudentManagement({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-400 block">学号</label>
                   <input
@@ -604,7 +658,7 @@ export default function StudentManagement({
                         onChange={() => setFormData({ ...formData, gender: 'male' })}
                         className="accent-emerald-700"
                       />
-                      <span>男生 (Male)</span>
+                      <span>男</span>
                     </label>
                     <label className="flex items-center gap-1 text-xs">
                       <input
@@ -613,7 +667,7 @@ export default function StudentManagement({
                         onChange={() => setFormData({ ...formData, gender: 'female' })}
                         className="accent-emerald-700"
                       />
-                      <span>女生 (Female)</span>
+                      <span>女</span>
                     </label>
                   </div>
                 </div>
@@ -622,7 +676,7 @@ export default function StudentManagement({
               {/* Parent fields */}
               <div className="p-3 bg-slate-50 dark:bg-zinc-800/40 rounded-2xl border border-slate-200 dark:border-zinc-700 space-y-3">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">家长联系信息</span>
-                <div className="grid md:grid-cols-[260px_1fr] gap-4">
+                <div className="grid md:grid-cols-2 gap-4">
                   <div className="space-y-3">
                     <div className="space-y-1">
                       <label className="text-[11px] font-bold text-slate-500">家长姓名</label>
@@ -748,7 +802,7 @@ export default function StudentManagement({
               </div>
 
               {/* Representatives / Status */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-400 block">课表职责</label>
                   <label className="flex items-center gap-1.5 pt-2">
@@ -778,7 +832,7 @@ export default function StudentManagement({
             </div>
 
             {/* Actions */}
-            <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 dark:border-zinc-800">
+            <div className="shrink-0 flex justify-end gap-3 p-4 border-t border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-900">
               <button
                 onClick={() => setShowAddEditModal(false)}
                 className="px-4 py-2 text-xs font-medium bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-slate-200 rounded-xl"
@@ -786,7 +840,7 @@ export default function StudentManagement({
                 取消
               </button>
               <button
-                onClick={handleSaveStudent}
+                onClick={() => void handleSaveStudent()}
                 className="px-4 py-2 text-xs font-semibold bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl"
               >
                 保存档案

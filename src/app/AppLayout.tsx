@@ -1,5 +1,5 @@
-import { ChevronDown, GraduationCap, HelpCircle, Sparkles } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ChevronDown, GraduationCap, HelpCircle, Menu, Sparkles, X } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
 import type { SchoolClass } from '../domain/types';
 import type { NavGroup, PageId } from './navigation';
 
@@ -34,10 +34,25 @@ export default function AppLayout({
   onSelectPage,
   onToggleGroup
 }: AppLayoutProps) {
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const selectPage = (pageId: PageId) => {
+    onSelectPage(pageId);
+    setMobileNavOpen(false);
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-zinc-950 text-slate-800 dark:text-slate-100 font-sans flex flex-col antialiased">
-      <header className="h-16 bg-white/75 dark:bg-zinc-900/75 backdrop-blur-2xl border-b border-slate-200/70 dark:border-zinc-800/80 px-6 flex items-center justify-between z-30 sticky top-0">
+      <header className="h-16 bg-white/75 dark:bg-zinc-900/75 backdrop-blur-2xl border-b border-slate-200/70 dark:border-zinc-800/80 px-3 sm:px-6 flex items-center justify-between z-30 sticky top-0">
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            className="lg:hidden p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"
+            aria-label="打开导航"
+            aria-expanded={mobileNavOpen}
+          >
+            <Menu className="w-5 h-5" />
+          </button>
           <div className="w-10 h-10 rounded-[20px] bg-emerald-700 dark:bg-emerald-600 flex items-center justify-center text-white shadow-lg shadow-emerald-900/10">
             <GraduationCap className="w-5.5 h-5.5" />
           </div>
@@ -48,7 +63,7 @@ export default function AppLayout({
                 PRO v1.5
               </span>
             </h1>
-            <p className="text-[10px] text-slate-400">教学证据采集、作业 AI 批改、学情诊断和学生画像平台</p>
+            <p className="hidden sm:block text-[10px] text-slate-400">教学证据采集、作业 AI 批改、学情诊断和学生画像平台</p>
           </div>
         </div>
 
@@ -75,7 +90,7 @@ export default function AppLayout({
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">王老师</span>
+            <span className="hidden sm:inline text-xs font-semibold text-slate-700 dark:text-slate-200">王老师</span>
             <div className="w-8 h-8 rounded-full bg-slate-200/90 dark:bg-zinc-800 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center text-xs">
               王
             </div>
@@ -84,9 +99,27 @@ export default function AppLayout({
       </header>
 
       <div className="flex-1 flex overflow-hidden">
-        <aside className="w-72 bg-white/70 dark:bg-zinc-900/70 backdrop-blur-2xl border-r border-slate-200/70 dark:border-zinc-800/80 flex flex-col justify-between p-4 flex-shrink-0 select-none z-20">
+        {mobileNavOpen && (
+          <button
+            type="button"
+            className="fixed inset-0 z-40 bg-black/30 lg:hidden"
+            onClick={() => setMobileNavOpen(false)}
+            aria-label="关闭导航"
+          />
+        )}
+        <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl border-r border-slate-200/70 dark:border-zinc-800/80 flex flex-col justify-between p-4 flex-shrink-0 select-none transition-transform lg:static lg:z-20 lg:bg-white/70 lg:dark:bg-zinc-900/70 lg:translate-x-0 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="space-y-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-3 block mb-2">导航</span>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-3">导航</span>
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(false)}
+                className="lg:hidden p-2 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                aria-label="关闭导航"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
             <nav className="space-y-2">
               {navGroups.map(group => {
                 const GroupIcon = group.icon;
@@ -97,7 +130,7 @@ export default function AppLayout({
                 return (
                   <div key={group.id} className="rounded-2xl">
                     <button
-                      onClick={() => isSingle ? onSelectPage(group.items[0].id) : onToggleGroup(group.id)}
+                      onClick={() => isSingle ? selectPage(group.items[0].id) : onToggleGroup(group.id)}
                       className={`w-full px-3 py-2.5 rounded-2xl text-xs font-bold flex items-center justify-between transition-all cursor-pointer ${
                         hasActiveChild
                           ? 'bg-emerald-700/10 text-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-200'
@@ -122,7 +155,7 @@ export default function AppLayout({
                             <button
                               key={item.id}
                               id={`sidebar-item-${item.id}`}
-                              onClick={() => onSelectPage(item.id)}
+                              onClick={() => selectPage(item.id)}
                               className={`w-full px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
                                 isActive
                                   ? 'bg-emerald-700 text-white shadow-md shadow-emerald-700/10'
@@ -158,7 +191,7 @@ export default function AppLayout({
           </div>
         </aside>
 
-        <main className="flex-1 overflow-y-auto p-6 bg-slate-50 dark:bg-zinc-950">
+        <main className="flex-1 min-w-0 overflow-y-auto p-3 sm:p-4 lg:p-6 bg-slate-50 dark:bg-zinc-950">
           {children}
         </main>
       </div>

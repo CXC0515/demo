@@ -3,21 +3,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import AppLayout from './app/AppLayout';
 import { createNavGroups, PageId } from './app/navigation';
 
 // Import Types and Mock Data
-import { 
-  Student, SchoolClass, WorkbenchTask, ScheduleItem, 
-  TimerReminder, ReviewItem, WorkflowState, TeacherObservation 
+import {
+  Student, SchoolClass, WorkbenchTask, ScheduleItem,
+  TimerReminder, ReviewItem, WorkflowState, TeacherObservation, RosterStudent
 } from './domain/types';
-import { 
-  initialClasses, initialStudents, initialTasks, 
+import {
+  initialTasks,
   initialSchedule, initialReminders, initialReviewQueue, initialWorkflowState,
   initialKnowledgeNodes
 } from './domain/mockData';
 import { createEmptyWorkflowState } from './domain/gradingTask';
+import {
+  createRosterClass,
+  createRosterStudent,
+  deleteRosterStudent,
+  getRoster,
+  importRosterStudents,
+  toggleRosterClassArchive,
+  updateRosterClass,
+  updateRosterStudent
+} from './services/rosterApi';
 
 // Import Custom Sub-Components
 import Workbench from './features/workbench/Workbench';
@@ -30,10 +40,26 @@ import KnowledgeLibrary from './features/knowledge/KnowledgeLibrary';
 import TagManagement from './features/tags/TagManagement';
 import LessonPlanWorkspace from './features/lesson-plan/LessonPlanWorkspace';
 import GradingWorkspace from './features/grading/GradingWorkspace';
-import DiagnosisWorkspace from './features/diagnosis/DiagnosisWorkspace';
+import DiagnosisWorkspace, { DiagnosisTab } from './features/diagnosis/DiagnosisWorkspace';
 import CareerPlaceholder from './features/career/CareerPlaceholder';
 
 const AI_GRADING_TEST_TASK_ID = 'task-20260810-1';
+
+const describeRosterError = (error: unknown) => {
+  const code = error instanceof Error ? error.message : '未知错误';
+  if (code === 'DUPLICATE_STUDENT_NO') return '该班级中已存在相同学号';
+  if (code === 'DUPLICATE_CLASS') return '同一学期已存在同名班级';
+  if (code === 'CLASS_NOT_FOUND') return '目标班级不存在';
+  return code;
+};
+
+const getLocalDate = () => {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 const createInitialWorkflowState = (task: WorkbenchTask) => {
   if (task.id === AI_GRADING_TEST_TASK_ID) {
@@ -51,8 +77,10 @@ const createInitialWorkflowState = (task: WorkbenchTask) => {
 export default function App() {
   // Navigation & View State
   const [activePage, setActivePage] = useState<PageId>('workbench');
-  const [selectedClassId, setSelectedClassId] = useState<string>('c1');
-  const [selectedStudentId, setSelectedStudentId] = useState<string>('s1');
+  const [selectedClassId, setSelectedClassId] = useState<string>('c5');
+  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+  const [studentManagementTargetId, setStudentManagementTargetId] = useState<string | null>(null);
+  const [diagnosisRequestedTab, setDiagnosisRequestedTab] = useState<DiagnosisTab | null>(null);
   const [lowConfidenceThreshold, setLowConfidenceThreshold] = useState<number>(0.75);
   const [ocrHumanReviewThreshold, setOcrHumanReviewThreshold] = useState<number>(0.70);
   const [ocrAutoPassThreshold, setOcrAutoPassThreshold] = useState<number>(0.90);
@@ -64,9 +92,11 @@ export default function App() {
     library: true
   });
 
-  // Core App States (simulating cloud database persistence with local states)
-  const [classes, setClasses] = useState<SchoolClass[]>(initialClasses);
-  const [students, setStudents] = useState<Student[]>(initialStudents);
+  // Class and student state is hydrated from the authoritative roster service.
+  const [classes, setClasses] = useState<SchoolClass[]>([]);
+  const [students, setStudents] = useState<RosterStudent[]>([]);
+  const [rosterLoading, setRosterLoading] = useState(true);
+  const [rosterError, setRosterError] = useState<string | null>(null);
   const [tasks, setTasks] = useState<WorkbenchTask[]>(initialTasks);
   const [schedule, setSchedule] = useState<ScheduleItem[]>(initialSchedule);
   const [reminders, setReminders] = useState<TimerReminder[]>(initialReminders);
@@ -78,6 +108,28 @@ export default function App() {
   // Toast notifications state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showToast, setShowToast] = useState(false);
+
+  const loadRoster = async () => {
+    setRosterLoading(true);
+    setRosterError(null);
+    try {
+      const snapshot = await getRoster();
+      setClasses(snapshot.classes);
+      setStudents(snapshot.students);
+      const preferredClass = snapshot.classes.find(item => item.id === 'c5' && item.status === 'active')
+        ?? snapshot.classes.find(item => item.status === 'active');
+      if (preferredClass) setSelectedClassId(preferredClass.id);
+      if (snapshot.students.length) setSelectedStudentId(snapshot.students[0].id);
+    } catch (error) {
+      setRosterError(error instanceof Error ? error.message : 'ROSTER_LOAD_FAILED');
+    } finally {
+      setRosterLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadRoster();
+  }, []);
 
   // Trigger Toast helper
   const triggerToast = (msg: string) => {
@@ -128,84 +180,145 @@ export default function App() {
   };
 
   // 4. Class actions
-  const handleAddClass = (newClass: SchoolClass) => {
-    setClasses([...classes, newClass]);
-    triggerToast(`🏫 成功新建了班级 [${newClass.name}]！`);
+  const handleAddClass = async (newClass: SchoolClass) => {
+    try {
+      const created = await createRosterClass(newClass);
+      setClasses(current => [...current, created]);
+      triggerToast(`成功新建了班级 [${created.name}]！`);
+    } catch (error) {
+      triggerToast(`班级创建失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
   };
 
-  const handleUpdateClass = (updated: SchoolClass) => {
-    setClasses(classes.map(c => c.id === updated.id ? updated : c));
-    triggerToast('班级基础信息已成功更新！');
+  const handleUpdateClass = async (updated: SchoolClass) => {
+    try {
+      await updateRosterClass(updated);
+      const snapshot = await getRoster();
+      setClasses(snapshot.classes);
+      setStudents(snapshot.students);
+      triggerToast('班级基础信息已成功更新！');
+    } catch (error) {
+      triggerToast(`班级保存失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
   };
 
-  const handleArchiveClass = (classId: string) => {
-    setClasses(classes.map(c => c.id === classId ? { ...c, status: c.status === 'active' ? 'archived' as any : 'active' as any } : c));
-    const target = classes.find(c => c.id === classId);
-    triggerToast(target?.status === 'active' ? '该班级已归档。' : '该班级已取消归档。');
+  const handleArchiveClass = async (classId: string) => {
+    try {
+      const saved = await toggleRosterClassArchive(classId);
+      setClasses(current => current.map(item => item.id === saved.id ? saved : item));
+      triggerToast(saved.status === 'archived' ? '该班级已归档。' : '该班级已取消归档。');
+    } catch (error) {
+      triggerToast(`班级状态更新失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
   };
 
   // 5. Student actions
-  const handleAddStudent = (newStudent: Student) => {
-    setStudents([...students, newStudent]);
-    triggerToast(`👤 已成功新建 [${newStudent.name}] 的专属学情电子档案。`);
+  const handleAddStudent = async (newStudent: Student) => {
+    try {
+      const created = await createRosterStudent(newStudent);
+      setStudents(current => [created, ...current]);
+      setClasses(current => current.map(item => item.id === created.classId
+        ? {
+            ...item,
+            studentCount: item.studentCount + 1,
+            representatives: created.isRepresentative
+              ? [...new Set([...item.representatives, created.id])]
+              : item.representatives
+          }
+        : item));
+      setSelectedStudentId(created.id);
+      triggerToast(`已成功新建 [${created.name}] 的学生档案。`);
+      return true;
+    } catch (error) {
+      triggerToast(`学生保存失败：${describeRosterError(error)}`);
+      return false;
+    }
   };
 
-  const handleUpdateStudent = (updated: Student) => {
-    setStudents(students.map(s => s.id === updated.id ? updated : s));
-    triggerToast(`学生 [${updated.name}] 的档案资料修改保存成功！`);
+  const handleUpdateStudent = async (updated: Student) => {
+    try {
+      await updateRosterStudent(updated);
+      const snapshot = await getRoster();
+      setClasses(snapshot.classes);
+      setStudents(snapshot.students);
+      triggerToast(`学生 [${updated.name}] 的档案资料修改保存成功！`);
+      return true;
+    } catch (error) {
+      triggerToast(`学生保存失败：${describeRosterError(error)}`);
+      return false;
+    }
   };
 
-  const handleDeleteStudent = (studentId: string) => {
-    setStudents(students.filter(s => s.id !== studentId));
-    triggerToast('学生记录已成功删除。');
+  const handleDeleteStudent = async (studentId: string) => {
+    try {
+      await deleteRosterStudent(studentId);
+      const snapshot = await getRoster();
+      setClasses(snapshot.classes);
+      setStudents(snapshot.students);
+      triggerToast('学生已从当前班级名册移出。');
+    } catch (error) {
+      triggerToast(`学生移出失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
   };
 
-  const handleBulkImport = (imported: Student[]) => {
-    setStudents([...students, ...imported]);
-    // Also trigger toast from caller as needed
+  const handleBulkImport = async (classId: string, rows: { studentNo: string; name: string; gender?: 'male' | 'female' }[]) => {
+    const result = await importRosterStudents(classId, rows);
+    const snapshot = await getRoster();
+    setClasses(snapshot.classes);
+    setStudents(snapshot.students);
+    return result;
   };
 
-  const handleBulkMoveClass = (studentIds: string[], targetClassId: string) => {
+  const handleBulkMoveClass = async (studentIds: string[], targetClassId: string) => {
     const targetClass = classes.find(c => c.id === targetClassId);
     if (!targetClass) return;
-
-    setStudents(students.map(s => {
-      if (studentIds.includes(s.id)) {
-        return {
-          ...s,
-          classId: targetClassId,
-          className: targetClass.name
-        };
-      }
-      return s;
-    }));
-    triggerToast(`成功将选中的 ${studentIds.length} 名学生批量调入到 [${targetClass.name}]！`);
+    try {
+      const selected = students.filter(item => studentIds.includes(item.id));
+      await Promise.all(selected.map(student => updateRosterStudent({
+        ...student,
+        classId: targetClassId,
+        className: targetClass.name,
+        isRepresentative: false
+      })));
+      const snapshot = await getRoster();
+      setClasses(snapshot.classes);
+      setStudents(snapshot.students);
+      triggerToast(`成功将选中的 ${studentIds.length} 名学生批量调入到 [${targetClass.name}]！`);
+    } catch (error) {
+      triggerToast(`批量调班失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
   };
 
-  const handleBulkAddTags = (studentIds: string[], newTags: string[]) => {
-    setStudents(students.map(s => {
-      if (studentIds.includes(s.id)) {
-        return {
-          ...s,
-          behaviorTags: Array.from(new Set([...s.behaviorTags, ...newTags]))
-        };
-      }
-      return s;
-    }));
-    triggerToast(`成功为 ${studentIds.length} 名学生批量添加了标签：${newTags.join(', ')}`);
+  const handleBulkAddTags = async (studentIds: string[], newTags: string[]) => {
+    try {
+      const selected = students.filter(item => studentIds.includes(item.id));
+      const saved = await Promise.all(selected.map(student => updateRosterStudent({
+        ...student,
+        behaviorTags: Array.from(new Set([...student.behaviorTags, ...newTags]))
+      })));
+      const savedById = new Map(saved.map(item => [item.id, item]));
+      setStudents(current => current.map(item => savedById.get(item.id) ?? item));
+      triggerToast(`成功为 ${studentIds.length} 名学生批量添加了标签：${newTags.join(', ')}`);
+    } catch (error) {
+      triggerToast(`批量标签保存失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
   };
 
   // 6. Observation Note addition
+  const persistObservation = async (studentId: string, note: TeacherObservation) => {
+    const student = students.find(item => item.id === studentId);
+    if (!student) throw new Error('STUDENT_NOT_FOUND');
+    const saved = await updateRosterStudent({
+      ...student,
+      observationHistory: [note, ...student.observationHistory]
+    });
+    setStudents(current => current.map(item => item.id === studentId ? saved : item));
+  };
+
   const handleAddObservation = (studentId: string, note: TeacherObservation) => {
-    setStudents(students.map(s => {
-      if (s.id === studentId) {
-        return {
-          ...s,
-          observationHistory: [note, ...s.observationHistory]
-        };
-      }
-      return s;
-    }));
+    setStudents(current => current.map(student => student.id === studentId
+      ? { ...student, observationHistory: [note, ...student.observationHistory] }
+      : student));
   };
 
   // 7. Review Queue Actions
@@ -291,6 +404,29 @@ export default function App() {
     setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
   };
 
+  if (rosterLoading) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center text-sm font-semibold text-slate-500">
+        正在加载班级与学生名册...
+      </div>
+    );
+  }
+
+  if (rosterError) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center gap-3 text-slate-600">
+        <p className="text-sm font-semibold">名册服务暂时不可用（{rosterError}）</p>
+        <button
+          type="button"
+          onClick={() => void loadRoster()}
+          className="px-4 py-2 rounded-lg bg-emerald-700 text-white text-xs font-semibold"
+        >
+          重新连接
+        </button>
+      </div>
+    );
+  }
+
   const selectedClass = classes.find(c => c.id === selectedClassId) ?? classes[0];
   const pendingReviewCount = reviewQueue.filter(r => r.status === 'pending').length;
   const navGroups = createNavGroups(pendingReviewCount);
@@ -343,23 +479,24 @@ export default function App() {
               classes={classes}
               selectedClassId={selectedClassId}
               onSelectClass={setSelectedClassId}
-              onNavigate={handleNavigate}
+              onManageStudent={(studentId) => {
+                setSelectedStudentId(studentId);
+                setStudentManagementTargetId(studentId);
+                setActivePage('student-mgmt');
+              }}
               onViewStudentProfile={(studentId) => {
                 setSelectedStudentId(studentId);
-                handleNavigate('profile');
+                setDiagnosisRequestedTab('student');
+                setActivePage('diagnosis-workspace');
               }}
               onAddObservation={(studentId, text) => {
-                handleAddObservation(studentId, {
-                  date: '2026-07-02',
+                return persistObservation(studentId, {
+                  date: getLocalDate(),
                   type: 'neutral',
                   category: 'behavior',
                   content: text,
-                  author: '王王老师'
+                  author: '王老师'
                 });
-              }}
-              onSetStudentReminder={(studentId, name) => {
-                const s = students.find(stud => stud.id === studentId);
-                triggerToast(`⏰ 成功为 [${s ? s.name : '学生'}] 创建了个性化督促提醒：${name}`);
               }}
             />
           )}
@@ -388,6 +525,8 @@ export default function App() {
               onBulkImport={handleBulkImport}
               onBulkMoveClass={handleBulkMoveClass}
               onBulkAddTags={handleBulkAddTags}
+              targetStudentId={studentManagementTargetId}
+              onTargetStudentHandled={() => setStudentManagementTargetId(null)}
             />
           )}
 
@@ -450,12 +589,15 @@ export default function App() {
               onSelectStudent={setSelectedStudentId}
               onEditStudent={(studentId) => {
                 setSelectedStudentId(studentId);
+                setStudentManagementTargetId(studentId);
                 setActivePage('student-mgmt');
-                triggerToast('已跳转到学生管理，请在列表中编辑该学生档案');
+                triggerToast('已打开该学生档案');
               }}
               onAddObservation={handleAddObservation}
               onNavigate={handleNavigate}
               onShowToast={triggerToast}
+              requestedTab={diagnosisRequestedTab}
+              onRequestedTabHandled={() => setDiagnosisRequestedTab(null)}
             />
           )}
 

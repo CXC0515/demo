@@ -4,6 +4,7 @@
  */
 
 export type StudentStatus = 'good' | 'warning' | 'risk' | 'outstanding';
+export type EnrollmentStatus = 'active' | 'transferred' | 'withdrawn' | 'suspended';
 
 export interface ParentInfo {
   name: string;
@@ -55,6 +56,47 @@ export interface Student {
   recentHomeworkTrend: number[]; // Last 5 homework scores (out of 100)
   homeworkHistory: HomeworkRecord[];
   weaknessEvidence?: WeaknessEvidence[];
+}
+
+export interface ClassMembership {
+  id: string;
+  classId: string;
+  studentId: string;
+  studentNo: string;
+  isRepresentative: boolean;
+  status: EnrollmentStatus;
+  joinedAt: string;
+  leftAt?: string;
+}
+
+export interface RosterStudent extends Student {
+  studentId: string;
+  enrollmentStatus: EnrollmentStatus;
+}
+
+export interface RosterSnapshot {
+  classes: SchoolClass[];
+  students: RosterStudent[];
+}
+
+export interface ClassroomSeatAssignment {
+  seatIndex: number;
+  studentId: string;
+}
+
+export interface ClassroomLayout {
+  classId: string;
+  rowCount: number;
+  columnCount: number;
+  seats: ClassroomSeatAssignment[];
+  updatedAt?: string;
+}
+
+export interface SubmissionRosterMatch {
+  matched: RosterStudent[];
+  missing: RosterStudent[];
+  unknownStudentNos: string[];
+  duplicateStudentNos: string[];
 }
 
 export interface WeaknessEvidence {
