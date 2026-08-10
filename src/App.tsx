@@ -33,6 +33,21 @@ import GradingWorkspace from './features/grading/GradingWorkspace';
 import DiagnosisWorkspace from './features/diagnosis/DiagnosisWorkspace';
 import CareerPlaceholder from './features/career/CareerPlaceholder';
 
+const AI_GRADING_TEST_TASK_ID = 'task-20260810-1';
+
+const createInitialWorkflowState = (task: WorkbenchTask) => {
+  if (task.id === AI_GRADING_TEST_TASK_ID) {
+    const state = createEmptyWorkflowState(task);
+    return { ...state, assignment: { ...state.assignment, status: 'assigned' as const } };
+  }
+  return {
+    ...initialWorkflowState,
+    taskName: task.name,
+    classId: task.classId,
+    deadline: task.deadline
+  };
+};
+
 export default function App() {
   // Navigation & View State
   const [activePage, setActivePage] = useState<PageId>('workbench');
@@ -57,12 +72,7 @@ export default function App() {
   const [reminders, setReminders] = useState<TimerReminder[]>(initialReminders);
   const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>(initialReviewQueue);
   const [workflowStates, setWorkflowStates] = useState<Record<string, WorkflowState>>(() => Object.fromEntries(
-    initialTasks.map(task => [task.id, {
-      ...initialWorkflowState,
-      taskName: task.name,
-      classId: task.classId,
-      deadline: task.deadline
-    }])
+    initialTasks.map(task => [task.id, createInitialWorkflowState(task)])
   ));
 
   // Toast notifications state

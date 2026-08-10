@@ -44,7 +44,8 @@ export const createEmptyWorkflowState = (task: WorkbenchTask): WorkflowState => 
     questionFileNames: [],
     answerFileNames: [],
     note: '',
-    assets: []
+    assets: [],
+    documents: []
   },
   questions: [],
   sourceEvidence: [],

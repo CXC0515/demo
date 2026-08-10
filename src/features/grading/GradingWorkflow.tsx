@@ -34,10 +34,12 @@ import {
   Users,
   X
 } from 'lucide-react';
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import {
+  AnalyzedQuestionUnit,
   CalibrationResultSource,
   CalibrationSample,
+  FirstSectionAnalysis,
   GradingMode,
   GradingQuestion,
   KnowledgeNode,
@@ -50,7 +52,7 @@ import {
 } from '../../domain/types';
 import ReviewQueuePage from './ReviewQueuePage';
 import SourceEvidenceViewer from './SourceEvidenceViewer';
-import { analyzeTaskMaterials, uploadTaskMaterials } from '../../services/gradingApi';
+import { analyzeTaskMaterials, getTaskAnalysis, getTaskMaterials, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
 
 interface GradingWorkflowProps {
   workflowState: WorkflowState;
@@ -112,9 +114,98 @@ const getFiles = (files: FileList | null) => {
   return result;
 };
 
-const analysisStatusLabel: Record<WorkflowState['assignment']['analysisStatus'], string> = {
-  idle: '等待材料', uploading: '上传中', parsing: 'AI 解析中', 'needs-review': '待确认', ready: '解析完成', failed: '解析失败'
+const buildWorkflowFromAnalysis = (taskId: string, analysis: FirstSectionAnalysis) => {
+  const sourceEvidence = analysis.questions.flatMap(question => {
+    const questionEvidenceId = `${taskId}-question-${question.displayNo}`;
+    const answerEvidenceId = `${taskId}-answer-${question.displayNo}`;
+    return [{
+      id: questionEvidenceId,
+      assetId: question.questionSource.assetId,
+      assetKind: question.questionSource.assetKind,
+      fileName: question.questionSource.fileName,
+      pageNumber: 1,
+      boundingBox: { x: 0, y: 0, width: 1, height: 1 },
+      ocrText: question.questionSource.quote,
+      confidence: question.confidence
+    }, ...(question.answerSource ? [{
+      id: answerEvidenceId,
+      assetId: question.answerSource.assetId,
+      assetKind: question.answerSource.assetKind,
+      fileName: question.answerSource.fileName,
+      pageNumber: 1,
+      boundingBox: { x: 0, y: 0, width: 1, height: 1 },
+      ocrText: question.answerSource.quote,
+      confidence: question.confidence
+    }] : [])];
+  });
+  const questions: WorkflowState['questions'] = analysis.questions.map(question => ({
+    id: `${taskId}-q-${question.displayNo}`,
+    displayNo: question.displayNo,
+    title: question.title || `第 ${question.displayNo} 题`,
+    score: question.score ?? 0,
+    knowledgePoint: question.knowledgeCandidates.map(candidate => candidate.nodeName).join('、') || '待关联知识点',
+    knowledgeLinks: question.knowledgeCandidates.map(candidate => ({ ...candidate, status: 'suggested' as const })),
+    desc: question.stem,
+    stem: question.stem,
+    aiQuestionType: question.questionType,
+    answerRequirement: question.answerRequirement,
+    parseConfidence: question.confidence,
+    sourceEvidenceIds: [`${taskId}-question-${question.displayNo}`]
+  }));
+  const questionGradingStates: QuestionGradingState[] = analysis.questions.map(question => ({
+    questionId: `${taskId}-q-${question.displayNo}`,
+    standardAnswer: question.standardAnswer,
+    standardAnswerSourceIds: question.answerSource ? [`${taskId}-answer-${question.displayNo}`] : [],
+    gradingRubric: question.rubricPoints.map(point => ({ point: point.point, score: point.score ?? 0, description: point.description })),
+    teacherRules: [],
+    rubricVersion: 1,
+    sampleTarget: 3,
+    calibrationSamples: [],
+    jointReviewEnabled: false
+  }));
+  return {
+    questions,
+    sourceEvidence,
+    questionGradingStates,
+    standardAnswer: questionGradingStates[0]?.standardAnswer ?? '',
+    gradingRubric: questionGradingStates[0]?.gradingRubric ?? []
+  };
 };
+
+function AnalysisEvidenceDetails({ unit }: { unit: AnalyzedQuestionUnit }) {
+  return (
+    <details className="mt-3">
+      <summary className="cursor-pointer text-xs font-bold text-slate-500">查看题目与参考答案原文</summary>
+      <div className="mt-2 grid gap-3 lg:grid-cols-2">
+        <section className="border-l-2 border-emerald-600 bg-slate-50 p-3 dark:bg-zinc-950"><span className="text-xs font-black text-emerald-800">题目原文 · {unit.questionSource.fileName}</span><p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600 dark:text-slate-300">{unit.questionSource.quote}</p></section>
+        <section className="border-l-2 border-sky-600 bg-slate-50 p-3 dark:bg-zinc-950"><span className="text-xs font-black text-sky-800">参考答案原文 · {unit.answerSource?.fileName ?? '未匹配'}</span><p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600 dark:text-slate-300">{unit.answerSource?.quote || '参考答案中没有匹配到可引用内容。'}</p></section>
+      </div>
+    </details>
+  );
+}
+
+function MaterialDocumentDetails({ document, asset }: { document: NonNullable<WorkflowState['assignment']['documents']>[number]; asset?: WorkflowState['assignment']['assets'][number] }) {
+  const visibleImages = document.resources.filter(resource => resource.mimeType.startsWith('image/') && !/\.(?:wmf|emf)$/i.test(resource.fileName));
+  return (
+    <details className="border-t border-slate-200 py-3 dark:border-zinc-800">
+      <summary className="cursor-pointer text-sm font-bold text-slate-800 dark:text-slate-100">查看解析内容 · {asset?.fileName ?? document.sourceFormat.toUpperCase()}</summary>
+      {document.warnings.length ? <div className="mt-3 space-y-1 text-xs text-amber-800">{document.warnings.map((warning, index) => <p key={`${warning.code}-${index}`}><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />{warning.message}</p>)}</div> : null}
+      {visibleImages.length ? <div className="mt-3 grid gap-3 sm:grid-cols-2">{visibleImages.map(resource => <figure key={resource.id} className="overflow-hidden border border-slate-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950"><img src={resource.publicUrl} alt="文档中的图片" className="max-h-80 w-full object-contain" /></figure>)}</div> : null}
+      {!visibleImages.length && document.resources.length && document.sourcePreviewUrl ? <div className="mt-3"><img src={document.sourcePreviewUrl} alt="原版页面预览" className="max-h-96 w-full border border-slate-200 bg-white object-contain dark:border-zinc-800" /><a href={document.sourcePreviewUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-emerald-700"><Eye className="h-3.5 w-3.5" />查看完整原版页面</a></div> : null}
+      <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words bg-slate-50 p-4 text-xs leading-6 text-slate-700 dark:bg-zinc-950 dark:text-slate-200">{document.markdown}</pre>
+    </details>
+  );
+}
+
+const analysisStatusLabel: Record<WorkflowState['assignment']['analysisStatus'], string> = {
+  idle: '等待材料', uploading: '上传中', parsing: '材料解析中', 'needs-review': '需要检查', ready: '材料已解析', failed: '解析失败'
+};
+
+const materialStatusLabel: Record<WorkflowState['assignment']['assets'][number]['status'], string> = {
+  uploaded: '等待解析', processing: '解析中', ready: '已解析', 'needs-review': '需检查', failed: '失败'
+};
+
+const materialAccept = '.docx,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,application/pdf,image/*';
 
 const getInitialStage = (node: WorkbenchTask['node']): StageId => {
   if (node === 'setup' || node === 'collection') return 'assignment';
@@ -260,6 +351,7 @@ export default function GradingWorkflow({
   const [gradedCount, setGradedCount] = useState(() => workflowState.aiResults.length ? 36 : 0);
   const [isPaused, setIsPaused] = useState(false);
   const [diagnosisConfirmed, setDiagnosisConfirmed] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const currentClass = classes.find(item => item.id === selectedTask.classId) ?? classes[0];
   const currentQuestion = workflowState.questions.find(item => item.id === selectedQuestionId) ?? workflowState.questions[0];
@@ -275,63 +367,39 @@ export default function GradingWorkflow({
   const allCalibrationComplete = questionStates.length > 0 && questionStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget);
   const assignmentReady = workflowState.assignment.status === 'assigned';
   const gradingDataReady = workflowState.questions.length > 0 && matchRows.length > 0;
+  const normalizedDocuments = workflowState.assignment.documents ?? [];
 
   const updateAssignment = (updated: Partial<WorkflowState['assignment']>) => {
     onUpdateState({ assignment: { ...workflowState.assignment, ...updated } });
   };
 
-  const parseUploadedMaterials = async (assets: WorkflowState['assignment']['assets']) => {
-    updateAssignment({ assets, analysisStatus: 'parsing' });
-    try {
-      const analyzed = await analyzeTaskMaterials(selectedTask.id, knowledgeNodes);
-      const evidence = analyzed.flatMap((question, index) => {
-        const questionId = `source-question-${selectedTask.id}-${index + 1}`;
-        const answerId = `source-answer-${selectedTask.id}-${index + 1}`;
-        const questionAsset = assets.find(asset => asset.kind === question.questionSource.assetKind && asset.fileName === question.questionSource.fileName);
-        const answerAsset = question.referenceAnswer.source ? assets.find(asset => asset.kind === question.referenceAnswer.source?.assetKind && asset.fileName === question.referenceAnswer.source?.fileName) : undefined;
-        return [
-          { id: questionId, assetId: questionAsset?.id ?? '', ...question.questionSource, imageUrl: questionAsset?.publicUrl },
-          ...(question.referenceAnswer.source ? [{ id: answerId, assetId: answerAsset?.id ?? '', ...question.referenceAnswer.source, imageUrl: answerAsset?.publicUrl }] : [])
-        ];
+  useEffect(() => {
+    let active = true;
+    void Promise.all([getTaskMaterials(selectedTask.id), getTaskAnalysis(selectedTask.id)]).then(([materials, analysis]) => {
+      if (!active || (!materials.assets.length && !analysis)) return;
+      const questionFileNames = materials.assets.filter(asset => asset.kind === 'assignment').map(asset => asset.fileName);
+      const answerFileNames = materials.assets.filter(asset => asset.kind === 'reference-answer').map(asset => asset.fileName);
+      const needsReview = materials.assets.some(asset => asset.status === 'needs-review');
+      const derivedWorkflow = analysis ? buildWorkflowFromAnalysis(selectedTask.id, analysis) : undefined;
+      if (derivedWorkflow) {
+        setQuestionStates(derivedWorkflow.questionGradingStates);
+        setSelectedQuestionId(derivedWorkflow.questions[0]?.id ?? '');
+      }
+      onUpdateState({
+        assignment: {
+          ...workflowState.assignment,
+          questionFileNames,
+          answerFileNames,
+          assets: materials.assets,
+          documents: materials.documents,
+          firstSectionAnalysis: analysis ?? undefined,
+          analysisStatus: needsReview ? 'needs-review' : materials.assets.length ? 'ready' : workflowState.assignment.analysisStatus
+        },
+        ...(derivedWorkflow ?? {})
       });
-      const questionIds = analyzed.map((_, index) => `question-${selectedTask.id}-${index + 1}`);
-      const questions = analyzed.map((question, index) => ({
-        id: questionIds[index],
-        displayNo: question.displayNo,
-        parentId: question.parentDisplayNo
-          ? questionIds[analyzed.findIndex(candidate => candidate.displayNo === question.parentDisplayNo)]
-          : undefined,
-        title: question.title,
-        score: question.score,
-        knowledgePoint: question.knowledgeCandidates[0]?.nodeName ?? '待关联',
-        knowledgeLinks: question.knowledgeCandidates.map(candidate => ({ ...candidate, status: 'suggested' as const })),
-        desc: question.answerRequirement,
-        stem: question.stem,
-        aiQuestionType: question.questionType,
-        answerRequirement: question.answerRequirement,
-        parseConfidence: question.parseConfidence,
-        sourceEvidenceIds: [`source-question-${selectedTask.id}-${index + 1}`]
-      }));
-      const questionGradingStates = analyzed.map((question, index) => ({
-        questionId: questions[index].id,
-        standardAnswer: question.referenceAnswer.normalizedText,
-        standardAnswerOcrText: question.referenceAnswer.originalOcrText,
-        standardAnswerSourceIds: question.referenceAnswer.source ? [`source-answer-${selectedTask.id}-${index + 1}`] : [],
-        gradingRubric: question.rubricPoints,
-        teacherRules: [],
-        rubricVersion: 1,
-        sampleTarget: 3 as const,
-        calibrationSamples: [],
-        jointReviewEnabled: false
-      }));
-      onUpdateState({ questions, sourceEvidence: evidence, questionGradingStates, assignment: { ...workflowState.assignment, assets, analysisStatus: 'needs-review' } });
-      onShowToast(`已识别 ${questions.length} 道题，等待教师确认`);
-    } catch (error) {
-      const code = error instanceof Error ? error.message : 'ANALYSIS_FAILED';
-      updateAssignment({ assets, analysisStatus: 'failed' });
-      onShowToast(code === 'MODEL_NOT_CONFIGURED' ? '多模态服务尚未配置 API Key 和模型' : code === 'MODEL_INPUT_REQUIRES_RENDERED_IMAGE' ? 'PDF 需要先经过 OCR 页图转换服务' : '材料解析失败，请检查服务配置');
-    }
-  };
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [selectedTask.id]);
 
   const handleMaterialFiles = async (kind: 'assignment' | 'reference-answer', fileList: FileList | null) => {
     const files = getFiles(fileList);
@@ -341,13 +409,32 @@ export default function GradingWorkflow({
     try {
       const uploaded = await uploadTaskMaterials(selectedTask.id, kind, files);
       const assets = [...workflowState.assignment.assets.filter(asset => asset.kind !== kind), ...uploaded];
-      const hasBothKinds = assets.some(asset => asset.kind === 'assignment') && assets.some(asset => asset.kind === 'reference-answer');
-      updateAssignment({ assets, analysisStatus: hasBothKinds ? 'parsing' : 'idle' });
-      if (hasBothKinds) await parseUploadedMaterials(assets);
-      else onShowToast('材料已上传，请继续上传对应的题目或参考答案');
-    } catch {
+      updateAssignment({ assets, analysisStatus: 'parsing' });
+      const result = await waitForTaskMaterials(selectedTask.id, uploaded.map(asset => asset.id));
+      const needsReview = result.documents.some(document => document.warnings.length > 0);
+      onUpdateState({
+        assignment: {
+          ...workflowState.assignment,
+          ...(kind === 'assignment' ? { questionFileNames: names } : { answerFileNames: names }),
+          assets: result.assets,
+          documents: result.documents,
+          analysisStatus: needsReview ? 'needs-review' : 'ready'
+        }
+      });
+      onShowToast(needsReview ? '材料解析完成，存在需要检查的内容' : `已解析 ${result.documents.length} 份材料`);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : 'MATERIAL_PARSE_FAILED';
       updateAssignment({ analysisStatus: 'failed' });
-      onShowToast('文件上传失败，请确认后端服务已启动');
+      const messageByCode: Record<string, string> = {
+        DOCX_PARSER_NOT_INSTALLED: 'DOCX 解析环境尚未安装',
+        PADDLEOCR_NOT_CONFIGURED: 'PaddleOCR API 尚未配置',
+        PADDLEOCR_AUTH_FAILED: 'PaddleOCR Token 无效',
+        PADDLEOCR_INVALID_REQUEST: 'PaddleOCR 无法处理当前文件',
+        PADDLEOCR_RATE_LIMITED: 'PaddleOCR API 当前额度或频率受限',
+        PADDLEOCR_TIMEOUT: 'PaddleOCR 解析超时，请稍后重试',
+        MATERIAL_PARSE_TIMEOUT: '材料解析等待超时，请稍后重试'
+      };
+      onShowToast(messageByCode[code] ?? '材料解析失败，请检查文件后重试');
     }
   };
 
@@ -359,6 +446,36 @@ export default function GradingWorkflow({
     updateAssignment({ status: 'assigned' });
     onUpdateTask({ ...selectedTask, node: 'collection', nodeName: '等待收取作业' });
     onShowToast('作业已布置，系统将按收作业时间提醒');
+  };
+
+  const analyzeFirstSection = async () => {
+    const hasQuestion = workflowState.assignment.assets.some(asset => asset.kind === 'assignment' && (asset.status === 'ready' || asset.status === 'needs-review'));
+    const hasAnswer = workflowState.assignment.assets.some(asset => asset.kind === 'reference-answer' && (asset.status === 'ready' || asset.status === 'needs-review'));
+    if (!hasQuestion || !hasAnswer) {
+      onShowToast('请先完成题目和参考答案解析');
+      return;
+    }
+    setIsAnalyzing(true);
+    try {
+      const analysis = await analyzeTaskMaterials(selectedTask.id, knowledgeNodes);
+      const derivedWorkflow = buildWorkflowFromAnalysis(selectedTask.id, analysis);
+      setQuestionStates(derivedWorkflow.questionGradingStates);
+      setSelectedQuestionId(derivedWorkflow.questions[0]?.id ?? '');
+      onUpdateState({ assignment: { ...workflowState.assignment, firstSectionAnalysis: analysis }, ...derivedWorkflow });
+      onShowToast(`第一部分拆题完成，共识别 ${analysis.questions.length} 道一级题`);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : 'ANALYSIS_FAILED';
+      const messageByCode: Record<string, string> = {
+        MODEL_NOT_CONFIGURED: 'AI 模型尚未配置',
+        MODEL_OUTPUT_INVALID: '模型返回结构不完整，请重新分析',
+        ASSIGNMENT_MATERIAL_REQUIRED: '缺少已解析的题目材料',
+        REFERENCE_ANSWER_REQUIRED: '缺少已解析的参考答案',
+        MATERIALS_NOT_READY: '材料仍在解析，请稍后再试'
+      };
+      onShowToast(messageByCode[code] ?? 'AI 拆题失败，请检查模型配置');
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const startSubmissionUpload = () => {
@@ -467,10 +584,28 @@ export default function GradingWorkflow({
           <div className={`${panelClass} p-6`}>
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-5 dark:border-zinc-800"><div><h2 className="font-black text-slate-900 dark:text-white">作业材料</h2><p className="mt-1 text-xs text-slate-500">先确定学生收到的题目和本次评分参考。</p></div><div className="flex gap-2"><span className="rounded-xl bg-slate-100 px-2.5 py-1.5 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-slate-300">{analysisStatusLabel[workflowState.assignment.analysisStatus]}</span><span className={`rounded-xl px-2.5 py-1.5 text-xs font-bold ${assignmentReady ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{assignmentReady ? '已布置' : '待准备'}</span></div></div>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors hover:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900/50"><Upload className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">作业题目或试卷</strong><span className="mt-1 max-w-full truncate text-xs text-slate-400">{workflowState.assignment.questionFileNames.join('、') || 'PDF 或图片'}</span><input type="file" multiple accept="application/pdf,image/*" className="sr-only" onChange={event => void handleMaterialFiles('assignment', event.currentTarget.files)} /></label>
-              <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors hover:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900/50"><FileText className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">参考答案</strong><span className="mt-1 max-w-full truncate text-xs text-slate-400">{workflowState.assignment.answerFileNames.join('、') || 'PDF、图片或文档'}</span><input type="file" multiple accept="application/pdf,image/*" className="sr-only" onChange={event => void handleMaterialFiles('reference-answer', event.currentTarget.files)} /></label>
+              <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors hover:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900/50"><Upload className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">作业题目或试卷</strong><span className="mt-1 max-w-full truncate text-xs text-slate-400">{workflowState.assignment.questionFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" onChange={event => void handleMaterialFiles('assignment', event.currentTarget.files)} /></label>
+              <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors hover:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900/50"><FileText className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">参考答案</strong><span className="mt-1 max-w-full truncate text-xs text-slate-400">{workflowState.assignment.answerFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" onChange={event => void handleMaterialFiles('reference-answer', event.currentTarget.files)} /></label>
             </div>
-            {workflowState.questions.length ? <section className="mt-5 border-y border-slate-200 py-4 dark:border-zinc-800"><div className="flex items-center justify-between"><h3 className="text-sm font-black">AI 题目解析</h3><span className="text-xs font-bold text-emerald-700">识别 {workflowState.questions.length} 题</span></div><div className="mt-3 divide-y divide-slate-200 dark:divide-zinc-800">{workflowState.questions.map(question => <div key={question.id} className="grid gap-2 py-3 text-xs sm:grid-cols-[50px_minmax(0,1fr)_150px_70px] sm:items-center"><strong className="text-sm">第 {question.displayNo} 题</strong><span className="truncate text-slate-600 dark:text-slate-300">{question.stem}</span><span className="truncate font-bold text-violet-700">{question.knowledgeLinks.map(link => link.nodeName).join('、') || '待关联知识点'}</span><span className={question.parseConfidence < 0.8 ? 'font-bold text-rose-700' : 'text-slate-400'}>{Math.round(question.parseConfidence * 100)}%</span></div>)}</div></section> : null}
+            {workflowState.assignment.assets.length ? <section className="mt-5 border-y border-slate-200 dark:border-zinc-800"><div className="flex flex-wrap items-center gap-2 py-3">{workflowState.assignment.assets.map(asset => <span key={asset.id} className={`inline-flex max-w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs font-bold ${asset.status === 'failed' ? 'bg-rose-100 text-rose-800' : asset.status === 'needs-review' ? 'bg-amber-100 text-amber-800' : asset.status === 'ready' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-slate-300'}`}><span className="max-w-56 truncate">{asset.fileName}</span><span>{materialStatusLabel[asset.status]}</span></span>)}</div>{normalizedDocuments.map(document => <Fragment key={document.assetId}><MaterialDocumentDetails document={document} asset={workflowState.assignment.assets.find(item => item.id === document.assetId)} /></Fragment>)}</section> : null}
+            {workflowState.assignment.assets.length ? <section className="mt-5 border-y border-slate-200 py-4 dark:border-zinc-800">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div><h3 className="text-sm font-black">AI 拆题 · 第一部分</h3><p className="mt-1 text-xs text-slate-500">题号、答案、采分点和原文依据需经教师确认。</p></div>
+                <button type="button" disabled={isAnalyzing} onClick={() => void analyzeFirstSection()} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60"><Sparkles className="h-4 w-4" />{isAnalyzing ? '正在拆题' : workflowState.assignment.firstSectionAnalysis ? '重新拆题' : '开始拆题'}</button>
+              </div>
+              {workflowState.assignment.firstSectionAnalysis ? <div className="mt-4 divide-y divide-slate-200 border-t border-slate-200 dark:divide-zinc-800 dark:border-zinc-800">
+                {workflowState.assignment.firstSectionAnalysis.questions.map(question => <article key={question.displayNo} className="py-5">
+                  <div className="flex flex-wrap items-center gap-2"><strong className="text-base">第 {question.displayNo} 题</strong><span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-slate-300">{question.questionType}</span><span className="text-xs font-bold text-emerald-700">{question.score ?? '待确认'} 分</span><span className={`text-xs ${question.confidence < 0.8 ? 'font-bold text-rose-700' : 'text-slate-400'}`}>置信度 {Math.round(question.confidence * 100)}%</span></div>
+                  <h4 className="mt-3 text-sm font-black text-slate-900 dark:text-white">{question.title}</h4>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">{question.stem}</p>
+                  {!question.subquestions.length ? <div className="mt-3 grid gap-3 lg:grid-cols-2"><div><span className="text-xs font-bold text-slate-400">标准答案</span><p className="mt-1 whitespace-pre-wrap text-sm leading-6">{question.standardAnswer || '待教师补充'}</p></div><div><span className="text-xs font-bold text-slate-400">解析</span><p className="mt-1 whitespace-pre-wrap text-sm leading-6">{question.explanation || '暂无'}</p></div></div> : null}
+                  {question.subquestions.length ? <div className="mt-4 divide-y divide-slate-200 border-y border-slate-200 dark:divide-zinc-800 dark:border-zinc-800">{question.subquestions.map(subquestion => <div key={subquestion.displayNo} className="py-4"><div className="flex flex-wrap items-center gap-2"><strong className="text-sm">{subquestion.displayNo}</strong><span className="text-xs text-slate-500">{subquestion.questionType} · {subquestion.score === null ? '分值待确认' : `${subquestion.score} 分`}</span></div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">{subquestion.stem}</p><p className="mt-2 text-sm leading-6"><span className="mr-2 text-xs font-bold text-slate-400">答案</span>{subquestion.standardAnswer || '待教师补充'}</p>{subquestion.rubricPoints.length ? <p className="mt-2 text-xs leading-5 text-emerald-800">采分点：{subquestion.rubricPoints.map(point => `${point.point}（${point.score ?? '待确认'}分）`).join('；')}</p> : null}{subquestion.reviewReasons.length ? <p className="mt-2 text-xs leading-5 text-amber-800"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />{subquestion.reviewReasons.join('；')}</p> : null}<AnalysisEvidenceDetails unit={subquestion} /></div>)}</div> : null}
+                  {!question.subquestions.length && question.rubricPoints.length ? <p className="mt-3 text-xs leading-5 text-emerald-800">采分点：{question.rubricPoints.map(point => `${point.point}（${point.score ?? '待确认'}分）`).join('；')}</p> : null}
+                  {question.reviewReasons.length ? <p className="mt-3 text-xs leading-5 text-amber-800"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />{question.reviewReasons.join('；')}</p> : null}
+                  <AnalysisEvidenceDetails unit={question} />
+                </article>)}
+              </div> : <p className="mt-4 text-sm text-slate-500">材料解析完成后，点击“开始拆题”生成第一部分结构。</p>}
+            </section> : null}
             <label className="mt-5 block space-y-2"><span className="text-xs font-bold text-slate-500">补充要求</span><textarea value={workflowState.assignment.note} onChange={event => updateAssignment({ note: event.target.value })} rows={4} placeholder="可填写作业范围、答题要求或暂时没有电子文件的题目内容" className={`${inputClass} resize-none leading-6`} /></label>
             <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-5 dark:border-zinc-800">{assignmentReady ? <><button type="button" onClick={() => setActiveStage('rubric')} className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-emerald-700 dark:border-zinc-700">查看评分依据</button><button type="button" onClick={startSubmissionUpload} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white"><Upload className="h-4 w-4" />上传学生作业</button></> : <button type="button" onClick={completeAssignment} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">确认已布置</button>}</div>
           </div>

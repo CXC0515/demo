@@ -201,7 +201,87 @@ export interface DocumentAsset {
   mimeType: string;
   pageCount?: number;
   publicUrl?: string;
-  status: 'uploaded' | 'processing' | 'ready' | 'failed';
+  status: 'uploaded' | 'processing' | 'ready' | 'needs-review' | 'failed';
+  parseErrorCode?: string;
+}
+
+export type MaterialSourceFormat = 'docx' | 'pdf' | 'image' | 'text';
+
+export interface NormalizedDocumentBlock {
+  id: string;
+  order: number;
+  type: 'heading' | 'paragraph' | 'list-item' | 'table' | 'image' | 'formula' | 'page';
+  text: string;
+  markdown?: string;
+  listLabel?: string;
+  level?: number;
+  pageNumber?: number;
+  confidence?: number;
+}
+
+export interface NormalizedDocumentResource {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  publicUrl: string;
+}
+
+export interface MaterialParseWarning {
+  code: string;
+  message: string;
+  blockId?: string;
+}
+
+export interface NormalizedDocument {
+  assetId: string;
+  sourceFormat: MaterialSourceFormat;
+  markdown: string;
+  sourceMarkdown?: string;
+  sourcePreviewUrl?: string;
+  blocks: NormalizedDocumentBlock[];
+  resources: NormalizedDocumentResource[];
+  warnings: MaterialParseWarning[];
+  pageCount?: number;
+  parsedAt: string;
+}
+
+export interface AnalysisEvidenceRef {
+  assetKind: 'assignment' | 'reference-answer';
+  assetId: string;
+  fileName: string;
+  blockIds: string[];
+  quote: string;
+}
+
+export interface AnalyzedQuestionUnit {
+  displayNo: string;
+  title: string;
+  stem: string;
+  score: number | null;
+  questionType: string;
+  answerRequirement: string;
+  standardAnswer: string;
+  explanation: string;
+  rubricPoints: { point: string; score: number | null; description: string }[];
+  knowledgeCandidates: { nodeId: string; nodeName: string; confidence: number }[];
+  questionSource: AnalysisEvidenceRef;
+  answerSource: AnalysisEvidenceRef | null;
+  confidence: number;
+  reviewReasons: string[];
+}
+
+export interface AnalyzedQuestion extends AnalyzedQuestionUnit {
+  subquestions: AnalyzedQuestionUnit[];
+}
+
+export interface FirstSectionAnalysis {
+  taskId: string;
+  scope: string;
+  status: 'needs-review' | 'confirmed';
+  model: string;
+  materialAssetIds: string[];
+  questions: AnalyzedQuestion[];
+  createdAt: string;
 }
 
 export interface SourceEvidence {
@@ -254,6 +334,8 @@ export interface WorkflowState {
     answerFileNames: string[];
     note: string;
     assets: DocumentAsset[];
+    documents?: NormalizedDocument[];
+    firstSectionAnalysis?: FirstSectionAnalysis;
   };
   questions: GradingQuestion[];
   sourceEvidence: SourceEvidence[];

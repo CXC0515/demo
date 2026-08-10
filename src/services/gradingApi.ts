@@ -3,31 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { DocumentAsset, GradingRubricPoint, KnowledgeNode } from '../domain/types';
-
-interface AnalysisSourceDto {
-  assetKind: 'assignment' | 'reference-answer';
-  fileName: string;
-  pageNumber: number;
-  boundingBox: { x: number; y: number; width: number; height: number };
-  ocrText: string;
-  confidence: number;
-}
-
-export interface AnalyzedQuestionDto {
-  displayNo: string;
-  parentDisplayNo?: string;
-  title: string;
-  stem: string;
-  score: number;
-  questionType: string;
-  answerRequirement: string;
-  parseConfidence: number;
-  questionSource: AnalysisSourceDto;
-  referenceAnswer: { originalOcrText: string; normalizedText: string; source?: AnalysisSourceDto };
-  rubricPoints: GradingRubricPoint[];
-  knowledgeCandidates: { nodeId: string; nodeName: string; confidence: number }[];
-}
+import { DocumentAsset, FirstSectionAnalysis, KnowledgeNode, NormalizedDocument } from '../domain/types';
 
 const readErrorCode = async (response: Response) => {
   const body = await response.json().catch(() => ({})) as { code?: string };
@@ -44,6 +20,31 @@ export const uploadTaskMaterials = async (taskId: string, kind: 'assignment' | '
   return body.assets;
 };
 
+export interface TaskMaterialsResult {
+  assets: DocumentAsset[];
+  documents: NormalizedDocument[];
+}
+
+export const getTaskMaterials = async (taskId: string): Promise<TaskMaterialsResult> => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/materials`);
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return response.json() as Promise<TaskMaterialsResult>;
+};
+
+export const waitForTaskMaterials = async (taskId: string, assetIds: string[], timeoutMs = 15 * 60 * 1000) => {
+  const startedAt = Date.now();
+  const expectedIds = new Set(assetIds);
+  while (Date.now() - startedAt < timeoutMs) {
+    const result = await getTaskMaterials(taskId);
+    const expectedAssets = result.assets.filter(asset => expectedIds.has(asset.id));
+    const failed = expectedAssets.find(asset => asset.status === 'failed');
+    if (failed) throw new Error(failed.parseErrorCode ?? 'MATERIAL_PARSE_FAILED');
+    if (expectedAssets.length === expectedIds.size && expectedAssets.every(asset => asset.status === 'ready' || asset.status === 'needs-review')) return result;
+    await new Promise(resolve => window.setTimeout(resolve, 1200));
+  }
+  throw new Error('MATERIAL_PARSE_TIMEOUT');
+};
+
 export const analyzeTaskMaterials = async (taskId: string, knowledgeNodes: KnowledgeNode[]) => {
   const knowledgeCatalog = knowledgeNodes
     .filter(node => node.type === 'knowledge' || node.type === 'capability')
@@ -54,6 +55,14 @@ export const analyzeTaskMaterials = async (taskId: string, knowledgeNodes: Knowl
     body: JSON.stringify({ knowledgeCatalog })
   });
   if (!response.ok) throw new Error(await readErrorCode(response));
-  const body = await response.json() as { status: 'needs-review'; analysis: { questions: AnalyzedQuestionDto[] } };
-  return body.analysis.questions;
+  const body = await response.json() as { analysis: FirstSectionAnalysis };
+  return body.analysis;
+};
+
+export const getTaskAnalysis = async (taskId: string) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/analysis`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  const body = await response.json() as { analysis: FirstSectionAnalysis };
+  return body.analysis;
 };

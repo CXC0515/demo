@@ -1,0 +1,1 @@
+paddleocr[doc2md]==3.7.0

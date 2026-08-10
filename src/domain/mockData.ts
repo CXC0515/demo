@@ -449,6 +449,18 @@ export const initialStudents: Student[] = [
 
 export const initialTasks: WorkbenchTask[] = [
   {
+    id: 'task-20260810-1',
+    name: '20260810_1',
+    classId: 'c1',
+    className: '七年级 3 班',
+    node: 'collection',
+    nodeName: '评分依据待确认',
+    deadline: '今天 18:00',
+    createdAt: '2026-08-10T10:00:00+08:00',
+    collectionDeadlineAt: '2026-08-10T18:00:00+08:00',
+    status: 'pending'
+  },
+  {
     id: 't1',
     name: '《驿路梨花》阅读理解检测',
     classId: 'c1',
