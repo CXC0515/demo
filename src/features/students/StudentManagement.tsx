@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Users, UserPlus, FileSpreadsheet, Edit, Trash2, Tag,
   ArrowLeftRight, Filter, Search, X, Eye, HelpCircle, Award, Sparkles
@@ -23,6 +23,8 @@ interface StudentManagementProps {
   ) => Promise<RosterImportResult>;
   onBulkMoveClass: (studentIds: string[], targetClassId: string) => void;
   onBulkAddTags: (studentIds: string[], tags: string[]) => void;
+  targetStudentId?: string | null;
+  onTargetStudentHandled?: () => void;
 }
 
 export default function StudentManagement({
@@ -33,7 +35,9 @@ export default function StudentManagement({
   onDeleteStudent,
   onBulkImport,
   onBulkMoveClass,
-  onBulkAddTags
+  onBulkAddTags,
+  targetStudentId,
+  onTargetStudentHandled
 }: StudentManagementProps) {
   const [selectedClassId, setSelectedClassId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -78,6 +82,17 @@ export default function StudentManagement({
   const dailyBehaviorTags = ['课堂积极', '注意力易分散', '作业拖延', '书写认真', '情绪敏感', '同伴关系良好'];
   const selectedFamilyTags = (formData.familyStatusTag || '').split('、').filter(Boolean);
   const selectedBehaviorTags = formData.behaviorTags || [];
+
+  useEffect(() => {
+    if (!targetStudentId) return;
+    const targetStudent = students.find(student => student.id === targetStudentId);
+    if (!targetStudent) return;
+
+    setSelectedClassId(targetStudent.classId);
+    setSearchQuery('');
+    setSelectedStudentId(targetStudent.id);
+    onTargetStudentHandled?.();
+  }, [onTargetStudentHandled, students, targetStudentId]);
 
   // Filter students
   const filteredStudents = students.filter(s => {

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Edit3, Eye, MessageSquare, Search, TrendingUp } from 'lucide-react';
 import { SchoolClass, Student, TeacherObservation } from '../../domain/types';
 
@@ -17,6 +17,8 @@ interface StudentProfileV2Props {
   onEditStudent: (studentId: string) => void;
   onAddObservation: (studentId: string, note: TeacherObservation) => void;
   onShowToast: (message: string) => void;
+  targetStudentId?: string | null;
+  onTargetStudentHandled?: () => void;
 }
 
 const statusLabel = {
@@ -42,7 +44,9 @@ export default function StudentProfileV2({
   onSelectStudent,
   onEditStudent,
   onAddObservation,
-  onShowToast
+  onShowToast,
+  targetStudentId,
+  onTargetStudentHandled
 }: StudentProfileV2Props) {
   const [query, setQuery] = useState('');
   const [detailMode, setDetailMode] = useState(false);
@@ -61,6 +65,12 @@ export default function StudentProfileV2({
     onSelectStudent(studentId);
     setDetailMode(true);
   };
+
+  useEffect(() => {
+    if (!targetStudentId || !students.some(student => student.id === targetStudentId)) return;
+    openDetail(targetStudentId);
+    onTargetStudentHandled?.();
+  }, [onTargetStudentHandled, students, targetStudentId]);
 
   const addNote = () => {
     if (!note.trim()) return;

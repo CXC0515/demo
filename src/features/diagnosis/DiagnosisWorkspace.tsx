@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BarChart3, UserSquare2 } from 'lucide-react';
 import { SchoolClass, Student, TeacherObservation } from '../../domain/types';
 import ClassDiagnosis from './ClassDiagnosis';
@@ -20,9 +20,11 @@ interface DiagnosisWorkspaceProps {
   onAddObservation: (studentId: string, note: TeacherObservation) => void;
   onNavigate: (pageId: string, subPageId?: string) => void;
   onShowToast: (message: string) => void;
+  requestedTab?: DiagnosisTab | null;
+  onRequestedTabHandled?: () => void;
 }
 
-type DiagnosisTab = 'class' | 'student';
+export type DiagnosisTab = 'class' | 'student';
 
 const tabs: { id: DiagnosisTab; label: string; icon: React.ElementType }[] = [
   { id: 'class', label: '班级诊断', icon: BarChart3 },
@@ -39,9 +41,21 @@ export default function DiagnosisWorkspace({
   onEditStudent,
   onAddObservation,
   onNavigate,
-  onShowToast
+  onShowToast,
+  requestedTab,
+  onRequestedTabHandled
 }: DiagnosisWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<DiagnosisTab>('class');
+  const [studentDetailTargetId, setStudentDetailTargetId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!requestedTab) return;
+    setActiveTab(requestedTab);
+    if (requestedTab === 'student' && selectedStudentId) {
+      setStudentDetailTargetId(selectedStudentId);
+    }
+    onRequestedTabHandled?.();
+  }, [onRequestedTabHandled, requestedTab, selectedStudentId]);
 
   return (
     <div className="space-y-5 animate-fade-in" id="diagnosis-workspace-page">
@@ -93,6 +107,8 @@ export default function DiagnosisWorkspace({
           onEditStudent={onEditStudent}
           onAddObservation={onAddObservation}
           onShowToast={onShowToast}
+          targetStudentId={studentDetailTargetId}
+          onTargetStudentHandled={() => setStudentDetailTargetId(null)}
         />
       )}
     </div>

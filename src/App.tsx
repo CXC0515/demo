@@ -40,7 +40,7 @@ import KnowledgeLibrary from './features/knowledge/KnowledgeLibrary';
 import TagManagement from './features/tags/TagManagement';
 import LessonPlanWorkspace from './features/lesson-plan/LessonPlanWorkspace';
 import GradingWorkspace from './features/grading/GradingWorkspace';
-import DiagnosisWorkspace from './features/diagnosis/DiagnosisWorkspace';
+import DiagnosisWorkspace, { DiagnosisTab } from './features/diagnosis/DiagnosisWorkspace';
 import CareerPlaceholder from './features/career/CareerPlaceholder';
 
 const AI_GRADING_TEST_TASK_ID = 'task-20260810-1';
@@ -79,6 +79,8 @@ export default function App() {
   const [activePage, setActivePage] = useState<PageId>('workbench');
   const [selectedClassId, setSelectedClassId] = useState<string>('c5');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+  const [studentManagementTargetId, setStudentManagementTargetId] = useState<string | null>(null);
+  const [diagnosisRequestedTab, setDiagnosisRequestedTab] = useState<DiagnosisTab | null>(null);
   const [lowConfidenceThreshold, setLowConfidenceThreshold] = useState<number>(0.75);
   const [ocrHumanReviewThreshold, setOcrHumanReviewThreshold] = useState<number>(0.70);
   const [ocrAutoPassThreshold, setOcrAutoPassThreshold] = useState<number>(0.90);
@@ -477,10 +479,15 @@ export default function App() {
               classes={classes}
               selectedClassId={selectedClassId}
               onSelectClass={setSelectedClassId}
-              onNavigate={handleNavigate}
+              onManageStudent={(studentId) => {
+                setSelectedStudentId(studentId);
+                setStudentManagementTargetId(studentId);
+                setActivePage('student-mgmt');
+              }}
               onViewStudentProfile={(studentId) => {
                 setSelectedStudentId(studentId);
-                handleNavigate('profile');
+                setDiagnosisRequestedTab('student');
+                setActivePage('diagnosis-workspace');
               }}
               onAddObservation={(studentId, text) => {
                 return persistObservation(studentId, {
@@ -518,6 +525,8 @@ export default function App() {
               onBulkImport={handleBulkImport}
               onBulkMoveClass={handleBulkMoveClass}
               onBulkAddTags={handleBulkAddTags}
+              targetStudentId={studentManagementTargetId}
+              onTargetStudentHandled={() => setStudentManagementTargetId(null)}
             />
           )}
 
@@ -580,12 +589,15 @@ export default function App() {
               onSelectStudent={setSelectedStudentId}
               onEditStudent={(studentId) => {
                 setSelectedStudentId(studentId);
+                setStudentManagementTargetId(studentId);
                 setActivePage('student-mgmt');
-                triggerToast('已跳转到学生管理，请在列表中编辑该学生档案');
+                triggerToast('已打开该学生档案');
               }}
               onAddObservation={handleAddObservation}
               onNavigate={handleNavigate}
               onShowToast={triggerToast}
+              requestedTab={diagnosisRequestedTab}
+              onRequestedTabHandled={() => setDiagnosisRequestedTab(null)}
             />
           )}
 
