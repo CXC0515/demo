@@ -21,7 +21,10 @@ export class OpenAICompatibleVisionRegionLocator {
     sourceImagePath: string,
     questionNos: string[],
     analysis: FirstSectionAnalysis,
-    layoutHints: Array<{ text: string; boundingBox: [number, number, number, number] }> = []
+    layoutHints: Array<{
+      text: string;
+      boundingBox: { x: number; y: number; width: number; height: number };
+    }> = []
   ) {
     const questions = analysis.questions
       .filter(question => questionNos.includes(question.displayNo))
@@ -55,7 +58,7 @@ export class OpenAICompatibleVisionRegionLocator {
               '所有 boundingBox 使用相对整页的 0 到 1 坐标。题目或证据无法可靠定位时 confidence 降低、needsReview=true 并说明原因。页面不存在的题目不要返回。',
               '题目级 needsReview 只表示区域坐标是否不可靠；字迹难认只标记对应 evidenceUnits.needsReview，不得因此降低题目定位状态。',
               `待定位题目：${JSON.stringify(questions)}`,
-              layoutHints.length ? `Paddle 版面候选（只辅助精确坐标，文字可能识别错误）：${JSON.stringify(layoutHints)}` : '',
+              layoutHints.length ? `Paddle 原始版面块（坐标可信，文字和返回顺序可能有误；单题块优先沿用，合并块才在块内拆分）：${JSON.stringify(layoutHints)}` : '',
               '严格返回 JSON：{"items":[{"displayNo":"4","boundingBox":{"x":0,"y":0,"width":0.1,"height":0.1},"evidenceUnits":[{"evidenceId":"4-answer","kind":"choice","boundingBox":{"x":0,"y":0,"width":0.1,"height":0.1},"provisionalText":"B","confidence":0,"needsReview":false,"reason":""}],"confidence":0,"needsReview":false,"reason":""}]}'
             ].join('\n')
           }, {

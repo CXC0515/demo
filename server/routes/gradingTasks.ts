@@ -241,7 +241,20 @@ router.post('/:taskId/vision-validation', async (request, response) => {
     }));
     const locator = new OpenAICompatibleVisionRegionLocator(config);
     const locatedPages = await Promise.all(pageSources.map(async page => {
-      const located = await locator.locate(page.sourceImagePath, parsedRequest.data.questionNos, analysis);
+      const artifactPage = parsedArtifact.data.pages.find(candidate => candidate.pageNumber === page.pageNumber);
+      const layoutHints = artifactPage?.prunedResult.parsing_res_list.map(block => {
+        const [left, top, right, bottom] = block.block_bbox;
+        return {
+          text: block.block_content.trim().slice(0, 160),
+          boundingBox: {
+            x: left / artifactPage.prunedResult.width,
+            y: top / artifactPage.prunedResult.height,
+            width: (right - left) / artifactPage.prunedResult.width,
+            height: (bottom - top) / artifactPage.prunedResult.height
+          }
+        };
+      }) ?? [];
+      const located = await locator.locate(page.sourceImagePath, parsedRequest.data.questionNos, analysis, layoutHints);
       return located.items.map(item => ({ ...item, pageNumber: page.pageNumber }));
     }));
     const expectedEvidenceIds = new Map(analysis.questions

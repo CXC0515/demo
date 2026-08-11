@@ -39,8 +39,15 @@ export class PaddleVisionMaterialParser implements MaterialParser {
         filePath: input.filePath,
         model: this.config.paddleModel || Model.PaddleOCRVL16,
         options: {
+          // Crops must use the same coordinate space as Paddle's returned input image.
+          // Orientation and unwarping are handled before parsing when we can retain the transform.
+          useDocOrientationClassify: false,
+          useDocUnwarping: false,
           useLayoutDetection: true,
           useChartRecognition: true,
+          useOcrForImageBlock: true,
+          mergeLayoutBlocks: false,
+          layoutShapeMode: 'rect',
           prettifyMarkdown: true,
           showFormulaNumber: true,
           returnMarkdownImages: true

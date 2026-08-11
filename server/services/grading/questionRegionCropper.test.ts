@@ -26,6 +26,17 @@ const makePage = async (pageNumber: number) => {
   return { pageNumber, sourceImagePath: sourcePath };
 };
 
+const makeChoicePage = async () => {
+  await mkdir(sourceDirectory, { recursive: true });
+  const sourcePath = path.join(sourceDirectory, `${assetId}-choices.jpg`);
+  const ink = Buffer.from('<svg width="800" height="1000"><text x="70" y="320" font-size="24">3 [A] [B] [C] [D]</text><text x="70" y="350" font-size="24">4 [A] [B] [C] [D]</text></svg>');
+  await sharp({ create: { width: 800, height: 1000, channels: 3, background: 'white' } })
+    .composite([{ input: ink }])
+    .jpeg()
+    .toFile(sourcePath);
+  return { pageNumber: 1, sourceImagePath: sourcePath };
+};
+
 const located = (overrides: Partial<VisionLocatedRegion> = {}): VisionLocatedRegion => ({
   displayNo: '1',
   pageNumber: 1,
@@ -107,8 +118,8 @@ test('uses the page returned by visual location for multi-page submissions', asy
   }
 });
 
-test('recovers an unnumbered choice row only when neighboring question numbers establish its sequence', async () => {
-  const page = await makePage(1);
+test('splits a merged Paddle block using image rows instead of averaged coordinates', async () => {
+  const page = await makeChoicePage();
   const artifact: PaddleParserArtifact = {
     model: 'PaddleOCR-VL-1.6',
     pages: [{
@@ -117,9 +128,7 @@ test('recovers an unnumbered choice row only when neighboring question numbers e
         width: 800,
         height: 1000,
         parsing_res_list: [
-          { block_label: 'text', block_content: '3 [A] [B] [C] [D]', block_bbox: [60, 300, 300, 325], block_id: 1, block_order: 1 },
-          { block_label: 'text', block_content: '[A] [B] [C] [D]', block_bbox: [60, 330, 300, 355], block_id: 2, block_order: 2 },
-          { block_label: 'text', block_content: '5. 下一题', block_bbox: [60, 370, 400, 430], block_id: 3, block_order: 3 }
+          { block_label: 'text', block_content: '3 [A] [B] [C] [D]\n4 [A] [B] [C] [D]', block_bbox: [60, 290, 350, 360], block_id: 1, block_order: 2 }
         ]
       }
     }]
@@ -131,13 +140,104 @@ test('recovers an unnumbered choice row only when neighboring question numbers e
       [page],
       ['4'],
       new Map([['4', ['4-1']]]),
-      [],
+      [located({
+        displayNo: '4',
+        boundingBox: { x: 0.07, y: 0.55, width: 0.32, height: 0.03 },
+        evidenceUnits: [{
+          ...located().evidenceUnits[0],
+          evidenceId: '4-1',
+          kind: 'choice',
+          boundingBox: { x: 0.07, y: 0.55, width: 0.32, height: 0.03 }
+        }]
+      })],
       artifact
     );
-    assert.equal(region.locatorSource, 'paddle-layout');
+    assert.equal(region.locatorSource, 'vision-layout');
     assert.equal(region.locationStatus, 'located');
-    assert.ok(region.region.y >= 325 && region.region.y < 335, JSON.stringify(region.region));
-    assert.ok(region.region.y + region.region.height <= 360);
+    assert.ok(region.region.y >= 325 && region.region.y < 345, JSON.stringify(region.region));
+    assert.ok(region.region.y + region.region.height <= 365);
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('uses geometric Paddle blocks even when block_order is reversed', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [
+          { block_label: 'text', block_content: '4 [A] [B] [C] [D]', block_bbox: [60, 340, 300, 365], block_id: 2, block_order: 1 },
+          { block_label: 'text', block_content: '3 [A] [B] [C] [D]', block_bbox: [60, 300, 300, 325], block_id: 1, block_order: 2 }
+        ]
+      }
+    }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['4'],
+      new Map([['4', ['4-1']]]),
+      [located({
+        displayNo: '4',
+        boundingBox: { x: 0.07, y: 0.33, width: 0.32, height: 0.05 },
+        evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '4-1', kind: 'choice' }]
+      })],
+      artifact
+    );
+    assert.ok(region.region.y >= 335 && region.region.y < 345, JSON.stringify(region.region));
+    assert.ok(region.region.y + region.region.height <= 370);
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('keeps continuation blocks in the same column when other columns interleave', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [
+          { block_label: 'text', block_content: '5. ① 活动名称', block_bbox: [60, 700, 260, 725], block_id: 1, block_order: 1 },
+          { block_label: 'text', block_content: '13 [A] [B] [C] [D]', block_bbox: [410, 715, 650, 740], block_id: 2, block_order: 2 },
+          { block_label: 'text', block_content: '② 活动说明', block_bbox: [60, 735, 330, 765], block_id: 3, block_order: 3 },
+          { block_label: 'text', block_content: '7. 下一题', block_bbox: [60, 850, 330, 880], block_id: 4, block_order: 4 }
+        ]
+      }
+    }]
+  };
+  const visual = located({
+    displayNo: '5',
+    boundingBox: { x: 0.05, y: 0.68, width: 0.9, height: 0.15 },
+    evidenceUnits: [
+      { ...located().evidenceUnits[0], evidenceId: '5-1', boundingBox: { x: 0.08, y: 0.7, width: 0.3, height: 0.04 } },
+      { ...located().evidenceUnits[0], evidenceId: '5-2', boundingBox: { x: 0.08, y: 0.74, width: 0.4, height: 0.05 } }
+    ]
+  });
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['5'],
+      new Map([['5', ['5-1', '5-2']]]),
+      [visual],
+      artifact
+    );
+    assert.ok(region.region.x + region.region.width < 380, JSON.stringify(region.region));
+    assert.ok(region.region.y <= 700 && region.region.y + region.region.height >= 765);
   } finally {
     await rm(page.sourceImagePath, { force: true });
     await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });

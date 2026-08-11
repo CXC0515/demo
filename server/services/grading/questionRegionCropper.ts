@@ -82,7 +82,8 @@ const writeCrop = async (sourcePath: string, targetPath: string, region: PixelRe
 interface PaddleRow {
   key: string;
   region: PixelRegion;
-  inferred?: boolean;
+  lineIndex?: number;
+  lineCount?: number;
 }
 
 const circledNumbers = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
@@ -98,48 +99,40 @@ const answerRowFromPaddle = (
   const page = artifact.pages.find(candidate => candidate.pageNumber === pageNumber);
   if (!page) return undefined;
   const orderedBlocks = [...page.prunedResult.parsing_res_list]
-    .filter(block => block.block_order !== null && block.block_order !== undefined)
-    .sort((first, second) => (first.block_order ?? 0) - (second.block_order ?? 0));
-  const rowFor = (block: (typeof orderedBlocks)[number], blockIndex: number, lineIndex: number, lines: string[]): PaddleRow => {
+    .sort((first, second) => first.block_bbox[1] - second.block_bbox[1] || first.block_bbox[0] - second.block_bbox[0]);
+  const blockRegion = (
+    block: (typeof orderedBlocks)[number],
+    blockIndex: number,
+    lineIndex?: number,
+    lineCount?: number
+  ): PaddleRow => {
     const [left, top, right, bottom] = block.block_bbox;
-    const lineHeight = (bottom - top) / lines.length;
     return {
-      key: `${blockIndex}:${lineIndex}`,
+      key: lineIndex === undefined ? `${blockIndex}` : `${blockIndex}:${lineIndex}`,
       region: {
         x: left,
-        y: Math.floor(top + lineHeight * lineIndex),
+        y: top,
         width: Math.max(1, right - left),
-        height: Math.max(1, Math.ceil(lineHeight))
-      }
+        height: Math.max(1, bottom - top)
+      },
+      lineIndex,
+      lineCount
     };
   };
   if (kind === 'choice') {
     const choices: PaddleRow[] = [];
-    const layoutRows: Array<PaddleRow & { number?: string; hasOptions: boolean }> = [];
     for (const [blockIndex, block] of orderedBlocks.entries()) {
       const lines = block.block_content.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-      lines.forEach((line, lineIndex) => layoutRows.push({
-        ...rowFor(block, blockIndex, lineIndex, lines),
-        number: line.match(/^(\d+)(?:\s|[.、\[])/)?.[1],
-        hasOptions: (line.match(/\[[A-Z]\]/gi)?.length ?? 0) >= 2
-      }));
       const lineIndex = lines.findIndex(line => line.match(/^(\d+)(?:\s|[.、\[])/)?.[1] === displayNo && /\[[A-Z]\]/i.test(line));
-      if (lineIndex >= 0) choices.push(rowFor(block, blockIndex, lineIndex, lines));
+      if (lineIndex >= 0) choices.push(blockRegion(block, blockIndex, lineIndex, lines.length));
     }
     const nearest = choices.sort((first, second) => {
       const center = (region: PixelRegion) => region.y + region.height / 2;
       return Math.abs(center(first.region) - center(visualQuestion)) - Math.abs(center(second.region) - center(visualQuestion));
     })[0];
     if (nearest) return nearest;
-    const inferred = layoutRows.find((row, index) => {
-      if (!row.hasOptions || row.number) return false;
-      const previousNumber = [...layoutRows.slice(0, index)].reverse().find(candidate => candidate.number)?.number;
-      const nextNumber = layoutRows.slice(index + 1).find(candidate => candidate.number)?.number;
-      return Number(previousNumber) === Number(displayNo) - 1 && Number(nextNumber) === Number(displayNo) + 1;
-    });
-    if (inferred) return { ...inferred, inferred: true };
   }
-  const startIndex = orderedBlocks
+  const start = orderedBlocks
     .map((block, index) => ({ block, index }))
     .filter(({ block }) => block.block_content.split(/\r?\n/).some(line => line.trim().match(/^(\d+)(?:\s|[.、])/i)?.[1] === displayNo))
     .sort((first, second) => {
@@ -149,25 +142,83 @@ const answerRowFromPaddle = (
         return -overlapRatio(region, visualQuestion) * 10_000 + Math.abs((top + bottom) / 2 - (visualQuestion.y + visualQuestion.height / 2));
       };
       return distance(first) - distance(second);
-    })[0]?.index ?? -1;
-  if (startIndex < 0) return undefined;
-  let endIndex = startIndex + 1;
-  while (endIndex < orderedBlocks.length) {
-    const nextNumber = orderedBlocks[endIndex].block_content.trim().match(/^(\d+)(?:\s|[.、])/i)?.[1];
-    if (nextNumber && nextNumber !== displayNo) break;
-    endIndex += 1;
-  }
+    })[0];
+  if (!start) return undefined;
+  const [startLeft, startTop, startRight] = start.block.block_bbox;
+  const startWidth = Math.max(1, startRight - startLeft);
+  const sameLane = (block: (typeof orderedBlocks)[number]) => {
+    const [left, , right] = block.block_bbox;
+    const overlap = Math.max(0, Math.min(startRight, right) - Math.max(startLeft, left));
+    const overlapRatio = overlap / Math.max(1, Math.min(startWidth, right - left));
+    return overlapRatio >= 0.25 || Math.abs(left - startLeft) <= page.prunedResult.width * 0.04;
+  };
+  const nextAnchorTop = orderedBlocks
+    .filter(block => {
+      const [, top] = block.block_bbox;
+      const nextNumber = block.block_content.trim().match(/^(\d+)(?:\s|[.、])/i)?.[1];
+      return top > startTop && nextNumber && nextNumber !== displayNo && sameLane(block);
+    })
+    .map(block => block.block_bbox[1])
+    .sort((first, second) => first - second)[0] ?? Number.POSITIVE_INFINITY;
+  const questionBlocks = orderedBlocks
+    .map((block, index) => ({ block, index }))
+    .filter(({ block }) => block.block_bbox[3] >= startTop && block.block_bbox[1] < nextAnchorTop && sameLane(block));
   const embeddedMarker = evidenceId.match(/[①②③④⑤⑥⑦⑧⑨⑩]/)?.[0];
   const fieldIndex = Number(evidenceId.match(/-(\d+)$/)?.[1] ?? 0);
   const marker = embeddedMarker ?? circledNumbers[fieldIndex - 1];
   if (!marker) return undefined;
-  for (let blockIndex = startIndex; blockIndex < endIndex; blockIndex += 1) {
-    const block = orderedBlocks[blockIndex];
+  for (const { block, index: blockIndex } of questionBlocks) {
     const lines = block.block_content.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     const lineIndex = lines.findIndex(line => line.includes(marker));
-    if (lineIndex >= 0) return rowFor(block, blockIndex, lineIndex, lines);
+    if (lineIndex >= 0 && lines.length === 1) return blockRegion(block, blockIndex);
   }
   return undefined;
+};
+
+const alignBlockLineToInk = async (sourcePath: string, row: PaddleRow): Promise<PaddleRow | undefined> => {
+  if (row.lineIndex === undefined || !row.lineCount || row.lineCount === 1) return row;
+  const { data, info } = await sharp(sourcePath)
+    .extract({ left: row.region.x, top: row.region.y, width: row.region.width, height: row.region.height })
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const activeRows: number[] = [];
+  for (let y = 0; y < info.height; y += 1) {
+    let darkPixels = 0;
+    for (let x = 0; x < info.width; x += 1) if (data[y * info.width + x] < 210) darkPixels += 1;
+    const darkRatio = darkPixels / info.width;
+    if (darkPixels >= Math.max(2, info.width * 0.015) && darkRatio < 0.7) activeRows.push(y);
+  }
+  const bands = activeRows.reduce<Array<{ top: number; bottom: number }>>((result, y) => {
+    const current = result[result.length - 1];
+    if (!current || y - current.bottom > 2) result.push({ top: y, bottom: y });
+    else current.bottom = y;
+    return result;
+  }, []).filter(band => band.bottom - band.top >= 2);
+  while (bands.length > row.lineCount) {
+    let closestIndex = 0;
+    let closestGap = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < bands.length - 1; index += 1) {
+      const gap = bands[index + 1].top - bands[index].bottom;
+      if (gap < closestGap) {
+        closestGap = gap;
+        closestIndex = index;
+      }
+    }
+    bands.splice(closestIndex, 2, { top: bands[closestIndex].top, bottom: bands[closestIndex + 1].bottom });
+  }
+  const band = bands.length === row.lineCount ? bands[row.lineIndex] : undefined;
+  if (!band) return undefined;
+  const previous = bands[row.lineIndex - 1];
+  const next = bands[row.lineIndex + 1];
+  const upperBoundary = previous ? Math.floor((previous.bottom + band.top + 1) / 2) : 0;
+  const lowerBoundary = next ? Math.floor((band.bottom + next.top + 1) / 2) : info.height;
+  const top = row.region.y + Math.max(upperBoundary, band.top - 2);
+  const bottom = row.region.y + Math.min(lowerBoundary, band.bottom + 3);
+  return {
+    ...row,
+    region: { ...row.region, y: top, height: Math.max(1, bottom - top) }
+  };
 };
 
 const unionRegions = (regions: PixelRegion[]): PixelRegion => {
@@ -208,35 +259,6 @@ const padRegion = (region: PixelRegion, limit: PixelRegion, xPadding = 12, yPadd
   const right = Math.max(left + 1, Math.min(limitRight, region.x + region.width + xPadding));
   const bottom = Math.max(top + 1, Math.min(limitBottom, region.y + region.height + yPadding));
   return { x: left, y: top, width: right - left, height: bottom - top };
-};
-
-const snapInferredRowToInk = async (sourcePath: string, row: PixelRegion): Promise<PixelRegion> => {
-  const metadata = await sharp(sourcePath).metadata();
-  if (!metadata.width || !metadata.height) return row;
-  const search = padRegion(row, { x: 0, y: 0, width: metadata.width, height: metadata.height }, 8, row.height);
-  const { data, info } = await sharp(sourcePath)
-    .extract({ left: search.x, top: search.y, width: search.width, height: search.height })
-    .greyscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const activeRows: number[] = [];
-  for (let y = 0; y < info.height; y += 1) {
-    let dark = 0;
-    for (let x = 0; x < info.width; x += 1) if (data[y * info.width + x] < 165) dark += 1;
-    if (dark >= Math.max(4, info.width * 0.025) && dark < info.width * 0.65) activeRows.push(y);
-  }
-  const bands = activeRows.reduce<Array<{ top: number; bottom: number }>>((result, y) => {
-    const current = result[result.length - 1];
-    if (!current || y - current.bottom > 2) result.push({ top: y, bottom: y });
-    else current.bottom = y;
-    return result;
-  }, []).filter(band => band.bottom - band.top >= 2);
-  const originalCenter = row.y + row.height / 2;
-  const target = bands.find(band => search.y + (band.top + band.bottom) / 2 >= originalCenter);
-  if (!target) return row;
-  const top = Math.max(0, search.y + target.top - 2);
-  const bottom = Math.min(metadata.height, search.y + target.bottom + 3);
-  return { x: row.x, y: top, width: row.width, height: Math.max(1, bottom - top) };
 };
 
 export const createVisionLocatedRegions = async (
@@ -283,9 +305,7 @@ export const createVisionLocatedRegions = async (
     }] : []);
     const evidencePlans = await Promise.all(sourceEvidence.map(async evidence => {
       const locatedRow = fallbackChoiceRow ?? (artifact ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, evidence.evidenceId, evidence.kind, visualQuestion) : undefined);
-      const paddleRow = locatedRow?.inferred
-        ? { ...locatedRow, region: await snapInferredRowToInk(page.sourceImagePath, locatedRow.region) }
-        : locatedRow;
+      const paddleRow = locatedRow ? await alignBlockLineToInk(page.sourceImagePath, locatedRow) : undefined;
       return {
         evidence,
         visualRegion: toPixels(evidence.boundingBox, metadata.width!, metadata.height!),
@@ -300,7 +320,7 @@ export const createVisionLocatedRegions = async (
       questionPixels,
       fullPage,
       12,
-      sourceEvidence.length && sourceEvidence.every(unit => unit.kind === 'choice') ? 2 : 8
+      sourceEvidence.length && sourceEvidence.every(unit => unit.kind === 'choice') && paddleRows.length === evidencePlans.length ? 0 : 8
     );
     const questionFileName = `question-${displayNo}.jpg`;
     const questionPath = path.join(cropDirectory, questionFileName);
@@ -318,7 +338,7 @@ export const createVisionLocatedRegions = async (
         : visualRegion;
       const isInsideQuestion = containsRegion(questionPixels, rawRegion);
       const boundedRegion = paddleRow
-        ? padRegion(rawRegion, questionRegion, 12, 2)
+        ? padRegion(rawRegion, questionRegion, 12, paddleRow.lineCount && paddleRow.lineCount > 1 ? 0 : 2)
         : expandRegion(rawRegion, questionRegion, metadata.width!, metadata.height!);
       const safeId = `${evidenceIndex + 1}-${Buffer.from(evidence.evidenceId).toString('hex').slice(0, 20)}`;
       const fileName = `question-${displayNo}-evidence-${safeId}.jpg`;
