@@ -7,10 +7,28 @@ import { ModelConfig } from '../../config/modelConfig';
 import { StoredMaterial } from '../../repositories/materialRepository';
 import { getVisionValidationResult } from '../../repositories/visionValidationRepository';
 import { trialGradingModelOutputSchema, TrialGradingRequest } from '../../schemas/trialGrading';
+import { VisionValidationItem } from '../../../src/domain/types';
+import { formatPaddleTextForDisplay, recognitionTextsConflict } from './trialScore';
 
 const extractJson = (value: string) => {
   const fenced = value.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
   return JSON.parse((fenced ?? value).trim());
+};
+
+export const buildTrialAnswerEvidence = (item: VisionValidationItem) => {
+  const paddleAnswer = formatPaddleTextForDisplay(item.paddleText);
+  const recognitionConflict = !item.selectedOption && recognitionTextsConflict(item.paddleText, item.lunaText);
+  return {
+    displayNo: item.displayNo,
+    answer: item.selectedOption || paddleAnswer || item.lunaText,
+    paddleAnswer,
+    lunaReview: item.lunaText,
+    recognitionConflict,
+    crossedOutText: item.crossedOutText,
+    existingMarkings: item.existingMarkings,
+    confidence: item.confidence,
+    needsReview: item.needsReview || item.locationStatus !== 'located' || recognitionConflict
+  };
 };
 
 export class OpenAICompatibleTrialGrader {
@@ -25,21 +43,17 @@ export class OpenAICompatibleTrialGrader {
         assetId: material.id,
         studentName: student.studentName,
         studentNo: student.studentNo,
-        recognizedAnswers: (getVisionValidationResult(taskId, material.id)?.items ?? []).map(item => ({
-          displayNo: item.displayNo,
-          answer: item.lunaText || item.selectedOption || '',
-          answerFields: item.answerFields ?? [],
-          crossedOutText: item.crossedOutText,
-          confidence: item.confidence,
-          needsReview: item.needsReview || item.locationStatus !== 'located'
-        }))
+        recognizedAnswers: (getVisionValidationResult(taskId, material.id)?.items ?? []).map(buildTrialAnswerEvidence)
       }];
     });
     const prompt = [
       '你是语文教师的试批助手。依据已确认的题目、标准答案、采分点和教师规则，逐题评阅每份学生答卷的第一部分。',
       '只评价学生作答内容。答题卡上已有的分数、打勾、批注、阅卷痕迹和题旁数字都不是评分依据，必须忽略。',
       '只使用 recognizedAnswers 中已按题裁图识别的答案。不得引用整页 OCR，不得把相邻题答案混入，也不得补写学生未作答的内容。',
-      'crossedOutText 是学生明确划掉的内容，评分时必须排除。recognizedAnswers 标记 needsReview 时，评分结果也必须 needsTeacherReview=true。',
+      'answer 与 paddleAnswer 是 PaddleOCR 主证据，评分默认以它们为准；lunaReview 只能作为视觉复核，不能静默覆盖 PaddleOCR。',
+      'crossedOutText 是 Luna 从图片确认的划掉内容，评分时必须从主证据中排除。existingMarkings 是已有分数、勾叉或批注，必须忽略。',
+      'recognitionConflict=true 表示两路证据有实质差异：不得自行选择更通顺或更接近标准答案的一路，必须 needsTeacherReview=true，并在 reason 中说明冲突。',
+      'recognizedAnswers 标记 needsReview 时，评分结果也必须 needsTeacherReview=true。',
       'score 必须在 0 到 fullScore 之间。标准答案或采分依据不足以可靠评分时，score 返回 null、needsTeacherReview=true，并说明缺少什么依据。',
       'matchedPoints 和 missedPoints 必须对应输入采分点；没有明确采分点时保持空数组。confidence 取 0 到 1。',
       '必须为每个 questionId 与 assetId 组合返回一条结果，不得遗漏。',

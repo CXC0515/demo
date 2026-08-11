@@ -57,6 +57,7 @@ import {
   WorkbenchTask,
   WorkflowState
 } from '../../domain/types';
+import { orderCalibrationSamplesForTrial } from '../../domain/calibrationSamples';
 import ReviewQueuePage from './ReviewQueuePage';
 import SourceEvidenceViewer from './SourceEvidenceViewer';
 import { analyzeTaskMaterials, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, runVisionValidation, saveTaskRubric, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
@@ -245,7 +246,7 @@ const applyTrialSamples = (states: QuestionGradingState[], result: TrialGradingR
   if (!result) return states;
   return states.map(state => ({
     ...state,
-    calibrationSamples: result.samples.filter(sample => sample.questionId === state.questionId)
+    calibrationSamples: orderCalibrationSamplesForTrial(result.samples.filter(sample => sample.questionId === state.questionId))
   }));
 };
 
@@ -810,13 +811,13 @@ export default function GradingWorkflow({
     try {
       for (const submission of matchedSubmissions) {
         const stored = visionValidationByAsset[submission.id] ?? await getVisionValidation(selectedTask.id, submission.id);
-        const coversCurrentQuestions = currentQuestionNos.every(displayNo => stored?.items.some(item => item.displayNo === displayNo));
-        if (coversCurrentQuestions && stored) {
+        const missingQuestionNos = currentQuestionNos.filter(displayNo => !stored?.items.some(item => item.displayNo === displayNo));
+        if (!missingQuestionNos.length && stored) {
           setVisionValidationByAsset(current => ({ ...current, [submission.id]: stored }));
           continue;
         }
         setVisionValidationPhase(current => ({ ...current, [submission.id]: 'loading' }));
-        const result = await runVisionValidation(selectedTask.id, submission.id, currentQuestionNos);
+        const result = await runVisionValidation(selectedTask.id, submission.id, missingQuestionNos);
         setVisionValidationByAsset(current => ({ ...current, [submission.id]: result }));
         setVisionValidationPhase(current => ({ ...current, [submission.id]: 'ready' }));
       }

@@ -16,7 +16,7 @@ import { getMaterials, replaceMaterialsForKind, StoredMaterial, updateMaterial }
 import { getTaskRubrics, saveTaskRubric } from '../repositories/gradingRubricRepository';
 import { getParserArtifact } from '../repositories/parserArtifactRepository';
 import { deleteTrialGradingResult, getTrialGradingResult, saveTrialGradingResult } from '../repositories/trialGradingRepository';
-import { getVisionValidationResult, saveVisionValidationResult } from '../repositories/visionValidationRepository';
+import { getVisionValidationResult, NON_CHOICE_RECOGNITION_VERSION, saveVisionValidationResult } from '../repositories/visionValidationRepository';
 import { paddleParserArtifactSchema, visionValidationRequestSchema } from '../schemas/paddleParserArtifact';
 import { trialGradingRequestSchema } from '../schemas/trialGrading';
 import { gradingRubricInputSchema } from '../schemas/gradingRubric';
@@ -317,6 +317,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
           };
         });
         return {
+          pipelineVersion: NON_CHOICE_RECOGNITION_VERSION,
           displayNo: region.displayNo,
           region: region.region,
           locatorSource: region.locatorSource,

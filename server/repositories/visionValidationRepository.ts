@@ -21,6 +21,12 @@ const loadResults = () => {
 
 const results = loadResults();
 const keyFor = (taskId: string, assetId: string) => `${taskId}:${assetId}`;
+export const NON_CHOICE_RECOGNITION_VERSION = 2;
+
+export const isVisionValidationItemCurrent = (item: VisionValidationResult['items'][number]) => {
+  const isChoice = Boolean(item.evidenceUnits?.length && item.evidenceUnits.every(unit => unit.kind === 'choice'));
+  return isChoice || item.pipelineVersion === NON_CHOICE_RECOGNITION_VERSION;
+};
 
 const persist = () => {
   const temporary = `${dataPath}.tmp`;
@@ -28,7 +34,11 @@ const persist = () => {
   renameSync(temporary, dataPath);
 };
 
-export const getVisionValidationResult = (taskId: string, assetId: string) => results.get(keyFor(taskId, assetId));
+export const getVisionValidationResult = (taskId: string, assetId: string) => {
+  const result = results.get(keyFor(taskId, assetId));
+  if (!result) return undefined;
+  return { ...result, items: result.items.filter(isVisionValidationItemCurrent) };
+};
 
 export const saveVisionValidationResult = (result: VisionValidationResult) => {
   results.set(keyFor(result.taskId, result.assetId), result);

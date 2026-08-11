@@ -220,6 +220,7 @@ export interface TrialGradingResult {
 }
 
 export interface VisionValidationItem {
+  pipelineVersion?: number;
   displayNo: string;
   region: { x: number; y: number; width: number; height: number; pageNumber: number };
   locatorSource: 'paddle-layout' | 'inferred-gap' | 'vision-layout';
