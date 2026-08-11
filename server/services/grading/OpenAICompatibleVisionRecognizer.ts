@@ -13,15 +13,20 @@ const extractJson = (value: string) => {
   return JSON.parse((fenced ?? value).trim());
 };
 
+export const getWholeQuestionAnswer = (recognizedAnswer: string, answerFields: Array<{ text: string }>) =>
+  recognizedAnswer.trim() || [...new Set(answerFields.map(field => field.text.trim()).filter(Boolean))].join('\n');
+
 export const buildRecognitionRegionPrompt = (region: LocatedRegion) => {
+  const isChoice = region.evidenceUnits.length > 0 && region.evidenceUnits.every(unit => unit.kind === 'choice');
   const choiceCandidates = region.evidenceUnits
     .filter(unit => unit.kind === 'choice')
     .map(unit => ({ evidenceId: unit.evidenceId, kind: unit.kind, paddleText: unit.paddleText }));
-  const expectedFields = region.evidenceUnits.map(unit => ({ evidenceId: unit.evidenceId, kind: unit.kind }));
   return [
     `题组 ${region.displayNo}`,
     `PaddleOCR 整题原文：${JSON.stringify(region.paddleText)}`,
-    `待复核字段：${JSON.stringify(expectedFields)}`,
+    isChoice
+      ? '这是选择题，请返回 selectedOption，answerFields 保持空数组'
+      : '这是非选择题，请按图片原有行序将整题作答写入 recognizedAnswer，answerFields 保持空数组；不要拆分到逐空字段',
     ...(choiceCandidates.length ? [`选择题候选：${JSON.stringify(choiceCandidates)}`] : [])
   ].join('；');
 };
@@ -39,9 +44,9 @@ export class OpenAICompatibleVisionRecognizer {
         '候选与图片一致时原样确认；确有字形差异时按图片逐字返回；不能确认时写“[看不清]”并标记 needsReview，不得为了语句通顺改写。',
         '字形不能确认时写“[看不清]”，confidence 降低并 needsReview=true；空白证据必须返回空字符串，不得猜答案。',
         '划掉内容仅放入 crossedOutText。教师分数、勾叉和批注仅放入 existingMarkings。',
-        '按照图片中实际可见的题号、圈号和上下顺序对应 evidenceId。evidenceId 以“-answer”结尾时写入 recognizedAnswer；其他 evidenceId 原样写入 answerFields.fieldId。',
+        '非选择题只返回一份按图片原有行序排列的整题 recognizedAnswer，answerFields 必须为空；不得把同一行复制到多个字段。',
         'selectedOption 仅用于确实可见的选择题填涂。visualEvidence 只描述可见笔迹，不解释题意。',
-        '严格返回 JSON：{"items":[{"displayNo":"2","recognizedAnswer":"","answerFields":[{"fieldId":"2-1","text":"","crossedOutText":[],"confidence":0,"needsReview":false}],"crossedOutText":[],"selectedOption":null,"visualEvidence":"","existingMarkings":[],"confidence":0,"needsReview":false}]}。'
+        '严格返回 JSON：{"items":[{"displayNo":"2","recognizedAnswer":"按图片行序排列的整题作答","answerFields":[],"crossedOutText":[],"selectedOption":null,"visualEvidence":"","existingMarkings":[],"confidence":0,"needsReview":false}]}。'
       ].join('\n')
     }];
     for (const region of regions) {
@@ -70,24 +75,12 @@ export class OpenAICompatibleVisionRecognizer {
     const regionByNo = new Map(regions.map(region => [region.displayNo, region]));
     return {
       items: parsed.items.filter(item => regionByNo.has(item.displayNo)).map(item => {
-        const region = regionByNo.get(item.displayNo);
-        const expectedFieldIds = region?.evidenceUnits
-          .filter(unit => unit.kind !== 'choice')
-          .map(unit => unit.evidenceId)
-          .filter(id => !id.endsWith('-answer')) ?? [];
-        const returnedById = new Map(item.answerFields.map(field => [field.fieldId, field]));
-        const answerFields = expectedFieldIds.map(fieldId => returnedById.get(fieldId) ?? {
-          fieldId,
-          text: '',
-          crossedOutText: [],
-          confidence: 0,
-          needsReview: true
-        });
-        const incomplete = expectedFieldIds.some(fieldId => !returnedById.has(fieldId));
+        const recognizedAnswer = getWholeQuestionAnswer(item.recognizedAnswer, item.answerFields);
         return {
           ...item,
-          answerFields,
-          needsReview: item.needsReview || incomplete || answerFields.some(field => field.needsReview)
+          recognizedAnswer,
+          answerFields: [],
+          needsReview: item.needsReview || (!item.selectedOption && !recognizedAnswer)
         };
       })
     };

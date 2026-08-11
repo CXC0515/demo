@@ -15,6 +15,13 @@ export const formatPaddleTextForDisplay = (value: string) => value
 export const getObservedAnswer = (item: VisionValidationItem) =>
   item.selectedOption || formatPaddleTextForDisplay(item.paddleText) || item.lunaText || '';
 
+export const recognitionTextsConflict = (paddleText: string, lunaText: string) => {
+  const normalize = (value: string) => value.replace(/[\s\[\]（）()。,.，_:：;；、\\$\-]/g, '').toUpperCase();
+  const paddle = normalize(paddleText);
+  const luna = normalize(lunaText);
+  return Boolean(paddle && luna && paddle !== luna && !paddle.includes(luna) && !luna.includes(paddle));
+};
+
 export const resolveTrialConfidence = (gradingConfidence: number, item: VisionValidationItem) =>
   Math.min(gradingConfidence, item.confidence);
 

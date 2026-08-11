@@ -293,6 +293,23 @@ const paddleTextInsideRegion = (
     .join('\n');
 };
 
+const paddleTextForQuestion = (
+  artifact: PaddleParserArtifact,
+  pageNumber: number,
+  region: PixelRegion,
+  displayNo: string
+) => {
+  const lines = paddleTextInsideRegion(artifact, pageNumber, region)
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+  const questionNumber = (line: string) => line.match(/^(\d+)(?:\s|[.、])/u)?.[1];
+  const start = lines.findIndex(line => questionNumber(line) === displayNo);
+  if (start < 0) return '';
+  const next = lines.findIndex((line, index) => index > start && questionNumber(line) !== undefined && questionNumber(line) !== displayNo);
+  return lines.slice(start, next < 0 ? undefined : next).join('\n');
+};
+
 const emptyPanelFromPaddle = (
   artifact: PaddleParserArtifact,
   pageNumber: number,
@@ -439,7 +456,7 @@ export const createVisionLocatedRegions = async (
     const paddleText = evidenceUnits.length && evidenceUnits.every(unit => unit.kind === 'choice')
       ? evidencePaddleText
       : artifact
-        ? paddleTextInsideRegion(artifact, page.pageNumber, questionRegion) || evidencePaddleText
+        ? paddleTextForQuestion(artifact, page.pageNumber, questionRegion, displayNo) || evidencePaddleText
         : evidencePaddleText;
     return {
       displayNo,

@@ -246,3 +246,42 @@ test('keeps continuation blocks in the same column when other columns interleave
     await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
   }
 });
+
+test('keeps adjacent-question text out when the visual crop overlaps it', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [
+          { block_label: 'text', block_content: '1. ① 本题答案\n2. 下一题答案', block_bbox: [80, 300, 300, 370], block_id: 1, block_order: 1 }
+        ]
+      }
+    }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['1'],
+      new Map([['1', ['1①-1']]]),
+      [located({
+        boundingBox: { x: 0.08, y: 0.28, width: 0.4, height: 0.12 },
+        evidenceUnits: [{
+          ...located().evidenceUnits[0],
+          evidenceId: '1①-1',
+          boundingBox: { x: 0.1, y: 0.3, width: 0.28, height: 0.04 }
+        }]
+      })],
+      artifact
+    );
+    assert.equal(region.paddleText, '1. ① 本题答案');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});

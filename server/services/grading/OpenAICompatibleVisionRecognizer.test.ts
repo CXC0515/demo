@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { LocatedRegion } from './questionRegionCropper';
-import { buildRecognitionRegionPrompt } from './OpenAICompatibleVisionRecognizer';
+import { buildRecognitionRegionPrompt, getWholeQuestionAnswer } from './OpenAICompatibleVisionRecognizer';
 
 const region = (kind: 'text' | 'choice'): LocatedRegion => ({
   displayNo: '2',
@@ -36,8 +36,17 @@ test('text recognition receives whole-question Paddle text without per-field anc
   const prompt = buildRecognitionRegionPrompt(region('text'));
   assert.match(prompt, /Paddle 整题原文/);
   assert.doesNotMatch(prompt, /逐空候选/);
+  assert.match(prompt, /answerFields 保持空数组/);
+  assert.match(prompt, /不要拆分到逐空字段/);
 });
 
 test('choice recognition keeps the Paddle option candidate', () => {
   assert.match(buildRecognitionRegionPrompt(region('choice')), /逐空候选/);
+});
+
+test('legacy per-field output is collapsed without duplicating a whole line', () => {
+  assert.equal(getWholeQuestionAnswer('', [
+    { text: '濯清涟而不妖 周敦颐' },
+    { text: '濯清涟而不妖 周敦颐' }
+  ]), '濯清涟而不妖 周敦颐');
 });

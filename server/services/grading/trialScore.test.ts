@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { VisionValidationItem } from '../../../src/domain/types';
-import { formatPaddleTextForDisplay, getObservedAnswer, hasSuspiciousRepeatedShortAnswer, resolveTrialConfidence, resolveTrialScore, trialNeedsTeacherReview } from './trialScore';
+import { formatPaddleTextForDisplay, getObservedAnswer, hasSuspiciousRepeatedShortAnswer, recognitionTextsConflict, resolveTrialConfidence, resolveTrialScore, trialNeedsTeacherReview } from './trialScore';
 
 const points = ['一', '二', '三'].map(point => ({ point, score: 1, description: '' }));
 
@@ -55,4 +55,9 @@ test('removes Paddle formatting without changing recognized characters', () => {
     formatPaddleTextForDisplay('2.① $ \\underline{\\text{默默}} $ ② $ \\underline{\\text{芒}} $'),
     '2.① 默默 ② 芒'
   );
+});
+
+test('compares whole-question Paddle and Luna text after formatting differences are removed', () => {
+  assert.equal(recognitionTextsConflict('1. ① 独恺然而涕下', '① 独怆然而涕下'), true);
+  assert.equal(recognitionTextsConflict('① 默。', '①默'), false);
 });
