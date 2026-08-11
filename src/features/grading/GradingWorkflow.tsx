@@ -39,20 +39,29 @@ import {
   AnalyzedQuestionUnit,
   CalibrationResultSource,
   CalibrationSample,
+  DocumentAsset,
   FirstSectionAnalysis,
   GradingMode,
   GradingQuestion,
   KnowledgeNode,
   QuestionGradingState,
   ReviewItem,
+  RosterStudent,
   SchoolClass,
+  SourceEvidence,
   SubmissionPage,
+  TaskQuestionRubric,
+  TrialGradingResult,
+  VisionValidationItem,
+  VisionValidationResult,
   WorkbenchTask,
   WorkflowState
 } from '../../domain/types';
 import ReviewQueuePage from './ReviewQueuePage';
 import SourceEvidenceViewer from './SourceEvidenceViewer';
-import { analyzeTaskMaterials, getTaskAnalysis, getTaskMaterials, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
+import { analyzeTaskMaterials, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, runVisionValidation, saveTaskRubric, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
+import { listRosterClasses, listRosterStudents, matchRosterSubmissions } from '../../services/rosterApi';
+import { buildSubmissionPages, getReadableStudentNos, reconcileSubmissionRoster } from '../../domain/submissionRoster';
 
 interface GradingWorkflowProps {
   workflowState: WorkflowState;
@@ -114,7 +123,50 @@ const getFiles = (files: FileList | null) => {
   return result;
 };
 
-const buildWorkflowFromAnalysis = (taskId: string, analysis: FirstSectionAnalysis) => {
+const getSubmissionStatus = (page: SubmissionPage) => {
+  if (page.rosterMatchStatus === 'ambiguous-student-name') return { label: '同名待确认', className: 'bg-rose-100 text-rose-800' };
+  if (page.rosterMatchStatus === 'duplicate-student-no') return { label: '重复学号', className: 'bg-rose-100 text-rose-800' };
+  if (page.rosterMatchStatus === 'unknown-student-no') return { label: '名册无此学号', className: 'bg-rose-100 text-rose-800' };
+  if (page.rosterMatchStatus === 'unreadable-student-no') return { label: '学号待确认', className: 'bg-rose-100 text-rose-800' };
+  if (page.rosterMatchStatus === 'pending') return { label: '正在匹配', className: 'bg-amber-100 text-amber-800' };
+  if (page.status === 'matched') return { label: '自动通过', className: 'bg-emerald-100 text-emerald-800' };
+  if (page.reviewSource === 'multimodal') return { label: '多模态核验', className: 'bg-sky-100 text-sky-800' };
+  return { label: '教师复核', className: 'bg-rose-100 text-rose-800' };
+};
+
+function VisionItemCard({ item }: { item: VisionValidationItem; key?: string }) {
+  return (
+    <article className="grid gap-3 border border-slate-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-center gap-2">
+        <strong className="text-sm">第 {item.displayNo} 题</strong>
+        <span className={`rounded-lg px-2 py-1 text-[11px] font-bold ${item.needsReview ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+          {item.needsReview ? '需核验' : `置信度 ${Math.round(item.confidence * 100)}%`}
+        </span>
+      </div>
+      <img src={item.cropUrl} alt={`第 ${item.displayNo} 题完整区域`} className="max-h-48 w-full border border-slate-200 object-contain" />
+      {item.evidenceUnits?.length ? (
+        <div className="grid grid-cols-2 gap-2">
+          {item.evidenceUnits.map(unit => (
+            <figure key={unit.evidenceId} className="min-w-0">
+              <img src={unit.cropUrl} alt={`${unit.evidenceId} 学生作答证据`} className="h-20 w-full border border-slate-200 bg-white object-contain" />
+              <figcaption className={`mt-1 truncate text-[10px] ${unit.needsReview ? 'font-bold text-amber-700' : 'text-slate-500'}`} title={unit.reviewReasons.join('；')}>
+                {unit.evidenceId}{unit.needsReview ? ' · 待核验' : ''}
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      ) : null}
+      {item.locationStatus !== 'located' ? <p className="text-[11px] font-bold text-rose-700">题目区域待确认：{item.locationReasons.join('；')}</p> : null}
+      {item.answerFields?.length ? (
+        <div className="space-y-1">{item.answerFields.map(field => <p key={field.fieldId} className="text-xs leading-5"><strong>{field.label}：</strong>{field.text || '未填写'}{field.needsReview ? <span className="ml-1 text-amber-700">待核验</span> : null}</p>)}</div>
+      ) : <p className="text-xs leading-5"><strong>{item.needsReview ? '识别草稿（待核验）' : '有效答案'}：</strong>{item.lunaText || item.selectedOption || '未识别'}{item.selectedOption && item.lunaText && item.lunaText !== item.selectedOption ? `（选项 ${item.selectedOption}）` : ''}</p>}
+      {item.crossedOutText.length ? <p className="text-[11px] leading-5 text-slate-500">已划去：{item.crossedOutText.join('；')}</p> : null}
+      {item.existingMarkings.length ? <p className="text-[11px] leading-5 text-amber-700">已有批改痕迹：{item.existingMarkings.join('；')}</p> : null}
+    </article>
+  );
+}
+
+const buildWorkflowFromAnalysis = (taskId: string, analysis: FirstSectionAnalysis, savedRubrics: TaskQuestionRubric[] = []) => {
   const sourceEvidence = analysis.questions.flatMap(question => {
     const questionEvidenceId = `${taskId}-question-${question.displayNo}`;
     const answerEvidenceId = `${taskId}-answer-${question.displayNo}`;
@@ -123,19 +175,29 @@ const buildWorkflowFromAnalysis = (taskId: string, analysis: FirstSectionAnalysi
       assetId: question.questionSource.assetId,
       assetKind: question.questionSource.assetKind,
       fileName: question.questionSource.fileName,
-      pageNumber: 1,
-      boundingBox: { x: 0, y: 0, width: 1, height: 1 },
+      pageNumber: question.questionSource.pageNumber ?? 1,
+      boundingBox: question.questionSource.boundingBox ?? { x: 0, y: 0, width: 1, height: 1 },
       ocrText: question.questionSource.quote,
-      confidence: question.confidence
+      confidence: question.confidence,
+      imageUrl: question.questionSource.imageUrl,
+      sourcePageUrl: question.questionSource.sourcePageUrl,
+      evidenceMode: question.questionSource.evidenceMode ?? 'native-text',
+      locatorStatus: question.questionSource.locatorStatus ?? 'located',
+      locatorReasons: question.questionSource.locatorReasons ?? []
     }, ...(question.answerSource ? [{
       id: answerEvidenceId,
       assetId: question.answerSource.assetId,
       assetKind: question.answerSource.assetKind,
       fileName: question.answerSource.fileName,
-      pageNumber: 1,
-      boundingBox: { x: 0, y: 0, width: 1, height: 1 },
+      pageNumber: question.answerSource.pageNumber ?? 1,
+      boundingBox: question.answerSource.boundingBox ?? { x: 0, y: 0, width: 1, height: 1 },
       ocrText: question.answerSource.quote,
-      confidence: question.confidence
+      confidence: question.confidence,
+      imageUrl: question.answerSource.imageUrl,
+      sourcePageUrl: question.answerSource.sourcePageUrl,
+      evidenceMode: question.answerSource.evidenceMode ?? 'native-text',
+      locatorStatus: question.answerSource.locatorStatus ?? 'located',
+      locatorReasons: question.answerSource.locatorReasons ?? []
     }] : [])];
   });
   const questions: WorkflowState['questions'] = analysis.questions.map(question => ({
@@ -152,17 +214,21 @@ const buildWorkflowFromAnalysis = (taskId: string, analysis: FirstSectionAnalysi
     parseConfidence: question.confidence,
     sourceEvidenceIds: [`${taskId}-question-${question.displayNo}`]
   }));
-  const questionGradingStates: QuestionGradingState[] = analysis.questions.map(question => ({
-    questionId: `${taskId}-q-${question.displayNo}`,
-    standardAnswer: question.standardAnswer,
+  const rubricByQuestionId = new Map(savedRubrics.map(rubric => [rubric.questionId, rubric]));
+  const questionGradingStates: QuestionGradingState[] = analysis.questions.map(question => {
+    const questionId = `${taskId}-q-${question.displayNo}`;
+    const savedRubric = rubricByQuestionId.get(questionId);
+    return {
+    questionId,
+    standardAnswer: savedRubric?.standardAnswer ?? question.standardAnswer,
     standardAnswerSourceIds: question.answerSource ? [`${taskId}-answer-${question.displayNo}`] : [],
-    gradingRubric: question.rubricPoints.map(point => ({ point: point.point, score: point.score ?? 0, description: point.description })),
-    teacherRules: [],
-    rubricVersion: 1,
+    gradingRubric: savedRubric?.gradingRubric ?? question.rubricPoints.map(point => ({ point: point.point, score: point.score ?? 0, description: point.description })),
+    teacherRules: savedRubric?.teacherRules ?? [],
+    rubricVersion: savedRubric?.rubricVersion ?? 1,
     sampleTarget: 3,
     calibrationSamples: [],
     jointReviewEnabled: false
-  }));
+  };});
   return {
     questions,
     sourceEvidence,
@@ -172,20 +238,43 @@ const buildWorkflowFromAnalysis = (taskId: string, analysis: FirstSectionAnalysi
   };
 };
 
+const applyTrialSamples = (states: QuestionGradingState[], result: TrialGradingResult | null) => {
+  if (!result) return states;
+  return states.map(state => ({
+    ...state,
+    calibrationSamples: result.samples.filter(sample => sample.questionId === state.questionId)
+  }));
+};
+
 function AnalysisEvidenceDetails({ unit }: { unit: AnalyzedQuestionUnit }) {
+  const toEvidence = (reference: AnalyzedQuestionUnit['questionSource'], id: string): SourceEvidence => ({
+    id,
+    assetId: reference.assetId,
+    assetKind: reference.assetKind,
+    fileName: reference.fileName,
+    pageNumber: reference.pageNumber ?? 1,
+    boundingBox: reference.boundingBox ?? { x: 0, y: 0, width: 1, height: 1 },
+    ocrText: reference.quote,
+    confidence: unit.confidence,
+    imageUrl: reference.imageUrl,
+    sourcePageUrl: reference.sourcePageUrl,
+    evidenceMode: reference.evidenceMode ?? 'native-text',
+    locatorStatus: reference.locatorStatus ?? 'located',
+    locatorReasons: reference.locatorReasons ?? []
+  });
   return (
     <details className="mt-3">
       <summary className="cursor-pointer text-xs font-bold text-slate-500">查看题目与参考答案原文</summary>
       <div className="mt-2 grid gap-3 lg:grid-cols-2">
-        <section className="border-l-2 border-emerald-600 bg-slate-50 p-3 dark:bg-zinc-950"><span className="text-xs font-black text-emerald-800">题目原文 · {unit.questionSource.fileName}</span><p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600 dark:text-slate-300">{unit.questionSource.quote}</p></section>
-        <section className="border-l-2 border-sky-600 bg-slate-50 p-3 dark:bg-zinc-950"><span className="text-xs font-black text-sky-800">参考答案原文 · {unit.answerSource?.fileName ?? '未匹配'}</span><p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600 dark:text-slate-300">{unit.answerSource?.quote || '参考答案中没有匹配到可引用内容。'}</p></section>
+        <SourceEvidenceViewer evidence={toEvidence(unit.questionSource, `${unit.displayNo}-question-source`)} label="题目原文" />
+        {unit.answerSource ? <SourceEvidenceViewer evidence={toEvidence(unit.answerSource, `${unit.displayNo}-answer-source`)} label="参考答案原文" /> : <section className="border-l-2 border-sky-600 bg-slate-50 p-3 text-xs text-slate-500 dark:bg-zinc-950">参考答案中没有匹配到可引用内容。</section>}
       </div>
     </details>
   );
 }
 
 function MaterialDocumentDetails({ document, asset }: { document: NonNullable<WorkflowState['assignment']['documents']>[number]; asset?: WorkflowState['assignment']['assets'][number] }) {
-  const visibleImages = document.resources.filter(resource => resource.mimeType.startsWith('image/') && !/\.(?:wmf|emf)$/i.test(resource.fileName));
+  const visibleImages = document.resources.filter(resource => resource.role !== 'source-page' && resource.mimeType.startsWith('image/') && !/\.(?:wmf|emf)$/i.test(resource.fileName));
   return (
     <details className="border-t border-slate-200 py-3 dark:border-zinc-800">
       <summary className="cursor-pointer text-sm font-bold text-slate-800 dark:text-slate-100">查看解析内容 · {asset?.fileName ?? document.sourceFormat.toUpperCase()}</summary>
@@ -287,7 +376,11 @@ function RubricEditor({ questionState, answerEvidence, onChange, onSaveDraft, on
   );
 }
 
-function OcrInlineReview({ page, humanThreshold, autoThreshold, onClose, onConfirm }: { page: SubmissionPage; humanThreshold: number; autoThreshold: number; onClose: () => void; onConfirm: () => void }) {
+function SubmissionPreview({ page, asset, document, validation, validationPhase, validationError, humanThreshold, autoThreshold, onClose, onConfirm, onRunVision }: { page: SubmissionPage; asset?: DocumentAsset; document?: NonNullable<WorkflowState['assignment']['documents']>[number]; validation?: VisionValidationResult; validationPhase: 'idle' | 'loading' | 'ready' | 'error'; validationError?: string; humanThreshold: number; autoThreshold: number; onClose: () => void; onConfirm: (studentNo: string) => void; onRunVision: () => void }) {
+  const [studentNo, setStudentNo] = useState(page.detectedStudentNo);
+  const previewUrl = asset ? `/api/grading-tasks/${encodeURIComponent(asset.taskId)}/materials/${encodeURIComponent(asset.id)}/content` : undefined;
+  const needsIdentityReview = page.rosterMatchStatus !== 'matched';
+  const visionReady = document?.resources.some(resource => resource.role === 'source-page') ?? false;
   const signals = [
     ['学号识别', page.studentNoConfidence ?? page.ocrConfidence],
     ['文字识别', page.textConfidence ?? page.ocrConfidence],
@@ -296,13 +389,18 @@ function OcrInlineReview({ page, humanThreshold, autoThreshold, onClose, onConfi
   ] as const;
   return (
     <div className="m-3 rounded-[24px] border border-emerald-200 bg-emerald-50/40 p-5 dark:border-emerald-900 dark:bg-emerald-950/10">
-      <div className="flex items-start justify-between gap-3"><div><h3 className="font-black text-slate-900 dark:text-white">{page.expectedStudentName} · 异常核对</h3><p className="mt-1 text-xs text-rose-700">{page.issueReason ?? '识别结果需要教师确认。'}</p></div><button type="button" title="收起" aria-label="收起" onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-white"><X className="h-4 w-4" /></button></div>
-      <div className="mt-4 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)_260px]">
-        <div className="border border-slate-300 bg-[#fffdf7] p-4 shadow-sm"><span className="block text-right font-mono text-[10px] text-slate-500">{page.detectedStudentNo}</span><p className="mt-4 font-serif text-xs leading-6 text-slate-700">驿路梨花既指路边的梨花，也指梨花姑娘，还象征着互相帮助的精神。</p><p className="mt-4 border-t border-dashed border-slate-300 pt-2 text-[10px] text-slate-400">模拟原图</p></div>
-        <div><label className="text-xs font-black text-slate-600">OCR 文本</label><textarea defaultValue="驿路梨花既指路边的梨花，也指梨花姑娘，还象征着互相帮助的精神。" rows={5} className={`${inputClass} mt-2 resize-none leading-6`} /><p className="mt-2 text-[11px] leading-5 text-slate-500"><Info className="mr-1 inline h-3 w-3" />{Math.round(humanThreshold * 100)}%–{Math.round(autoThreshold * 100)}% 先由多模态模型核验；缺页和错配始终人工确认。</p></div>
-        <div className="grid grid-cols-2 gap-2">{signals.map(([label, value]) => <div key={label} className="rounded-2xl bg-white p-3 dark:bg-zinc-900"><span className="text-[11px] font-bold text-slate-500">{label}</span><strong className="mt-1 block text-lg">{Math.round(value * 100)}%</strong></div>)}</div>
+      <div className="flex items-start justify-between gap-3"><div><h3 className="font-black text-slate-900 dark:text-white">{page.expectedStudentName} · 原始答卷</h3><p className={`mt-1 text-xs ${needsIdentityReview ? 'text-rose-700' : 'text-slate-500'}`}>{page.rosterIssueReason ?? page.issueReason ?? asset?.fileName ?? '已匹配当前班级名册。'}</p></div><button type="button" title="收起" aria-label="收起" onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-white"><X className="h-4 w-4" /></button></div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px]">
+        <div className="min-h-[480px] overflow-hidden border border-slate-300 bg-white shadow-sm">{previewUrl ? (asset?.mimeType === 'application/pdf' ? <object data={previewUrl} type="application/pdf" className="h-[620px] w-full"><a href={previewUrl} target="_blank" rel="noreferrer" className="p-4 text-sm font-bold text-emerald-700">打开原始 PDF</a></object> : <img src={previewUrl} alt={`${page.expectedStudentName} 原始答卷`} className="max-h-[620px] w-full object-contain" />) : <div className="flex h-full items-center justify-center text-sm text-slate-400">原文件不可用</div>}</div>
+        <div><div className="grid grid-cols-2 gap-2">{signals.map(([label, value]) => <div key={label} className="rounded-2xl bg-white p-3 dark:bg-zinc-900"><span className="text-[11px] font-bold text-slate-500">{label}</span><strong className="mt-1 block text-lg">{value > 0 ? `${Math.round(value * 100)}%` : '未提供'}</strong></div>)}</div>{needsIdentityReview ? <><label className="mt-4 block text-xs font-black text-slate-600">确认班内学号</label><input value={studentNo} onChange={event => setStudentNo(event.target.value)} className={`${inputClass} mt-2 font-mono`} /></> : <div className="mt-4 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-800">已按姓名匹配：{page.expectedStudentName}（{page.detectedStudentNo}）</div>}<p className="mt-3 text-[11px] leading-5 text-slate-500"><Info className="mr-1 inline h-3 w-3" />{Math.round(humanThreshold * 100)}%–{Math.round(autoThreshold * 100)}% 先由多模态模型核验；缺页和错配始终人工确认。</p></div>
       </div>
-      <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold dark:border-zinc-700 dark:bg-zinc-900">收起</button><button type="button" onClick={onConfirm} className="rounded-2xl bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800">确认归属与文本</button></div>
+      <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold dark:border-zinc-700 dark:bg-zinc-900">收起</button>{needsIdentityReview ? <button type="button" onClick={() => onConfirm(studentNo)} className="rounded-2xl bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800">重新匹配</button> : null}</div>
+      <section className="mt-5 border-t border-emerald-200 pt-5 dark:border-emerald-900">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h4 className="text-sm font-black">逐题答案识别</h4><p className="mt-1 text-xs text-slate-500">按当前评分题目裁图识别，结果作为试批的首选答案。</p></div><button type="button" disabled={!visionReady || validationPhase === 'loading'} onClick={onRunVision} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{validationPhase === 'loading' ? 'Luna 正在逐字识别...' : validation ? '重新识别' : '开始识别'}</button></div>
+        {!visionReady ? <p className="mt-3 text-xs font-bold text-amber-700">这份答卷尚未保留 Paddle 原始坐标，需要重新解析后才能裁图。</p> : null}
+        {validationPhase === 'error' ? <p className="mt-3 text-xs font-bold text-rose-700">逐题识别失败（{validationError}）</p> : null}
+        {validation ? <div className="mt-4 grid gap-3 lg:grid-cols-2">{validation.items.map(item => <VisionItemCard key={item.displayNo} item={item} />)}</div> : null}
+      </section>
     </div>
   );
 }
@@ -352,22 +450,45 @@ export default function GradingWorkflow({
   const [isPaused, setIsPaused] = useState(false);
   const [diagnosisConfirmed, setDiagnosisConfirmed] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [rosterClass, setRosterClass] = useState<SchoolClass | null>(null);
+  const [classRoster, setClassRoster] = useState<RosterStudent[]>([]);
+  const [rosterMatchPhase, setRosterMatchPhase] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [rosterMatchError, setRosterMatchError] = useState<string | null>(null);
+  const [rosterRefreshKey, setRosterRefreshKey] = useState(0);
+  const [submissionFiles, setSubmissionFiles] = useState<File[]>([]);
+  const [submissionUploadPhase, setSubmissionUploadPhase] = useState<'idle' | 'uploading' | 'parsing' | 'error'>('idle');
+  const [submissionUploadError, setSubmissionUploadError] = useState<string | null>(null);
+  const [trialGradingPhase, setTrialGradingPhase] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [trialGradingError, setTrialGradingError] = useState<string | null>(null);
+  const [visionValidationByAsset, setVisionValidationByAsset] = useState<Record<string, VisionValidationResult>>({});
+  const [visionValidationPhase, setVisionValidationPhase] = useState<Record<string, 'idle' | 'loading' | 'ready' | 'error'>>({});
+  const [visionValidationError, setVisionValidationError] = useState<Record<string, string>>({});
 
-  const currentClass = classes.find(item => item.id === selectedTask.classId) ?? classes[0];
+  const currentClass = rosterClass ?? classes.find(item => item.id === selectedTask.classId) ?? null;
   const currentQuestion = workflowState.questions.find(item => item.id === selectedQuestionId) ?? workflowState.questions[0];
   const currentQuestionState = questionStates.find(item => item.questionId === selectedQuestionId) ?? questionStates[0];
   const questionEvidence = currentQuestion?.sourceEvidenceIds.map(id => workflowState.sourceEvidence.find(item => item.id === id)).find(Boolean);
   const answerEvidence = currentQuestionState?.standardAnswerSourceIds?.map(id => workflowState.sourceEvidence.find(item => item.id === id)).find(Boolean);
   const selectedSample = currentQuestionState?.calibrationSamples.find(sample => sample.id === selectedSampleId) ?? currentQuestionState?.calibrationSamples[0];
   const matchRows = workflowState.submissionPages ?? [];
-  const issueRows = matchRows.filter(row => row.status !== 'matched');
+  const issueRows = matchRows.filter(row => row.status !== 'matched' || row.rosterMatchStatus !== 'matched');
   const displayedRows = showOnlyOcrIssues ? issueRows : matchRows;
   const missingRows = workflowState.missingSubmissions ?? [];
   const pendingReviews = reviewQueue.filter(item => item.status === 'pending').length;
   const allCalibrationComplete = questionStates.length > 0 && questionStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget);
   const assignmentReady = workflowState.assignment.status === 'assigned';
-  const gradingDataReady = workflowState.questions.length > 0 && matchRows.length > 0;
+  const gradingDataReady = workflowState.questions.length > 0 && matchRows.length > 0 && rosterMatchPhase === 'ready' && !issueRows.some(row => row.rosterMatchStatus !== 'matched');
   const normalizedDocuments = workflowState.assignment.documents ?? [];
+  const assignmentAssets = workflowState.assignment.assets.filter(asset => asset.kind === 'assignment' || asset.kind === 'reference-answer');
+  const assignmentAssetIds = new Set(assignmentAssets.map(asset => asset.id));
+  const assignmentDocuments = normalizedDocuments.filter(document => assignmentAssetIds.has(document.assetId));
+  const activeClassRoster = classRoster.filter(student => student.enrollmentStatus === 'active');
+  const expectedStudentCount = rosterMatchPhase === 'ready' ? activeClassRoster.length : currentClass?.studentCount ?? 0;
+  const currentClassName = currentClass?.name ?? selectedTask.className;
+  const matchedStudentCount = new Set(matchRows.filter(row => row.rosterMatchStatus === 'matched').map(row => row.studentId).filter(Boolean)).size;
+  const submissionRosterInputKey = matchRows.map(page => `${page.id}:${page.detectedStudentNo}`).join('|');
+  const submissionAssets = workflowState.assignment.assets.filter(asset => asset.kind === 'student-submission');
+  const submissionMaterialKey = submissionAssets.map(asset => `${asset.id}:${asset.status}`).join('|');
 
   const updateAssignment = (updated: Partial<WorkflowState['assignment']>) => {
     onUpdateState({ assignment: { ...workflowState.assignment, ...updated } });
@@ -375,15 +496,22 @@ export default function GradingWorkflow({
 
   useEffect(() => {
     let active = true;
-    void Promise.all([getTaskMaterials(selectedTask.id), getTaskAnalysis(selectedTask.id)]).then(([materials, analysis]) => {
+    void Promise.all([getTaskMaterials(selectedTask.id), getTaskAnalysis(selectedTask.id), getTaskTrialGrading(selectedTask.id), getTaskRubrics(selectedTask.id)]).then(([materials, analysis, trialResult, savedRubrics]) => {
       if (!active || (!materials.assets.length && !analysis)) return;
       const questionFileNames = materials.assets.filter(asset => asset.kind === 'assignment').map(asset => asset.fileName);
       const answerFileNames = materials.assets.filter(asset => asset.kind === 'reference-answer').map(asset => asset.fileName);
-      const needsReview = materials.assets.some(asset => asset.status === 'needs-review');
-      const derivedWorkflow = analysis ? buildWorkflowFromAnalysis(selectedTask.id, analysis) : undefined;
+      const assignmentAssets = materials.assets.filter(asset => asset.kind !== 'student-submission');
+      const needsReview = assignmentAssets.some(asset => asset.status === 'needs-review');
+      const derivedWorkflow = analysis ? buildWorkflowFromAnalysis(selectedTask.id, analysis, savedRubrics) : undefined;
       if (derivedWorkflow) {
-        setQuestionStates(derivedWorkflow.questionGradingStates);
+        const usableTrialResult = trialResult?.samples.every(sample => sample.sourcePreviewType === 'image') ? trialResult : null;
+        const restoredStates = applyTrialSamples(derivedWorkflow.questionGradingStates, usableTrialResult);
+        const firstSample = restoredStates[0]?.calibrationSamples[0];
+        setQuestionStates(restoredStates);
         setSelectedQuestionId(derivedWorkflow.questions[0]?.id ?? '');
+        setSelectedSampleId(firstSample?.id ?? '');
+        setEditedOcr(firstSample?.ocrText ?? '');
+        setTrialGradingPhase(usableTrialResult ? 'ready' : 'idle');
       }
       onUpdateState({
         assignment: {
@@ -393,13 +521,155 @@ export default function GradingWorkflow({
           assets: materials.assets,
           documents: materials.documents,
           firstSectionAnalysis: analysis ?? undefined,
-          analysisStatus: needsReview ? 'needs-review' : materials.assets.length ? 'ready' : workflowState.assignment.analysisStatus
+          analysisStatus: needsReview ? 'needs-review' : assignmentAssets.length ? 'ready' : workflowState.assignment.analysisStatus
         },
         ...(derivedWorkflow ?? {})
       });
     }).catch(() => undefined);
     return () => { active = false; };
   }, [selectedTask.id]);
+
+  useEffect(() => {
+    let active = true;
+    setRosterMatchPhase('loading');
+    setRosterMatchError(null);
+    void Promise.all([
+      listRosterClasses(),
+      listRosterStudents(selectedTask.classId)
+    ]).then(([schoolClasses, students]) => {
+      if (!active) return;
+      const selectedClass = schoolClasses.find(item => item.id === selectedTask.classId);
+      if (!selectedClass) throw new Error('CLASS_NOT_FOUND');
+      setRosterClass(selectedClass);
+      setClassRoster(students);
+      setRosterMatchPhase('ready');
+    }).catch(error => {
+      if (!active) return;
+      setRosterClass(null);
+      setClassRoster([]);
+      setRosterMatchPhase('error');
+      setRosterMatchError(error instanceof Error ? error.message : 'ROSTER_MATCH_FAILED');
+    });
+    return () => { active = false; };
+  }, [selectedTask.id, selectedTask.classId, rosterRefreshKey]);
+
+  useEffect(() => {
+    if (rosterMatchPhase !== 'ready') return;
+    let active = true;
+    const submissionAssetIds = new Set(submissionAssets.map(asset => asset.id));
+    const storedDocuments = normalizedDocuments.filter(document => submissionAssetIds.has(document.assetId));
+    const rowsMatchStoredAssets = matchRows.length === submissionAssets.length
+      && matchRows.every(page => submissionAssetIds.has(page.id));
+    const pagesToMatch = submissionAssets.length && !rowsMatchStoredAssets
+      ? buildSubmissionPages(submissionAssets, storedDocuments, classRoster)
+      : matchRows;
+    if (submissionAssets.length && !rowsMatchStoredAssets) {
+      onUpdateState({ submissionPages: pagesToMatch });
+    }
+    void matchRosterSubmissions(selectedTask.classId, getReadableStudentNos(pagesToMatch)).then(match => {
+      if (!active) return;
+      const reconciled = reconcileSubmissionRoster(pagesToMatch, match);
+      onUpdateState({
+        submissionPages: reconciled.pages,
+        missingSubmissions: reconciled.missingSubmissions
+      });
+    }).catch(error => {
+      if (!active) return;
+      setRosterMatchPhase('error');
+      setRosterMatchError(error instanceof Error ? error.message : 'ROSTER_MATCH_FAILED');
+    });
+    return () => { active = false; };
+  }, [selectedTask.id, selectedTask.classId, submissionRosterInputKey, submissionMaterialKey, normalizedDocuments.length, rosterMatchPhase, rosterRefreshKey]);
+
+  const confirmSubmissionStudentNo = (pageId: string, studentNo: string) => {
+    onUpdateState({
+      submissionPages: matchRows.map(page => page.id === pageId
+        ? { ...page, detectedStudentNo: studentNo.trim(), rosterMatchStatus: 'pending', rosterIssueReason: undefined }
+        : page)
+    });
+    setExpandedOcrPageId(null);
+    onShowToast('学号已更新，正在按当前班级名册重新匹配');
+  };
+
+  const currentQuestionNos = [...new Set(workflowState.questions
+    .map(question => question.displayNo.match(/^\d+/)?.[0])
+    .filter((value): value is string => Boolean(value)))];
+
+  const openSubmissionPreview = (assetId: string) => {
+    setExpandedOcrPageId(current => current === assetId ? null : assetId);
+    if (visionValidationByAsset[assetId]) return;
+    void getVisionValidation(selectedTask.id, assetId).then(result => {
+      if (result) {
+        setVisionValidationByAsset(current => ({ ...current, [assetId]: result }));
+        setVisionValidationPhase(current => ({ ...current, [assetId]: 'ready' }));
+        return;
+      }
+      void validateSubmissionVision(assetId, false);
+    }).catch(() => undefined);
+  };
+
+  const validateSubmissionVision = async (assetId: string, notify = true) => {
+    setVisionValidationPhase(current => ({ ...current, [assetId]: 'loading' }));
+    setVisionValidationError(current => ({ ...current, [assetId]: '' }));
+    try {
+      const result = await runVisionValidation(selectedTask.id, assetId, currentQuestionNos);
+      setVisionValidationByAsset(current => ({ ...current, [assetId]: result }));
+      setVisionValidationPhase(current => ({ ...current, [assetId]: 'ready' }));
+      if (notify) onShowToast('Luna 已完成当前题目的原图识别');
+    } catch (error) {
+      const code = error instanceof Error ? error.message : 'VISION_VALIDATION_FAILED';
+      setVisionValidationPhase(current => ({ ...current, [assetId]: 'error' }));
+      setVisionValidationError(current => ({ ...current, [assetId]: code }));
+      if (notify) onShowToast(code === 'VISION_VALIDATION_INPUT_NOT_READY' ? '该答卷需要重新解析后才能按题识别' : '原图识别失败，请检查模型服务');
+    }
+  };
+
+  const selectSubmissionFiles = (fileList: FileList | null) => {
+    const files = getFiles(fileList);
+    if (!files.length) return;
+    if (files.length > 20) {
+      onShowToast('单次最多上传 20 个答卷文件');
+      return;
+    }
+    setSubmissionFiles(files);
+    setSubmissionUploadPhase('idle');
+    setSubmissionUploadError(null);
+    onUpdateState({ uploadedCount: files.length });
+  };
+
+  const submitStudentSubmissions = async () => {
+    if (!submissionFiles.length) return;
+    setSubmissionUploadPhase('uploading');
+    setSubmissionUploadError(null);
+    try {
+      const uploaded = await uploadTaskMaterials(selectedTask.id, 'student-submission', submissionFiles);
+      const assets = [...workflowState.assignment.assets.filter(asset => asset.kind !== 'student-submission'), ...uploaded];
+      onUpdateState({
+        assignment: { ...workflowState.assignment, assets },
+        submissionPages: [],
+        missingSubmissions: []
+      });
+      setSubmissionUploadPhase('parsing');
+      const result = await waitForTaskMaterials(selectedTask.id, uploaded.map(asset => asset.id));
+      onUpdateState({
+        assignment: {
+          ...workflowState.assignment,
+          assets: result.assets,
+          documents: result.documents
+        },
+        submissionPages: [],
+        uploadedCount: uploaded.length
+      });
+      setSubmissionFiles([]);
+      setSubmissionUploadPhase('idle');
+      onShowToast(`已上传并解析 ${uploaded.length} 个答卷文件，正在匹配五班名册`);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : 'SUBMISSION_UPLOAD_FAILED';
+      setSubmissionUploadPhase('error');
+      setSubmissionUploadError(code);
+      onShowToast('答卷上传或解析失败，请检查文件后重试');
+    }
+  };
 
   const handleMaterialFiles = async (kind: 'assignment' | 'reference-answer', fileList: FileList | null) => {
     const files = getFiles(fileList);
@@ -458,7 +728,8 @@ export default function GradingWorkflow({
     setIsAnalyzing(true);
     try {
       const analysis = await analyzeTaskMaterials(selectedTask.id, knowledgeNodes);
-      const derivedWorkflow = buildWorkflowFromAnalysis(selectedTask.id, analysis);
+      const savedRubrics = await getTaskRubrics(selectedTask.id);
+      const derivedWorkflow = buildWorkflowFromAnalysis(selectedTask.id, analysis, savedRubrics);
       setQuestionStates(derivedWorkflow.questionGradingStates);
       setSelectedQuestionId(derivedWorkflow.questions[0]?.id ?? '');
       onUpdateState({ assignment: { ...workflowState.assignment, firstSectionAnalysis: analysis }, ...derivedWorkflow });
@@ -518,10 +789,73 @@ export default function GradingWorkflow({
   const selectSample = (sample: CalibrationSample) => {
     setSelectedSampleId(sample.id);
     setEditedOcr(sample.ocrText);
-    setTeacherScore(sample.teacherScore ?? sample.aiScore);
+    setTeacherScore(sample.teacherScore ?? sample.aiScore ?? 0);
     setTeacherReason(sample.teacherReason ?? '');
     setGradingAction('none');
     setRuleAddedNotice(false);
+  };
+
+  const prepareTrialCalibration = async (force = false) => {
+    const matchedSubmissions = matchRows.filter(page => page.rosterMatchStatus === 'matched' && page.studentId);
+    if (!matchedSubmissions.length || !workflowState.questions.length) {
+      onShowToast('缺少已匹配答卷或评分依据，暂时不能开始试批');
+      return;
+    }
+    setActiveStage('calibration');
+    setTrialGradingPhase('loading');
+    setTrialGradingError(null);
+    try {
+      for (const submission of matchedSubmissions) {
+        const stored = visionValidationByAsset[submission.id] ?? await getVisionValidation(selectedTask.id, submission.id);
+        const coversCurrentQuestions = currentQuestionNos.every(displayNo => stored?.items.some(item => item.displayNo === displayNo));
+        if (coversCurrentQuestions && stored) {
+          setVisionValidationByAsset(current => ({ ...current, [submission.id]: stored }));
+          continue;
+        }
+        setVisionValidationPhase(current => ({ ...current, [submission.id]: 'loading' }));
+        const result = await runVisionValidation(selectedTask.id, submission.id, currentQuestionNos);
+        setVisionValidationByAsset(current => ({ ...current, [submission.id]: result }));
+        setVisionValidationPhase(current => ({ ...current, [submission.id]: 'ready' }));
+      }
+      const result = await gradeTaskTrial(
+        selectedTask.id,
+        workflowState.questions.map(question => {
+          const state = questionStates.find(item => item.questionId === question.id);
+          return {
+            questionId: question.id,
+            displayNo: question.displayNo,
+            stem: question.stem ?? question.desc,
+            fullScore: question.score,
+            standardAnswer: state?.standardAnswer ?? '',
+            rubricPoints: state?.gradingRubric ?? [],
+            teacherRules: state?.teacherRules ?? [],
+            rubricVersion: state?.rubricVersion ?? 1
+          };
+        }),
+        matchedSubmissions.map(page => ({
+          assetId: page.id,
+          studentId: page.studentId!,
+          studentName: page.expectedStudentName,
+          studentNo: page.detectedStudentNo
+        }))
+      );
+      const nextStates = applyTrialSamples(questionStates, result);
+      const firstState = nextStates[0];
+      const firstSample = firstState?.calibrationSamples[0];
+      setQuestionStates(nextStates);
+      setSelectedQuestionId(firstState?.questionId ?? '');
+      setSelectedSampleId(firstSample?.id ?? '');
+      setEditedOcr(firstSample?.ocrText ?? '');
+      setTeacherScore(firstSample?.aiScore ?? 0);
+      setTrialGradingPhase('ready');
+      onUpdateState({ questionGradingStates: nextStates, calibrationSamples: firstState?.calibrationSamples ?? [] });
+      onShowToast(`Luna 已完成 ${result.samples.length} 条第一部分试批结果`);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : 'TRIAL_GRADING_FAILED';
+      setTrialGradingPhase('error');
+      setTrialGradingError(code);
+      onShowToast('试批评分失败，请检查模型返回后重试');
+    }
   };
 
   const updateSample = (source: CalibrationResultSource, score: number, reason: string) => {
@@ -537,9 +871,20 @@ export default function GradingWorkflow({
     if (nextStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget)) setShowModeDialog(true);
   };
 
+  const persistRubric = (state: QuestionGradingState) => saveTaskRubric(selectedTask.id, {
+    questionId: state.questionId,
+    standardAnswer: state.standardAnswer,
+    gradingRubric: state.gradingRubric,
+    teacherRules: state.teacherRules,
+    rubricVersion: state.rubricVersion
+  });
+
   const saveRubricDraft = () => {
+    if (!currentQuestionState) return;
     onUpdateState({ questionGradingStates: questionStates });
-    onShowToast(`第 ${workflowState.questions.findIndex(item => item.id === selectedQuestionId) + 1} 题评分依据草稿已保存`);
+    void persistRubric(currentQuestionState)
+      .then(() => onShowToast(`第 ${workflowState.questions.findIndex(item => item.id === selectedQuestionId) + 1} 题评分依据草稿已保存`))
+      .catch(() => onShowToast('评分依据保存失败'));
   };
 
   const applyRubric = () => {
@@ -553,7 +898,9 @@ export default function GradingWorkflow({
     const nextStates = questionStates.map(item => item.questionId === next.questionId ? next : item);
     setQuestionStates(nextStates);
     onUpdateState({ questionGradingStates: nextStates });
-    onShowToast(`本题评分依据已更新为 V${nextVersion}，教师终评样本保持不变`);
+    void persistRubric(next)
+      .then(() => onShowToast(`本题评分依据已更新为 V${nextVersion}，教师终评样本保持不变`))
+      .catch(() => onShowToast('评分依据保存失败'));
   };
 
   const lockAndStart = () => {
@@ -568,7 +915,7 @@ export default function GradingWorkflow({
   return (
     <div className="mx-auto max-w-7xl space-y-4">
       <header className="flex flex-wrap items-center gap-3">
-        <div className="flex min-w-0 items-center gap-3"><button type="button" title="返回批改任务" aria-label="返回批改任务" onClick={onBack} className="rounded-2xl border border-slate-200 bg-white/70 p-2.5 text-slate-500 hover:text-emerald-700 dark:border-zinc-800 dark:bg-zinc-900"><ArrowLeft className="h-4 w-4" /></button><div className="min-w-0"><h1 className="truncate text-xl font-black text-slate-900 dark:text-white">{selectedTask.name}</h1><p className="mt-1 text-xs text-slate-500">{currentClass.name} · {currentClass.studentCount} 人 · 收作业 {selectedTask.deadline}</p></div></div>
+        <div className="flex min-w-0 items-center gap-3"><button type="button" title="返回批改任务" aria-label="返回批改任务" onClick={onBack} className="rounded-2xl border border-slate-200 bg-white/70 p-2.5 text-slate-500 hover:text-emerald-700 dark:border-zinc-800 dark:bg-zinc-900"><ArrowLeft className="h-4 w-4" /></button><div className="min-w-0"><h1 className="truncate text-xl font-black text-slate-900 dark:text-white">{selectedTask.name}</h1><p className="mt-1 text-xs text-slate-500">{currentClassName} · {expectedStudentCount} 人 · 收作业 {selectedTask.deadline}</p></div></div>
       </header>
 
       <nav aria-label="任务流程" className="glass-panel grid grid-cols-2 overflow-hidden rounded-[24px] bg-slate-100/60 p-2 sm:grid-cols-4 xl:grid-cols-7 dark:bg-zinc-900/60">
@@ -587,7 +934,7 @@ export default function GradingWorkflow({
               <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors hover:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900/50"><Upload className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">作业题目或试卷</strong><span className="mt-1 max-w-full truncate text-xs text-slate-400">{workflowState.assignment.questionFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" onChange={event => void handleMaterialFiles('assignment', event.currentTarget.files)} /></label>
               <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors hover:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900/50"><FileText className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">参考答案</strong><span className="mt-1 max-w-full truncate text-xs text-slate-400">{workflowState.assignment.answerFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" onChange={event => void handleMaterialFiles('reference-answer', event.currentTarget.files)} /></label>
             </div>
-            {workflowState.assignment.assets.length ? <section className="mt-5 border-y border-slate-200 dark:border-zinc-800"><div className="flex flex-wrap items-center gap-2 py-3">{workflowState.assignment.assets.map(asset => <span key={asset.id} className={`inline-flex max-w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs font-bold ${asset.status === 'failed' ? 'bg-rose-100 text-rose-800' : asset.status === 'needs-review' ? 'bg-amber-100 text-amber-800' : asset.status === 'ready' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-slate-300'}`}><span className="max-w-56 truncate">{asset.fileName}</span><span>{materialStatusLabel[asset.status]}</span></span>)}</div>{normalizedDocuments.map(document => <Fragment key={document.assetId}><MaterialDocumentDetails document={document} asset={workflowState.assignment.assets.find(item => item.id === document.assetId)} /></Fragment>)}</section> : null}
+            {assignmentAssets.length ? <section className="mt-5 border-y border-slate-200 dark:border-zinc-800"><div className="flex flex-wrap items-center gap-2 py-3">{assignmentAssets.map(asset => <span key={asset.id} className={`inline-flex max-w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs font-bold ${asset.status === 'failed' ? 'bg-rose-100 text-rose-800' : asset.status === 'needs-review' ? 'bg-amber-100 text-amber-800' : asset.status === 'ready' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-slate-300'}`}><span className="max-w-56 truncate">{asset.fileName}</span><span>{materialStatusLabel[asset.status]}</span></span>)}</div>{assignmentDocuments.map(document => <Fragment key={document.assetId}><MaterialDocumentDetails document={document} asset={assignmentAssets.find(item => item.id === document.assetId)} /></Fragment>)}</section> : null}
             {workflowState.assignment.assets.length ? <section className="mt-5 border-y border-slate-200 py-4 dark:border-zinc-800">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div><h3 className="text-sm font-black">AI 拆题 · 第一部分</h3><p className="mt-1 text-xs text-slate-500">题号、答案、采分点和原文依据需经教师确认。</p></div>
@@ -611,21 +958,23 @@ export default function GradingWorkflow({
           </div>
           <aside className="space-y-4">
             <section className={`${panelClass} p-5`}><div className="flex items-center gap-2"><CalendarClock className="h-4 w-4 text-emerald-700" /><h2 className="font-black">收作业提醒</h2></div><strong className="mt-4 block text-lg text-slate-900 dark:text-white">{selectedTask.deadline}</strong><p className="mt-2 text-xs text-slate-500">提醒教师收取作业，不限制提前上传。</p></section>
-            <section className={`${panelClass} p-5`}><h2 className="font-black">当前班级</h2><strong className="mt-3 block text-sm">{currentClass.name}</strong><span className="mt-1 block text-xs text-slate-500">应交 {currentClass.studentCount} 人</span></section>
+            <section className={`${panelClass} p-5`}><h2 className="font-black">当前班级</h2><strong className="mt-3 block text-sm">{currentClassName}</strong><span className="mt-1 block text-xs text-slate-500">应交 {expectedStudentCount} 人</span></section>
           </aside>
         </section>
       ) : null}
 
       {activeStage === 'intake' ? matchRows.length ? (
         <section className="space-y-4">
+          {rosterMatchPhase === 'loading' ? <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-bold text-sky-800">正在读取当前班级名册并核对学号...</div> : null}
+          {rosterMatchPhase === 'error' ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"><span>名册核对失败（{rosterMatchError}），当前答卷不能进入自动批改。</span><button type="button" onClick={() => setRosterRefreshKey(value => value + 1)} className="font-bold underline">重新核对</button></div> : null}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            {[['应交', currentClass.studentCount, '人'], ['已识别', currentClass.studentCount - missingRows.length, '人'], ['未交', missingRows.length, '人'], ['自动通过', matchRows.filter(row => row.status === 'matched').length, '组'], ['待质检', issueRows.length, '组']].map(([label, value, unit]) => <div key={String(label)} className={`${panelClass} p-4`}><span className="text-xs font-bold text-slate-500">{label}</span><div className="mt-2"><strong className="text-2xl text-slate-900 dark:text-white">{value}</strong><span className="ml-1 text-xs text-slate-400">{unit}</span></div></div>)}
+            {[['应交', expectedStudentCount, '人'], ['已匹配', matchedStudentCount, '人'], ['未交', missingRows.length, '人'], ['自动通过', matchRows.filter(row => row.status === 'matched' && row.rosterMatchStatus === 'matched').length, '组'], ['待质检', issueRows.length, '组']].map(([label, value, unit]) => <div key={String(label)} className={`${panelClass} p-4`}><span className="text-xs font-bold text-slate-500">{label}</span><div className="mt-2"><strong className="text-2xl text-slate-900 dark:text-white">{value}</strong><span className="ml-1 text-xs text-slate-400">{unit}</span></div></div>)}
           </div>
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
             <section className={`${panelClass} overflow-hidden`}>
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/70 p-5 dark:border-zinc-800"><div><h2 className="font-black text-slate-900 dark:text-white">上传与识别结果</h2><p className="mt-1 text-xs text-slate-500">按名单顺序上传，同一学生页面连续排列。</p></div><button type="button" onClick={() => { setShowOnlyOcrIssues(value => !value); setExpandedOcrPageId(null); }} disabled={!issueRows.length} className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-bold disabled:opacity-50 ${showOnlyOcrIssues ? 'border border-slate-200 bg-white text-slate-600 dark:border-zinc-700 dark:bg-zinc-900' : 'bg-rose-600 text-white'}`}><CircleAlert className="h-4 w-4" />{showOnlyOcrIssues ? '查看全部' : `仅看 ${issueRows.length} 项异常`}</button></div>
-              <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead><tr className="border-b border-slate-200/70 text-xs font-bold text-slate-400 dark:border-zinc-800"><th className="px-5 py-3">顺序</th><th className="px-3 py-3">名单预期</th><th className="px-3 py-3">识别学号</th><th className="px-3 py-3">页数</th><th className="px-3 py-3">文字识别</th><th className="px-3 py-3">处理方式</th><th className="px-3 py-3" /></tr></thead><tbody>{displayedRows.map(row => <Fragment key={row.id}><tr className="border-b border-slate-200/50 last:border-0 dark:border-zinc-800/70"><td className="px-5 py-4 tabular-nums">{row.sequence}</td><td className="px-3 py-4 font-bold">{row.expectedStudentName}</td><td className="px-3 py-4 font-mono text-xs">{row.detectedStudentNo}</td><td className="px-3 py-4">{row.pageCount}</td><td className="px-3 py-4">{Math.round((row.textConfidence ?? row.ocrConfidence) * 100)}%</td><td className="px-3 py-4"><span className={`rounded-xl px-2.5 py-1.5 text-xs font-bold ${row.status === 'matched' ? 'bg-emerald-100 text-emerald-800' : row.reviewSource === 'multimodal' ? 'bg-sky-100 text-sky-800' : 'bg-rose-100 text-rose-800'}`}>{row.status === 'matched' ? '自动通过' : row.reviewSource === 'multimodal' ? '多模态核验' : '教师复核'}</span></td><td className="px-3 py-4">{row.status !== 'matched' ? <button type="button" onClick={() => setExpandedOcrPageId(current => current === row.id ? null : row.id)} className="rounded-xl p-2 text-emerald-700 hover:bg-emerald-50" title="核对异常" aria-label={`核对 ${row.expectedStudentName} 的异常`}><Eye className="h-4 w-4" /></button> : null}</td></tr>{expandedOcrPageId === row.id ? <tr><td colSpan={7} className="p-0"><OcrInlineReview page={row} humanThreshold={ocrHumanReviewThreshold} autoThreshold={ocrAutoPassThreshold} onClose={() => setExpandedOcrPageId(null)} onConfirm={() => { onShowToast(`${row.expectedStudentName} 的归属与 OCR 文本已确认`); setExpandedOcrPageId(null); }} /></td></tr> : null}</Fragment>)}</tbody></table></div>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200/70 p-5 dark:border-zinc-800"><span className="text-xs text-slate-500">高于阈值不代表必然正确，缺页和错配始终拦截。</span><button type="button" onClick={() => setActiveStage('calibration')} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800">进入试批校准<ArrowRight className="h-4 w-4" /></button></div>
+              <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead><tr className="border-b border-slate-200/70 text-xs font-bold text-slate-400 dark:border-zinc-800"><th className="px-5 py-3">顺序</th><th className="px-3 py-3">名单匹配</th><th className="px-3 py-3">识别学号</th><th className="px-3 py-3">页数</th><th className="px-3 py-3">文字识别</th><th className="px-3 py-3">处理状态</th><th className="px-3 py-3" /></tr></thead><tbody>{displayedRows.map(row => { const status = getSubmissionStatus(row); const asset = submissionAssets.find(item => item.id === row.id); const document = normalizedDocuments.find(item => item.assetId === row.id); const textConfidence = row.textConfidence ?? row.ocrConfidence; return <Fragment key={row.id}><tr className="border-b border-slate-200/50 last:border-0 dark:border-zinc-800/70"><td className="px-5 py-4 tabular-nums">{row.sequence}</td><td className="px-3 py-4 font-bold">{row.expectedStudentName}</td><td className="px-3 py-4 font-mono text-xs">{row.detectedStudentNo}</td><td className="px-3 py-4">{row.pageCount}</td><td className="px-3 py-4">{textConfidence > 0 ? `${Math.round(textConfidence * 100)}%` : '未提供'}</td><td className="px-3 py-4"><span className={`rounded-xl px-2.5 py-1.5 text-xs font-bold ${status.className}`}>{status.label}</span></td><td className="px-3 py-4"><button type="button" onClick={() => openSubmissionPreview(row.id)} className="rounded-xl p-2 text-emerald-700 hover:bg-emerald-50" title="查看答卷" aria-label={`查看 ${row.expectedStudentName} 的答卷`}><Eye className="h-4 w-4" /></button></td></tr>{expandedOcrPageId === row.id ? <tr><td colSpan={7} className="p-0"><SubmissionPreview page={row} asset={asset} document={document} validation={visionValidationByAsset[row.id]} validationPhase={visionValidationPhase[row.id] ?? 'idle'} validationError={visionValidationError[row.id]} humanThreshold={ocrHumanReviewThreshold} autoThreshold={ocrAutoPassThreshold} onClose={() => setExpandedOcrPageId(null)} onConfirm={studentNo => confirmSubmissionStudentNo(row.id, studentNo)} onRunVision={() => void validateSubmissionVision(row.id)} /></td></tr> : null}</Fragment>; })}</tbody></table></div>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200/70 p-5 dark:border-zinc-800"><span className="text-xs text-slate-500">未知、重复或无法识别的学号必须处理后才能进入试批。</span><button type="button" disabled={!gradingDataReady || trialGradingPhase === 'loading'} onClick={() => void prepareTrialCalibration()} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">{trialGradingPhase === 'loading' ? 'Luna 正在试批...' : '进入试批校准'}<ArrowRight className="h-4 w-4" /></button></div>
             </section>
             <aside className="space-y-4">
               <section className={`${panelClass} p-5`}><div className="flex items-center justify-between"><h2 className="flex items-center gap-2 font-black"><Users className="h-4 w-4 text-rose-600" />未交作业</h2><span className="text-sm font-black text-rose-700">{missingRows.length} 人</span></div><div className="mt-4 space-y-2">{missingRows.map(student => <div key={student.studentId} className="flex items-center justify-between rounded-2xl bg-rose-50 px-3 py-2.5 text-sm dark:bg-rose-950/20"><div><strong>{student.studentName}</strong><span className="ml-2 font-mono text-xs text-slate-500">{student.studentNo}</span></div><button type="button" onClick={() => onShowToast(`${student.studentName} 已标记为待补交`)} className="text-xs font-bold text-rose-700">待补交</button></div>)}</div></section>
@@ -637,18 +986,31 @@ export default function GradingWorkflow({
         <section className={`${panelClass} flex min-h-96 flex-col items-center justify-center p-8 text-center`}>
           <Upload className="h-8 w-8 text-emerald-700" />
           <h2 className="mt-4 font-black text-slate-900 dark:text-white">上传学生作业</h2>
-          <p className="mt-2 text-sm text-slate-500">选择班级答卷图片或 PDF，按名单顺序排列。</p>
-          <label className="mt-5 cursor-pointer rounded-2xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-800">选择答卷文件<input type="file" multiple accept="application/pdf,image/*" className="sr-only" onChange={event => { const count = event.currentTarget.files?.length ?? 0; if (count) { onUpdateState({ uploadedCount: count }); onShowToast(`已选择 ${count} 个文件，等待上传服务处理`); } }} /></label>
-          {workflowState.uploadedCount ? <span className="mt-3 text-xs font-bold text-emerald-700">已选择 {workflowState.uploadedCount} 个文件</span> : null}
+          <p className="mt-2 text-sm text-slate-500">选择 {currentClassName} 的答卷图片或 PDF，系统优先按姓名匹配，重名时再核对学号。</p>
+          {rosterMatchPhase === 'loading' ? <span className="mt-3 text-xs font-bold text-sky-700">正在读取班级名册...</span> : null}
+          {rosterMatchPhase === 'ready' ? <span className="mt-3 text-xs font-bold text-emerald-700">名册已连接，应交 {expectedStudentCount} 人</span> : null}
+          {rosterMatchPhase === 'error' ? <div className="mt-3 flex items-center gap-3 text-xs font-bold text-rose-700"><span>名册连接失败（{rosterMatchError}）</span><button type="button" onClick={() => setRosterRefreshKey(value => value + 1)} className="underline">重试</button></div> : null}
+          <label className="mt-5 cursor-pointer rounded-2xl border border-emerald-700 px-5 py-2.5 text-sm font-bold text-emerald-700 hover:bg-emerald-50">选择答卷文件<input type="file" multiple accept="application/pdf,image/*" className="sr-only" disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onChange={event => selectSubmissionFiles(event.currentTarget.files)} /></label>
+          {submissionFiles.length ? <div className="mt-4 w-full max-w-xl rounded-lg border border-slate-200 bg-slate-50 p-4 text-left dark:border-zinc-800 dark:bg-zinc-900"><div className="flex items-center justify-between gap-3"><strong className="text-sm">待提交 {submissionFiles.length} 个文件</strong><span className="text-xs text-slate-400">单次最多 20 个</span></div><div className="mt-3 space-y-1.5">{submissionFiles.slice(0, 5).map(file => <div key={`${file.name}-${file.size}`} className="truncate text-xs text-slate-600 dark:text-slate-300">{file.name}</div>)}{submissionFiles.length > 5 ? <div className="text-xs text-slate-400">另有 {submissionFiles.length - 5} 个文件</div> : null}</div><button type="button" disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onClick={() => void submitStudentSubmissions()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60">{submissionUploadPhase === 'uploading' ? '正在上传...' : submissionUploadPhase === 'parsing' ? '正在 OCR 解析...' : '提交并开始质检'}<Upload className="h-4 w-4" /></button></div> : null}
+          {submissionUploadPhase === 'error' ? <div className="mt-3 text-xs font-bold text-rose-700">处理失败（{submissionUploadError}），可直接重新提交。</div> : null}
         </section>
       ) : null}
 
       {activeStage === 'rubric' && currentQuestionState ? (
-        <section className="space-y-4"><QuestionSelector questions={workflowState.questions} states={questionStates} selectedId={selectedQuestionId} onSelect={selectQuestion} /><QuestionContext question={currentQuestion} number={questionNumber} evidence={questionEvidence} onConfirmKnowledge={confirmKnowledgeLink} /><div className={`${panelClass} p-6`}><RubricEditor questionState={currentQuestionState} answerEvidence={answerEvidence} onChange={updateQuestionState} onSaveDraft={saveRubricDraft} onApply={applyRubric} onEnterTrial={() => setActiveStage('calibration')} /></div></section>
+        <section className="space-y-4"><QuestionSelector questions={workflowState.questions} states={questionStates} selectedId={selectedQuestionId} onSelect={selectQuestion} /><QuestionContext question={currentQuestion} number={questionNumber} evidence={questionEvidence} onConfirmKnowledge={confirmKnowledgeLink} /><div className={`${panelClass} p-6`}><RubricEditor questionState={currentQuestionState} answerEvidence={answerEvidence} onChange={updateQuestionState} onSaveDraft={saveRubricDraft} onApply={applyRubric} onEnterTrial={() => void prepareTrialCalibration(true)} /></div></section>
       ) : null}
 
       {activeStage === 'rubric' && !currentQuestionState ? (
         <section className={`${panelClass} flex min-h-80 flex-col items-center justify-center p-8 text-center`}><Sparkles className="h-8 w-8 text-emerald-700" /><h2 className="mt-4 font-black text-slate-900 dark:text-white">尚未生成评分依据</h2><p className="mt-2 text-sm text-slate-500">题目和参考答案解析完成后，各题采分点会出现在这里。</p><button type="button" onClick={() => setActiveStage('assignment')} className="mt-5 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-emerald-700 dark:border-zinc-700">返回作业内容</button></section>
+      ) : null}
+
+      {activeStage === 'calibration' && (!currentQuestionState || !selectedSample) ? (
+        <section className={`${panelClass} flex min-h-96 flex-col items-center justify-center p-8 text-center`}>
+          <Sparkles className={`h-8 w-8 text-emerald-700 ${trialGradingPhase === 'loading' ? 'animate-pulse' : ''}`} />
+          <h2 className="mt-4 font-black text-slate-900 dark:text-white">{trialGradingPhase === 'loading' ? 'Luna 正在试批第一部分' : trialGradingPhase === 'error' ? '试批没有完成' : '尚未生成试批样本'}</h2>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">{trialGradingPhase === 'loading' ? '正在从三份真实答卷中提取各题答案，并依据当前评分依据逐题评分。已有分数和批注不会作为评分依据。' : trialGradingPhase === 'error' ? `处理失败（${trialGradingError}），可以保留当前材料直接重试。` : '请先完成答卷匹配，再运行真实试批。'}</p>
+          {trialGradingPhase !== 'loading' ? <button type="button" onClick={() => void prepareTrialCalibration(true)} className="mt-5 rounded-2xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white">重新运行试批</button> : null}
+        </section>
       ) : null}
 
       {activeStage === 'calibration' && currentQuestionState && selectedSample ? (
@@ -659,12 +1021,12 @@ export default function GradingWorkflow({
             <aside className={`${panelClass} overflow-hidden`}><div className="border-b border-slate-200/70 p-4 dark:border-zinc-800"><h2 className="font-black">第 {questionNumber} 题代表样本</h2><p className="mt-1 text-xs text-slate-500">已确认 {currentQuestionState.calibrationSamples.filter(sample => sample.status === 'confirmed').length} / {currentQuestionState.sampleTarget}</p></div>{currentQuestionState.calibrationSamples.slice(0, currentQuestionState.sampleTarget).map(sample => <button key={sample.id} type="button" onClick={() => selectSample(sample)} className={`w-full border-b border-slate-200/60 p-4 text-left last:border-0 dark:border-zinc-800/70 ${sample.id === selectedSample.id ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'hover:bg-slate-50 dark:hover:bg-zinc-900'}`}><div className="flex items-center justify-between gap-2"><strong className="text-sm">{sample.studentName}</strong>{sample.status === 'confirmed' ? <CheckCircle2 className="h-4 w-4 text-emerald-700" /> : null}</div><div className="mt-2 flex items-center justify-between text-xs"><span className="text-slate-500">{sampleTypeLabel[sample.sampleType]}</span><span className={sample.gradingConfidence < lowConfidenceThreshold ? 'font-bold text-rose-700' : 'text-slate-400'}>{Math.round(sample.gradingConfidence * 100)}%</span></div></button>)}</aside>
             <div className="space-y-4">
               <div className="grid gap-3 lg:grid-cols-3">
-                <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><FileImage className="h-4 w-4 text-emerald-700" />原始答卷</h3><span className="text-xs text-slate-400">可核对</span></div><div className="relative mx-auto mt-4 min-h-64 max-w-xs rotate-[-0.5deg] border border-slate-300 bg-[#fffdf7] p-5 shadow-sm"><span className="absolute right-4 top-3 font-mono text-xs text-slate-500">{selectedSample.studentNo.slice(-4)}</span><p className="mt-8 font-serif text-sm leading-8 text-slate-700">{selectedSample.ocrText}</p><p className="mt-6 border-t border-dashed border-slate-300 pt-3 text-[11px] leading-5 text-slate-400">模拟原图：{selectedSample.rawImageDescription}</p></div></section>
+                <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><FileImage className="h-4 w-4 text-emerald-700" />本题答卷截图</h3>{selectedSample.sourcePreviewUrl ? <a href={selectedSample.sourcePreviewUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-emerald-700">新窗口打开</a> : <span className="text-xs text-slate-400">可核对</span>}</div>{selectedSample.sourcePreviewUrl ? selectedSample.sourcePreviewType === 'image' ? <img src={selectedSample.sourcePreviewUrl} alt={`${selectedSample.studentName} 本题答卷截图`} className="mt-4 max-h-[520px] w-full border border-slate-200 bg-white object-contain" /> : <object data={selectedSample.sourcePreviewUrl} type="application/pdf" className="mt-4 h-[520px] w-full border border-slate-200 bg-white"><a href={selectedSample.sourcePreviewUrl} target="_blank" rel="noreferrer" className="p-4 text-sm font-bold text-emerald-700">打开 {selectedSample.sourceFileName}</a></object> : <div className="relative mx-auto mt-4 min-h-64 max-w-xs border border-slate-300 bg-[#fffdf7] p-5 shadow-sm"><span className="absolute right-4 top-3 font-mono text-xs text-slate-500">{selectedSample.studentNo.slice(-4)}</span><p className="mt-8 font-serif text-sm leading-8 text-slate-700">{selectedSample.ocrText}</p></div>}</section>
                 <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><ScanLine className="h-4 w-4 text-emerald-700" />OCR 文本</h3><span className={`rounded-xl px-2 py-1 text-xs font-bold ${selectedSample.ocrConfidence < ocrHumanReviewThreshold ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600'}`}>{Math.round(selectedSample.ocrConfidence * 100)}%</span></div><textarea value={editedOcr} onChange={event => setEditedOcr(event.target.value)} rows={9} className={`${inputClass} mt-4 resize-none leading-7`} /><button type="button" onClick={() => onShowToast('OCR 修正已保存，本题 AI 评分将重新计算')} className="mt-3 rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold dark:border-zinc-700">保存 OCR 修正</button></section>
-                <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><Sparkles className="h-4 w-4 text-emerald-700" />AI 评分</h3><span className="text-xs text-slate-400">置信度 {Math.round(selectedSample.gradingConfidence * 100)}%</span></div><div className="mt-5 flex items-end gap-1"><strong className="text-3xl text-slate-900 dark:text-white">{selectedSample.aiScore}</strong><span className="pb-1 text-sm text-slate-400">/ {selectedSample.fullScore} 分</span></div><div className="mt-5 space-y-2">{selectedSample.matchedPoints.map(point => <div key={point} className="flex gap-2 rounded-xl bg-emerald-50 p-2.5 text-xs text-emerald-800"><Check className="h-3.5 w-3.5 flex-none" />{point}</div>)}{selectedSample.missedPoints.map(point => <div key={point} className="flex gap-2 rounded-xl bg-amber-50 p-2.5 text-xs text-amber-800"><AlertTriangle className="h-3.5 w-3.5 flex-none" />{point}</div>)}</div></section>
+                <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><Sparkles className="h-4 w-4 text-emerald-700" />AI 评分</h3><span className="text-xs text-slate-400">置信度 {Math.round(selectedSample.gradingConfidence * 100)}%</span></div><div className="mt-5 flex items-end gap-1"><strong className="text-3xl text-slate-900 dark:text-white">{selectedSample.aiScore ?? '待定'}</strong><span className="pb-1 text-sm text-slate-400">/ {selectedSample.fullScore} 分</span></div>{selectedSample.gradingReason ? <p className="mt-4 text-xs leading-5 text-slate-600 dark:text-slate-300">{selectedSample.gradingReason}</p> : null}<div className="mt-5 space-y-2">{selectedSample.matchedPoints.map(point => <div key={point} className="flex gap-2 rounded-xl bg-emerald-50 p-2.5 text-xs text-emerald-800"><Check className="h-3.5 w-3.5 flex-none" />{point}</div>)}{selectedSample.missedPoints.map(point => <div key={point} className="flex gap-2 rounded-xl bg-amber-50 p-2.5 text-xs text-amber-800"><AlertTriangle className="h-3.5 w-3.5 flex-none" />{point}</div>)}</div></section>
               </div>
               <section className={`${panelClass} p-5`}>
-                {selectedSample.resultSource === 'teacher-manual' ? <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-start gap-3"><LockKeyhole className="mt-0.5 h-5 w-5 text-amber-600" /><div><h3 className="font-black">教师终评 {selectedSample.teacherScore} 分，已作为本题锚点</h3><p className="mt-1 text-xs text-slate-500">{selectedSample.teacherReason?.replace(/[。！？.!?]+$/, '')}。后续评分依据变化不会覆盖此结果。</p></div></div><button type="button" onClick={() => setGradingAction('manual')} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold dark:border-zinc-700">重新打开</button></div> : selectedSample.status === 'confirmed' && gradingAction === 'none' ? <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-start gap-3"><CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-700" /><div><h3 className="font-black">试批结果已确认 · {selectedSample.teacherScore ?? selectedSample.aiScore} 分</h3><p className="mt-1 text-xs text-slate-500">{selectedSample.resultSource === 'teacher-adjusted' ? '教师已调整 AI 结果' : '教师已采用 AI 结果'}，当前结果已计入本题试批进度。</p></div></div><button type="button" onClick={() => setGradingAction('adjust')} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold dark:border-zinc-700">重新打开</button></div> : gradingAction === 'none' ? <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-black">确认这份试批样本</h3><p className="mt-1 text-xs text-slate-500">教师亲批会成为本题最终结果和校准锚点。</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => updateSample('ai-confirmed', selectedSample.aiScore, '教师确认 AI 评分')} className="rounded-2xl border border-slate-200 px-3 py-2.5 text-xs font-bold dark:border-zinc-700">采用 AI 结果</button><button type="button" onClick={() => { setRuleAddedNotice(false); setGradingAction('adjust'); }} className="rounded-2xl border border-slate-200 px-3 py-2.5 text-xs font-bold dark:border-zinc-700">调整 AI 结果</button><button type="button" onClick={() => setGradingAction('manual')} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-3 py-2.5 text-xs font-bold text-white"><UserCheck className="h-4 w-4" />由我批改</button></div></div> : <div className="space-y-4"><div className="flex items-center justify-between"><div><h3 className="font-black">{gradingAction === 'manual' ? '教师亲自批改' : '调整 AI 结果'}</h3><p className="mt-1 text-xs text-slate-500">保存分数、理由、原图和当前评分依据版本。</p></div><button type="button" title="取消" aria-label="取消" onClick={() => setGradingAction('none')} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button></div><div className="grid gap-3 sm:grid-cols-[120px_1fr]"><label className="space-y-1"><span className="text-xs font-bold text-slate-500">最终分数</span><input type="number" min={0} max={selectedSample.fullScore} value={teacherScore} onChange={event => setTeacherScore(Number(event.target.value))} className={inputClass} /></label><label className="space-y-1"><span className="text-xs font-bold text-slate-500">评分理由与证据</span><input value={teacherReason} onChange={event => { setTeacherReason(event.target.value); setRuleAddedNotice(false); }} className={inputClass} placeholder="说明采用或调整分数的依据" /></label></div><div className="flex flex-wrap items-center justify-end gap-2">{ruleAddedNotice ? <span className="mr-auto flex items-center gap-1.5 text-xs font-bold text-emerald-700"><CheckCircle2 className="h-4 w-4" />已加入本题评分细则，可继续确认调整</span> : null}{gradingAction === 'adjust' ? <button type="button" disabled={ruleAddedNotice} onClick={() => { updateQuestionState({ ...currentQuestionState, teacherRules: [...currentQuestionState.teacherRules, teacherReason || '从当前边界样本补充的评分规则'] }); setRuleAddedNotice(true); onShowToast('已加入本题评分细则'); }} className="rounded-2xl border border-slate-200 px-4 py-2.5 text-xs font-bold disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-700 dark:border-zinc-700">{ruleAddedNotice ? '已加入评分细则' : '加入本题评分细则'}</button> : null}<button type="button" onClick={() => updateSample(gradingAction === 'manual' ? 'teacher-manual' : 'teacher-adjusted', teacherScore, teacherReason || '教师完成分项判断')} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white">{gradingAction === 'manual' ? '完成教师批改' : '确认调整'}</button></div></div>}
+                {selectedSample.resultSource === 'teacher-manual' ? <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-start gap-3"><LockKeyhole className="mt-0.5 h-5 w-5 text-amber-600" /><div><h3 className="font-black">教师终评 {selectedSample.teacherScore} 分，已作为本题锚点</h3><p className="mt-1 text-xs text-slate-500">{selectedSample.teacherReason?.replace(/[。！？.!?]+$/, '')}。后续评分依据变化不会覆盖此结果。</p></div></div><button type="button" onClick={() => setGradingAction('manual')} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold dark:border-zinc-700">重新打开</button></div> : selectedSample.status === 'confirmed' && gradingAction === 'none' ? <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-start gap-3"><CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-700" /><div><h3 className="font-black">试批结果已确认 · {selectedSample.teacherScore ?? selectedSample.aiScore} 分</h3><p className="mt-1 text-xs text-slate-500">{selectedSample.resultSource === 'teacher-adjusted' ? '教师已调整 AI 结果' : '教师已采用 AI 结果'}，当前结果已计入本题试批进度。</p></div></div><button type="button" onClick={() => setGradingAction('adjust')} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold dark:border-zinc-700">重新打开</button></div> : gradingAction === 'none' ? <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-black">确认这份试批样本</h3><p className="mt-1 text-xs text-slate-500">教师亲批会成为本题最终结果和校准锚点。</p></div><div className="flex flex-wrap gap-2"><button type="button" disabled={selectedSample.aiScore === null} onClick={() => { if (selectedSample.aiScore !== null) updateSample('ai-confirmed', selectedSample.aiScore, '教师确认 AI 评分'); }} className="rounded-2xl border border-slate-200 px-3 py-2.5 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700">采用 AI 结果</button><button type="button" onClick={() => { setRuleAddedNotice(false); setGradingAction('adjust'); }} className="rounded-2xl border border-slate-200 px-3 py-2.5 text-xs font-bold dark:border-zinc-700">调整 AI 结果</button><button type="button" onClick={() => setGradingAction('manual')} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-3 py-2.5 text-xs font-bold text-white"><UserCheck className="h-4 w-4" />由我批改</button></div></div> : <div className="space-y-4"><div className="flex items-center justify-between"><div><h3 className="font-black">{gradingAction === 'manual' ? '教师亲自批改' : '调整 AI 结果'}</h3><p className="mt-1 text-xs text-slate-500">保存分数、理由、原图和当前评分依据版本。</p></div><button type="button" title="取消" aria-label="取消" onClick={() => setGradingAction('none')} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button></div><div className="grid gap-3 sm:grid-cols-[120px_1fr]"><label className="space-y-1"><span className="text-xs font-bold text-slate-500">最终分数</span><input type="number" min={0} max={selectedSample.fullScore} value={teacherScore} onChange={event => setTeacherScore(Number(event.target.value))} className={inputClass} /></label><label className="space-y-1"><span className="text-xs font-bold text-slate-500">评分理由与证据</span><input value={teacherReason} onChange={event => { setTeacherReason(event.target.value); setRuleAddedNotice(false); }} className={inputClass} placeholder="说明采用或调整分数的依据" /></label></div><div className="flex flex-wrap items-center justify-end gap-2">{ruleAddedNotice ? <span className="mr-auto flex items-center gap-1.5 text-xs font-bold text-emerald-700"><CheckCircle2 className="h-4 w-4" />已加入本题评分细则，可继续确认调整</span> : null}{gradingAction === 'adjust' ? <button type="button" disabled={ruleAddedNotice} onClick={() => { updateQuestionState({ ...currentQuestionState, teacherRules: [...currentQuestionState.teacherRules, teacherReason || '从当前边界样本补充的评分规则'] }); setRuleAddedNotice(true); onShowToast('已加入本题评分细则'); }} className="rounded-2xl border border-slate-200 px-4 py-2.5 text-xs font-bold disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-700 dark:border-zinc-700">{ruleAddedNotice ? '已加入评分细则' : '加入本题评分细则'}</button> : null}<button type="button" onClick={() => updateSample(gradingAction === 'manual' ? 'teacher-manual' : 'teacher-adjusted', teacherScore, teacherReason || '教师完成分项判断')} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white">{gradingAction === 'manual' ? '完成教师批改' : '确认调整'}</button></div></div>}
               </section>
               <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-slate-500">{allCalibrationComplete ? '所有题目的试批样本均已完成。' : '批改方式将在所有题目的试批样本完成后统一选择。'}</p>{allCalibrationComplete ? <button type="button" onClick={() => setShowModeDialog(true)} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">选择本次批改方式</button> : null}</div>
             </div>
@@ -673,7 +1035,7 @@ export default function GradingWorkflow({
       ) : null}
 
       {activeStage === 'grading' ? (
-        <section className="space-y-4"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[['已完成', `${gradedCount} / ${currentClass.studentCount}`], ['正常结果', Math.max(gradedCount - pendingReviews, 0)], ['异常隔离', pendingReviews], ['批改方式', modeOptions.find(option => option.id === gradingMode)?.label ?? '未选择']].map(([label, value]) => <div key={String(label)} className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">{label}</span><strong className="mt-2 block text-2xl text-slate-900 dark:text-white">{value}</strong></div>)}</div><div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]"><section className={`${panelClass} p-6`}><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-black">AI 正在继续处理正常答卷</h2><p className="mt-1 text-sm text-slate-500">单份异常已隔离，系统性 OCR 异常才会暂停整批。</p></div><button type="button" onClick={() => setIsPaused(value => !value)} className="flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-bold dark:border-zinc-700">{isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}{isPaused ? '继续' : '暂停'}</button></div><div className="mt-8 h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800"><div className="h-full rounded-full bg-emerald-600" style={{ width: `${Math.round((gradedCount / currentClass.studentCount) * 100)}%` }} /></div><div className="mt-5 flex justify-end"><button type="button" onClick={() => { setGradedCount(currentClass.studentCount); onShowToast('正常答卷已完成，异常项等待教师复核'); }} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">完成模拟批改</button></div></section><aside className={`${panelClass} p-5`}><div className="flex items-center justify-between"><h2 className="flex items-center gap-2 font-black"><ShieldCheck className="h-4 w-4 text-rose-600" />异常复核</h2><span className="text-sm font-black text-rose-700">{pendingReviews} 项</span></div><p className="mt-2 text-xs leading-5 text-slate-500">当前任务的 OCR、评分分歧和抽检项目。</p><button type="button" onClick={() => setActiveStage('review')} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white">进入本任务异常复核<ArrowRight className="h-4 w-4" /></button></aside></div></section>
+        <section className="space-y-4"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[['已完成', `${gradedCount} / ${expectedStudentCount}`], ['正常结果', Math.max(gradedCount - pendingReviews, 0)], ['异常隔离', pendingReviews], ['批改方式', modeOptions.find(option => option.id === gradingMode)?.label ?? '未选择']].map(([label, value]) => <div key={String(label)} className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">{label}</span><strong className="mt-2 block text-2xl text-slate-900 dark:text-white">{value}</strong></div>)}</div><div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]"><section className={`${panelClass} p-6`}><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-black">AI 正在继续处理正常答卷</h2><p className="mt-1 text-sm text-slate-500">单份异常已隔离，系统性 OCR 异常才会暂停整批。</p></div><button type="button" onClick={() => setIsPaused(value => !value)} className="flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-bold dark:border-zinc-700">{isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}{isPaused ? '继续' : '暂停'}</button></div><div className="mt-8 h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800"><div className="h-full rounded-full bg-emerald-600" style={{ width: `${expectedStudentCount ? Math.round((gradedCount / expectedStudentCount) * 100) : 0}%` }} /></div><div className="mt-5 flex justify-end"><button type="button" onClick={() => { setGradedCount(expectedStudentCount); onShowToast('正常答卷已完成，异常项等待教师复核'); }} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">完成模拟批改</button></div></section><aside className={`${panelClass} p-5`}><div className="flex items-center justify-between"><h2 className="flex items-center gap-2 font-black"><ShieldCheck className="h-4 w-4 text-rose-600" />异常复核</h2><span className="text-sm font-black text-rose-700">{pendingReviews} 项</span></div><p className="mt-2 text-xs leading-5 text-slate-500">当前任务的 OCR、评分分歧和抽检项目。</p><button type="button" onClick={() => setActiveStage('review')} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white">进入本任务异常复核<ArrowRight className="h-4 w-4" /></button></aside></div></section>
       ) : null}
 
       {activeStage === 'review' ? <ReviewQueuePage reviewQueue={reviewQueue} onConfirmReview={onConfirmReview} onBounceToOcr={onBounceToOcr} onMarkAsSample={onMarkAsSample} onShowToast={onShowToast} /> : null}

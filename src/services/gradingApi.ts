@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { DocumentAsset, FirstSectionAnalysis, KnowledgeNode, NormalizedDocument } from '../domain/types';
+import { DocumentAsset, FirstSectionAnalysis, KnowledgeNode, NormalizedDocument, TaskQuestionRubric, TrialGradingQuestionInput, TrialGradingResult, TrialGradingSubmissionInput, VisionValidationResult } from '../domain/types';
 
 const readErrorCode = async (response: Response) => {
   const body = await response.json().catch(() => ({})) as { code?: string };
   return body.code ?? `HTTP_${response.status}`;
 };
 
-export const uploadTaskMaterials = async (taskId: string, kind: 'assignment' | 'reference-answer', files: File[]) => {
+export const uploadTaskMaterials = async (taskId: string, kind: 'assignment' | 'reference-answer' | 'student-submission', files: File[]) => {
   const form = new FormData();
   form.set('kind', kind);
   files.forEach(file => form.append('files', file));
@@ -65,4 +65,64 @@ export const getTaskAnalysis = async (taskId: string) => {
   if (!response.ok) throw new Error(await readErrorCode(response));
   const body = await response.json() as { analysis: FirstSectionAnalysis };
   return body.analysis;
+};
+
+export const getTaskRubrics = async (taskId: string) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/rubrics`);
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  const body = await response.json() as { rubrics: TaskQuestionRubric[] };
+  return body.rubrics;
+};
+
+export const saveTaskRubric = async (taskId: string, rubric: Omit<TaskQuestionRubric, 'taskId' | 'updatedAt'>) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/rubrics/${encodeURIComponent(rubric.questionId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(rubric)
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  const body = await response.json() as { rubric: TaskQuestionRubric };
+  return body.rubric;
+};
+
+export const gradeTaskTrial = async (
+  taskId: string,
+  questions: TrialGradingQuestionInput[],
+  submissions: TrialGradingSubmissionInput[]
+) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/trial-grading`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ questions, submissions })
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  const body = await response.json() as { result: TrialGradingResult };
+  return body.result;
+};
+
+export const getTaskTrialGrading = async (taskId: string) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/trial-grading`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  const body = await response.json() as { result: TrialGradingResult };
+  return body.result;
+};
+
+export const runVisionValidation = async (taskId: string, assetId: string, questionNos = ['2', '3', '4', '5', '6']) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/vision-validation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetId, questionNos })
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  const body = await response.json() as { result: VisionValidationResult };
+  return body.result;
+};
+
+export const getVisionValidation = async (taskId: string, assetId: string) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/vision-validation/${encodeURIComponent(assetId)}`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  const body = await response.json() as { result: VisionValidationResult };
+  return body.result;
 };

@@ -155,6 +155,8 @@ export interface SubmissionPage {
   pageContinuity?: number;
   reviewSource?: 'automatic' | 'multimodal' | 'teacher';
   issueReason?: string;
+  rosterMatchStatus?: 'pending' | 'matched' | 'unknown-student-no' | 'duplicate-student-no' | 'unreadable-student-no' | 'ambiguous-student-name';
+  rosterIssueReason?: string;
   status: 'matched' | 'needs-review' | 'missing-page';
 }
 
@@ -168,17 +170,107 @@ export interface CalibrationSample {
   rawImageDescription: string;
   ocrText: string;
   ocrConfidence: number;
-  aiScore: number;
+  aiScore: number | null;
   fullScore: number;
   gradingConfidence: number;
   matchedPoints: string[];
   missedPoints: string[];
+  gradingReason?: string;
+  sourceAssetId?: string;
+  sourceFileName?: string;
+  sourcePreviewUrl?: string;
+  sourcePreviewType?: 'image' | 'document';
   status: 'pending' | 'confirmed';
   resultSource?: CalibrationResultSource;
   teacherScore?: number;
   teacherReason?: string;
   isFinal?: boolean;
   rubricVersion: number;
+}
+
+export interface TrialGradingQuestionInput {
+  questionId: string;
+  displayNo: string;
+  stem: string;
+  fullScore: number;
+  standardAnswer: string;
+  rubricPoints: GradingRubricPoint[];
+  teacherRules: string[];
+  rubricVersion: number;
+}
+
+export interface TrialGradingSubmissionInput {
+  assetId: string;
+  studentId: string;
+  studentName: string;
+  studentNo: string;
+}
+
+export interface TrialGradingResult {
+  taskId: string;
+  model: string;
+  samples: CalibrationSample[];
+  createdAt: string;
+}
+
+export interface VisionValidationItem {
+  displayNo: string;
+  region: { x: number; y: number; width: number; height: number; pageNumber: number };
+  locatorSource: 'paddle-layout' | 'inferred-gap' | 'vision-layout';
+  locationStatus: 'located' | 'needs-visual' | 'needs-teacher';
+  locationReasons: string[];
+  cropUrl: string;
+  evidenceUnits?: VisionEvidenceUnit[];
+  paddleText: string;
+  lunaText: string;
+  answerFields?: VisionAnswerField[];
+  crossedOutText: string[];
+  selectedOption: string | null;
+  visualEvidence: string;
+  existingMarkings: string[];
+  confidence: number;
+  needsReview: boolean;
+}
+
+export type VisionEvidenceKind = 'text' | 'choice' | 'formula' | 'diagram' | 'table' | 'mixed';
+
+export interface VisionEvidenceUnit {
+  evidenceId: string;
+  kind: VisionEvidenceKind;
+  region: { x: number; y: number; width: number; height: number; pageNumber: number };
+  cropUrl: string;
+  provisionalText: string;
+  literalText: string;
+  confidence: number;
+  needsReview: boolean;
+  reviewReasons: string[];
+}
+
+export interface VisionAnswerField {
+  fieldId: string;
+  label: string;
+  text: string;
+  crossedOutText: string[];
+  confidence: number;
+  needsReview: boolean;
+}
+
+export interface TaskQuestionRubric {
+  taskId: string;
+  questionId: string;
+  standardAnswer: string;
+  gradingRubric: GradingRubricPoint[];
+  teacherRules: string[];
+  rubricVersion: number;
+  updatedAt: string;
+}
+
+export interface VisionValidationResult {
+  taskId: string;
+  assetId: string;
+  model: string;
+  items: VisionValidationItem[];
+  createdAt: string;
 }
 
 export interface GradingRubricPoint {
@@ -259,6 +351,7 @@ export interface NormalizedDocumentBlock {
   level?: number;
   pageNumber?: number;
   confidence?: number;
+  boundingBox?: { x: number; y: number; width: number; height: number };
 }
 
 export interface NormalizedDocumentResource {
@@ -266,6 +359,8 @@ export interface NormalizedDocumentResource {
   fileName: string;
   mimeType: string;
   publicUrl: string;
+  role?: 'content' | 'layout-visualization' | 'source-page';
+  pageNumber?: number;
 }
 
 export interface MaterialParseWarning {
@@ -293,6 +388,13 @@ export interface AnalysisEvidenceRef {
   fileName: string;
   blockIds: string[];
   quote: string;
+  evidenceMode?: 'native-text' | 'source-crop';
+  pageNumber?: number;
+  boundingBox?: { x: number; y: number; width: number; height: number };
+  imageUrl?: string;
+  sourcePageUrl?: string;
+  locatorStatus?: 'located' | 'needs-visual' | 'needs-teacher';
+  locatorReasons?: string[];
 }
 
 export interface AnalyzedQuestionUnit {
@@ -336,6 +438,10 @@ export interface SourceEvidence {
   ocrText: string;
   confidence: number;
   imageUrl?: string;
+  sourcePageUrl?: string;
+  evidenceMode?: 'native-text' | 'source-crop';
+  locatorStatus?: 'located' | 'needs-visual' | 'needs-teacher';
+  locatorReasons?: string[];
   isMock?: boolean;
 }
 

@@ -451,8 +451,8 @@ export const initialTasks: WorkbenchTask[] = [
   {
     id: 'task-20260810-1',
     name: '20260810_1',
-    classId: 'c1',
-    className: '七年级 3 班',
+    classId: 'c5',
+    className: '七年级 5 班',
     node: 'collection',
     nodeName: '评分依据待确认',
     deadline: '今天 18:00',
@@ -780,18 +780,9 @@ export const initialWorkflowState: WorkflowState = {
     '只写“梨花很美”不算命中自然环境作用。',
     '三层意思都有但没有结合文本，最高得 25 分。'
   ],
-  submissionPages: [
-    { id: 'page-1', sequence: 1, studentId: 's1', expectedStudentName: '林子涵', detectedStudentNo: '2026070301', pageCount: 2, ocrConfidence: 0.98, studentNoConfidence: 0.99, textConfidence: 0.98, regionCompleteness: 1, pageContinuity: 1, reviewSource: 'automatic', status: 'matched' },
-    { id: 'page-2', sequence: 2, studentId: 's2', expectedStudentName: '张雨轩', detectedStudentNo: '2026070302', pageCount: 2, ocrConfidence: 0.82, studentNoConfidence: 0.98, textConfidence: 0.82, regionCompleteness: 0.91, pageContinuity: 1, reviewSource: 'multimodal', issueReason: '末行有涂改，文字模型与多模态核验结果不一致。', status: 'needs-review' },
-    { id: 'page-3', sequence: 3, studentId: 's3', expectedStudentName: '陈梓睿', detectedStudentNo: '无法识别', pageCount: 2, ocrConfidence: 0.54, studentNoConfidence: 0.28, textConfidence: 0.86, regionCompleteness: 0.96, pageContinuity: 1, reviewSource: 'teacher', issueReason: '学号无法稳定识别，不能自动确认学生归属。', status: 'needs-review' },
-    { id: 'page-4', sequence: 4, studentId: 's4', expectedStudentName: '许佳琪', detectedStudentNo: '2026070304', pageCount: 1, ocrConfidence: 0.97, studentNoConfidence: 0.99, textConfidence: 0.97, regionCompleteness: 0.52, pageContinuity: 0.35, reviewSource: 'teacher', issueReason: '只识别到一页，属于缺页硬异常。', status: 'missing-page' },
-    { id: 'page-5', sequence: 5, studentId: 's5', expectedStudentName: '周宇洋', detectedStudentNo: '2026070305', pageCount: 2, ocrConfidence: 0.96, studentNoConfidence: 0.99, textConfidence: 0.96, regionCompleteness: 1, pageContinuity: 1, reviewSource: 'automatic', status: 'matched' }
-  ],
+  submissionPages: [],
   calibrationSamples: makeCalibrationSamples('q3', 30, 5, 1),
-  missingSubmissions: [
-    { studentId: 's11', studentName: '赵晨曦', studentNo: '2026070311', status: 'missing' },
-    { studentId: 's18', studentName: '蒋思远', studentNo: '2026070318', status: 'missing' }
-  ],
+  missingSubmissions: [],
   questionGradingStates: [
     {
       questionId: 'q1',
