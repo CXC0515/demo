@@ -30,7 +30,6 @@ test('allows the model to defer a score when the rubric is insufficient', () => 
     samples: [{
       questionId: 'q1',
       assetId: 'asset-1',
-      studentAnswer: '学生答案',
       score: null,
       confidence: 0.2,
       matchedPoints: [],
@@ -46,6 +45,6 @@ test('allows the model to defer a score when the rubric is insufficient', () => 
 test('rejects invalid confidence and empty submissions', () => {
   assert.equal(trialGradingRequestSchema.safeParse({ ...request, submissions: [] }).success, false);
   assert.equal(trialGradingModelOutputSchema.safeParse({
-    samples: [{ questionId: 'q1', assetId: 'asset-1', studentAnswer: '', score: 1, confidence: 1.2, matchedPoints: [], missedPoints: [], reason: '', needsTeacherReview: false }]
+    samples: [{ questionId: 'q1', assetId: 'asset-1', score: 1, confidence: 1.2, matchedPoints: [], missedPoints: [], reason: '', needsTeacherReview: false }]
   }).success, false);
 });

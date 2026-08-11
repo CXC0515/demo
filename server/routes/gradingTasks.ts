@@ -26,7 +26,7 @@ import { OpenAICompatibleTrialGrader } from '../services/grading/OpenAICompatibl
 import { OpenAICompatibleVisionRecognizer } from '../services/grading/OpenAICompatibleVisionRecognizer';
 import { OpenAICompatibleVisionRegionLocator } from '../services/grading/OpenAICompatibleVisionRegionLocator';
 import { createVisionLocatedRegions } from '../services/grading/questionRegionCropper';
-import { resolveTrialScore } from '../services/grading/trialScore';
+import { getObservedAnswer, resolveTrialConfidence, resolveTrialScore, trialNeedsTeacherReview } from '../services/grading/trialScore';
 import { buildExpectedAnswerFields } from '../services/grading/answerFieldSchema';
 import { MaterialParserError } from '../services/materials/MaterialParser';
 import { parseMaterial } from '../services/materials/materialParserRegistry';
@@ -463,16 +463,19 @@ router.post('/:taskId/trial-grading', async (request, response) => {
         sample.missedPoints,
         sample.score
       );
+      const visionItem = getVisionValidationResult(request.params.taskId, material.id)?.items.find(item => item.displayNo === question.displayNo);
+      if (!visionItem) throw new Error('VISION_RESULT_REFERENCE_MISSING');
+      const ocrText = getObservedAnswer(visionItem);
+      const gradingConfidence = resolveTrialConfidence(sample.confidence, visionItem);
+      const needsTeacherReview = trialNeedsTeacherReview(sample.needsTeacherReview, visionItem);
       const scoreRatio = question.fullScore > 0 && score !== null ? score / question.fullScore : 0;
-      const sampleType: CalibrationSample['sampleType'] = sample.confidence < 0.65
+      const sampleType: CalibrationSample['sampleType'] = needsTeacherReview || gradingConfidence < 0.65
         ? 'ocr-risk'
         : scoreRatio >= 0.8
           ? 'high'
           : scoreRatio <= 0.4
             ? 'low'
             : 'middle';
-      const visionItem = getVisionValidationResult(request.params.taskId, material.id)?.items.find(item => item.displayNo === question.displayNo);
-      if (!visionItem) throw new Error('VISION_RESULT_REFERENCE_MISSING');
       return {
         id: `${sample.questionId}-${sample.assetId}`,
         questionId: sample.questionId,
@@ -481,11 +484,13 @@ router.post('/:taskId/trial-grading', async (request, response) => {
         studentNo: submission.studentNo,
         sampleType,
         rawImageDescription: `${material.fileName} · 第 ${question.displayNo} 题截图`,
-        ocrText: sample.studentAnswer,
-        ocrConfidence: sample.confidence,
+        rawOcrText: ocrText,
+        ocrText,
+        ocrConfidence: visionItem.confidence,
         aiScore: score,
         fullScore: question.fullScore,
-        gradingConfidence: sample.confidence,
+        gradingConfidence,
+        needsTeacherReview,
         matchedPoints: sample.matchedPoints,
         missedPoints: sample.missedPoints,
         gradingReason: sample.reason,

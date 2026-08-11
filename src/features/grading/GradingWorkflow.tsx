@@ -104,6 +104,8 @@ const sampleTypeLabel: Record<CalibrationSample['sampleType'], string> = {
   'ocr-risk': 'OCR 风险'
 };
 
+const getEffectiveOcrText = (sample: CalibrationSample) => sample.teacherCorrectedText ?? sample.rawOcrText ?? sample.ocrText;
+
 const modeOptions: { id: GradingMode; label: string; description: string }[] = [
   { id: 'per-submission', label: '每份都确认', description: '每份作业完成后等待教师确认' },
   { id: 'batch-checkpoint', label: '每 10 份确认', description: '分批检查，逐步建立本次任务信任' },
@@ -437,7 +439,7 @@ export default function GradingWorkflow({
   const [questionStates, setQuestionStates] = useState<QuestionGradingState[]>(initialQuestionStates);
   const [selectedQuestionId, setSelectedQuestionId] = useState(workflowState.questions[0]?.id ?? '');
   const [selectedSampleId, setSelectedSampleId] = useState(initialQuestionStates[0]?.calibrationSamples[0]?.id ?? '');
-  const [editedOcr, setEditedOcr] = useState(initialQuestionStates[0]?.calibrationSamples[0]?.ocrText ?? '');
+  const [editedOcr, setEditedOcr] = useState(initialQuestionStates[0]?.calibrationSamples[0] ? getEffectiveOcrText(initialQuestionStates[0].calibrationSamples[0]) : '');
   const [gradingAction, setGradingAction] = useState<'none' | 'adjust' | 'manual'>('none');
   const [teacherScore, setTeacherScore] = useState(0);
   const [teacherReason, setTeacherReason] = useState('');
@@ -510,7 +512,7 @@ export default function GradingWorkflow({
         setQuestionStates(restoredStates);
         setSelectedQuestionId(derivedWorkflow.questions[0]?.id ?? '');
         setSelectedSampleId(firstSample?.id ?? '');
-        setEditedOcr(firstSample?.ocrText ?? '');
+        setEditedOcr(firstSample ? getEffectiveOcrText(firstSample) : '');
         setTrialGradingPhase(usableTrialResult ? 'ready' : 'idle');
       }
       onUpdateState({
@@ -788,7 +790,7 @@ export default function GradingWorkflow({
 
   const selectSample = (sample: CalibrationSample) => {
     setSelectedSampleId(sample.id);
-    setEditedOcr(sample.ocrText);
+    setEditedOcr(getEffectiveOcrText(sample));
     setTeacherScore(sample.teacherScore ?? sample.aiScore ?? 0);
     setTeacherReason(sample.teacherReason ?? '');
     setGradingAction('none');
@@ -845,7 +847,7 @@ export default function GradingWorkflow({
       setQuestionStates(nextStates);
       setSelectedQuestionId(firstState?.questionId ?? '');
       setSelectedSampleId(firstSample?.id ?? '');
-      setEditedOcr(firstSample?.ocrText ?? '');
+      setEditedOcr(firstSample ? getEffectiveOcrText(firstSample) : '');
       setTeacherScore(firstSample?.aiScore ?? 0);
       setTrialGradingPhase('ready');
       onUpdateState({ questionGradingStates: nextStates, calibrationSamples: firstState?.calibrationSamples ?? [] });
@@ -862,13 +864,29 @@ export default function GradingWorkflow({
     if (!selectedSample || !currentQuestionState) return;
     const nextState = {
       ...currentQuestionState,
-      calibrationSamples: currentQuestionState.calibrationSamples.map(sample => sample.id === selectedSample.id ? { ...sample, ocrText: editedOcr, status: 'confirmed' as const, resultSource: source, teacherScore: score, teacherReason: reason, isFinal: true, rubricVersion: currentQuestionState.rubricVersion } : sample)
+      calibrationSamples: currentQuestionState.calibrationSamples.map(sample => sample.id === selectedSample.id ? { ...sample, teacherCorrectedText: editedOcr, ocrText: editedOcr, status: 'confirmed' as const, resultSource: source, teacherScore: score, teacherReason: reason, isFinal: true, rubricVersion: currentQuestionState.rubricVersion } : sample)
     };
     const nextStates = questionStates.map(item => item.questionId === nextState.questionId ? nextState : item);
     setQuestionStates(nextStates);
     setGradingAction('none');
     onShowToast(source === 'teacher-manual' ? `${selectedSample.studentName} 已完成教师终评，并作为本题校准锚点` : `${selectedSample.studentName} 的试批结果已确认`);
     if (nextStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget)) setShowModeDialog(true);
+  };
+
+  const saveOcrCorrection = () => {
+    if (!selectedSample || !currentQuestionState) return;
+    const rawOcrText = selectedSample.rawOcrText ?? selectedSample.ocrText;
+    const teacherCorrectedText = editedOcr === rawOcrText ? undefined : editedOcr;
+    const nextState = {
+      ...currentQuestionState,
+      calibrationSamples: currentQuestionState.calibrationSamples.map(sample => sample.id === selectedSample.id
+        ? { ...sample, rawOcrText, teacherCorrectedText, ocrText: teacherCorrectedText ?? rawOcrText }
+        : sample)
+    };
+    const nextStates = questionStates.map(item => item.questionId === nextState.questionId ? nextState : item);
+    setQuestionStates(nextStates);
+    onUpdateState({ questionGradingStates: nextStates });
+    onShowToast(teacherCorrectedText === undefined ? 'OCR 文本已恢复为 AI 原始识别' : '教师 OCR 修正已保存');
   };
 
   const persistRubric = (state: QuestionGradingState) => saveTaskRubric(selectedTask.id, {
@@ -1022,7 +1040,7 @@ export default function GradingWorkflow({
             <div className="space-y-4">
               <div className="grid gap-3 lg:grid-cols-3">
                 <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><FileImage className="h-4 w-4 text-emerald-700" />本题答卷截图</h3>{selectedSample.sourcePreviewUrl ? <a href={selectedSample.sourcePreviewUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-emerald-700">新窗口打开</a> : <span className="text-xs text-slate-400">可核对</span>}</div>{selectedSample.sourcePreviewUrl ? selectedSample.sourcePreviewType === 'image' ? <img src={selectedSample.sourcePreviewUrl} alt={`${selectedSample.studentName} 本题答卷截图`} className="mt-4 max-h-[520px] w-full border border-slate-200 bg-white object-contain" /> : <object data={selectedSample.sourcePreviewUrl} type="application/pdf" className="mt-4 h-[520px] w-full border border-slate-200 bg-white"><a href={selectedSample.sourcePreviewUrl} target="_blank" rel="noreferrer" className="p-4 text-sm font-bold text-emerald-700">打开 {selectedSample.sourceFileName}</a></object> : <div className="relative mx-auto mt-4 min-h-64 max-w-xs border border-slate-300 bg-[#fffdf7] p-5 shadow-sm"><span className="absolute right-4 top-3 font-mono text-xs text-slate-500">{selectedSample.studentNo.slice(-4)}</span><p className="mt-8 font-serif text-sm leading-8 text-slate-700">{selectedSample.ocrText}</p></div>}</section>
-                <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><ScanLine className="h-4 w-4 text-emerald-700" />OCR 文本</h3><span className={`rounded-xl px-2 py-1 text-xs font-bold ${selectedSample.ocrConfidence < ocrHumanReviewThreshold ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600'}`}>{Math.round(selectedSample.ocrConfidence * 100)}%</span></div><textarea value={editedOcr} onChange={event => setEditedOcr(event.target.value)} rows={9} className={`${inputClass} mt-4 resize-none leading-7`} /><button type="button" onClick={() => onShowToast('OCR 修正已保存，本题 AI 评分将重新计算')} className="mt-3 rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold dark:border-zinc-700">保存 OCR 修正</button></section>
+                <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><ScanLine className="h-4 w-4 text-emerald-700" />OCR 文本</h3><span className={`rounded-xl px-2 py-1 text-xs font-bold ${selectedSample.needsTeacherReview || selectedSample.ocrConfidence < ocrHumanReviewThreshold ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600'}`}>{selectedSample.needsTeacherReview ? '待核验 · ' : ''}{Math.round(selectedSample.ocrConfidence * 100)}%</span></div><textarea value={editedOcr} onChange={event => setEditedOcr(event.target.value)} rows={9} className={`${inputClass} mt-4 resize-none leading-7`} /><button type="button" onClick={saveOcrCorrection} className="mt-3 rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold dark:border-zinc-700">保存 OCR 修正</button></section>
                 <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><Sparkles className="h-4 w-4 text-emerald-700" />AI 评分</h3><span className="text-xs text-slate-400">置信度 {Math.round(selectedSample.gradingConfidence * 100)}%</span></div><div className="mt-5 flex items-end gap-1"><strong className="text-3xl text-slate-900 dark:text-white">{selectedSample.aiScore ?? '待定'}</strong><span className="pb-1 text-sm text-slate-400">/ {selectedSample.fullScore} 分</span></div>{selectedSample.gradingReason ? <p className="mt-4 text-xs leading-5 text-slate-600 dark:text-slate-300">{selectedSample.gradingReason}</p> : null}<div className="mt-5 space-y-2">{selectedSample.matchedPoints.map(point => <div key={point} className="flex gap-2 rounded-xl bg-emerald-50 p-2.5 text-xs text-emerald-800"><Check className="h-3.5 w-3.5 flex-none" />{point}</div>)}{selectedSample.missedPoints.map(point => <div key={point} className="flex gap-2 rounded-xl bg-amber-50 p-2.5 text-xs text-amber-800"><AlertTriangle className="h-3.5 w-3.5 flex-none" />{point}</div>)}</div></section>
               </div>
               <section className={`${panelClass} p-5`}>

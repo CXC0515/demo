@@ -3,7 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { GradingRubricPoint } from '../../../src/domain/types';
+import { GradingRubricPoint, VisionValidationItem } from '../../../src/domain/types';
+
+export const getObservedAnswer = (item: VisionValidationItem) => item.lunaText || item.selectedOption || '';
+
+export const resolveTrialConfidence = (gradingConfidence: number, item: VisionValidationItem) =>
+  Math.min(gradingConfidence, item.confidence);
+
+export const trialNeedsTeacherReview = (modelNeedsReview: boolean, item: VisionValidationItem) =>
+  modelNeedsReview || item.needsReview || item.locationStatus !== 'located';
 
 export const resolveTrialScore = (
   fullScore: number,

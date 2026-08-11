@@ -168,11 +168,14 @@ export interface CalibrationSample {
   studentNo: string;
   sampleType: 'high' | 'middle' | 'low' | 'boundary' | 'ocr-risk';
   rawImageDescription: string;
+  rawOcrText?: string;
+  teacherCorrectedText?: string;
   ocrText: string;
   ocrConfidence: number;
   aiScore: number | null;
   fullScore: number;
   gradingConfidence: number;
+  needsTeacherReview?: boolean;
   matchedPoints: string[];
   missedPoints: string[];
   gradingReason?: string;

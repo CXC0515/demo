@@ -32,7 +32,6 @@ export const trialGradingModelOutputSchema = z.object({
   samples: z.array(z.object({
     questionId: z.string().min(1),
     assetId: z.string().min(1),
-    studentAnswer: z.string(),
     score: z.number().nonnegative().nullable(),
     confidence: z.number().min(0).max(1),
     matchedPoints: z.array(z.string()),

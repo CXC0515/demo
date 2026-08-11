@@ -43,7 +43,8 @@ export class OpenAICompatibleTrialGrader {
       'score 必须在 0 到 fullScore 之间。标准答案或采分依据不足以可靠评分时，score 返回 null、needsTeacherReview=true，并说明缺少什么依据。',
       'matchedPoints 和 missedPoints 必须对应输入采分点；没有明确采分点时保持空数组。confidence 取 0 到 1。',
       '必须为每个 questionId 与 assetId 组合返回一条结果，不得遗漏。',
-      '严格返回 JSON：{"samples":[{"questionId":"","assetId":"","studentAnswer":"","score":0,"confidence":0,"matchedPoints":[],"missedPoints":[],"reason":"","needsTeacherReview":false}]}。',
+      '你只负责评分，不得转写、纠正或输出学生答案。',
+      '严格返回 JSON：{"samples":[{"questionId":"","assetId":"","score":0,"confidence":0,"matchedPoints":[],"missedPoints":[],"reason":"","needsTeacherReview":false}]}。',
       `题目与评分依据：\n${JSON.stringify(request.questions)}`,
       `学生逐题视觉识别：\n${JSON.stringify(submissions)}`
     ].join('\n\n');
