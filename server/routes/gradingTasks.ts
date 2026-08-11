@@ -504,6 +504,7 @@ router.post('/:taskId/trial-grading', async (request, response) => {
         ocrText,
         lunaReviewText: visionItem.lunaText,
         recognitionConflict,
+        ocrSource: visionItem.selectedOption ? 'choice-vision' : visionItem.paddleText ? 'paddle' : 'luna',
         ocrConfidence: visionItem.confidence,
         aiScore: score,
         fullScore: question.fullScore,

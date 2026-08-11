@@ -172,6 +172,7 @@ export interface CalibrationSample {
   teacherCorrectedText?: string;
   lunaReviewText?: string;
   recognitionConflict?: boolean;
+  ocrSource?: 'paddle' | 'luna' | 'choice-vision';
   ocrText: string;
   ocrConfidence: number;
   aiScore: number | null;

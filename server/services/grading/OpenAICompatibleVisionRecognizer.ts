@@ -13,6 +13,19 @@ const extractJson = (value: string) => {
   return JSON.parse((fenced ?? value).trim());
 };
 
+export const buildRecognitionRegionPrompt = (region: LocatedRegion) => {
+  const choiceCandidates = region.evidenceUnits
+    .filter(unit => unit.kind === 'choice')
+    .map(unit => ({ evidenceId: unit.evidenceId, kind: unit.kind, paddleText: unit.paddleText }));
+  const expectedFields = region.evidenceUnits.map(unit => ({ evidenceId: unit.evidenceId, kind: unit.kind }));
+  return [
+    `题组 ${region.displayNo}`,
+    `PaddleOCR 整题原文：${JSON.stringify(region.paddleText)}`,
+    `待复核字段：${JSON.stringify(expectedFields)}`,
+    ...(choiceCandidates.length ? [`选择题候选：${JSON.stringify(choiceCandidates)}`] : [])
+  ].join('；');
+};
+
 export class OpenAICompatibleVisionRecognizer {
   constructor(private readonly config: ModelConfig) {}
 
@@ -34,7 +47,7 @@ export class OpenAICompatibleVisionRecognizer {
     for (const region of regions) {
       content.push({
         type: 'text',
-        text: `题组 ${region.displayNo}；PaddleOCR 整题原文：${JSON.stringify(region.paddleText)}；待复核字段及候选：${JSON.stringify(region.evidenceUnits.map(unit => ({ evidenceId: unit.evidenceId, kind: unit.kind, paddleText: unit.paddleText })))}`
+        text: buildRecognitionRegionPrompt(region)
       });
       const image = await readFile(region.cropPath);
       content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image.toString('base64')}`, detail: 'high' } });
