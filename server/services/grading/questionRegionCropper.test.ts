@@ -285,3 +285,44 @@ test('keeps adjacent-question text out when the visual crop overlaps it', async 
     await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
   }
 });
+
+test('uses the overlapping answer block when Paddle omits the printed question number', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [
+          { block_label: 'text', block_content: '我准备为杨利伟画像。', block_bbox: [160, 260, 520, 360], block_id: 1, block_order: 1 },
+          { block_label: 'text', block_content: '7 [A] [B] [C] [D]', block_bbox: [160, 380, 360, 410], block_id: 2, block_order: 2 }
+        ]
+      }
+    }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['6'],
+      new Map([['6', ['6-answer']]]),
+      [located({
+        displayNo: '6',
+        boundingBox: { x: 0.18, y: 0.24, width: 0.5, height: 0.14 },
+        evidenceUnits: [{
+          ...located().evidenceUnits[0],
+          evidenceId: '6-answer',
+          boundingBox: { x: 0.2, y: 0.26, width: 0.45, height: 0.1 }
+        }]
+      })],
+      artifact
+    );
+    assert.equal(region.paddleText, '我准备为杨利伟画像。');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});

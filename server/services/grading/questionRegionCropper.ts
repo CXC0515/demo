@@ -453,10 +453,15 @@ export const createVisionLocatedRegions = async (
       ...(missingIds.length ? [`缺少答案证据：${missingIds.join('、')}`] : [])
     ];
     const evidencePaddleText = [...new Set(evidenceUnits.map(unit => unit.paddleText.trim()).filter(Boolean))].join('\n');
+    const visualEvidenceRegion = evidencePlans.length
+      ? unionRegions(evidencePlans.map(plan => plan.visualRegion))
+      : visualQuestion;
     const paddleText = evidenceUnits.length && evidenceUnits.every(unit => unit.kind === 'choice')
       ? evidencePaddleText
       : artifact
-        ? paddleTextForQuestion(artifact, page.pageNumber, questionRegion, displayNo) || evidencePaddleText
+        ? paddleTextForQuestion(artifact, page.pageNumber, questionRegion, displayNo)
+          || paddleTextInsideRegion(artifact, page.pageNumber, visualEvidenceRegion)
+          || evidencePaddleText
         : evidencePaddleText;
     return {
       displayNo,

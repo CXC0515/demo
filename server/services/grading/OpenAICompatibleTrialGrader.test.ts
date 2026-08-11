@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { VisionValidationItem } from '../../../src/domain/types';
-import { buildTrialAnswerEvidence } from './OpenAICompatibleTrialGrader';
+import { buildTrialAnswerEvidence, buildTrialGradingPrompt } from './OpenAICompatibleTrialGrader';
 
 const item: VisionValidationItem = {
   displayNo: '1',
@@ -32,4 +32,10 @@ test('uses Paddle as the grading answer while preserving Luna review evidence', 
   assert.equal(evidence.recognitionConflict, true);
   assert.equal(evidence.needsReview, true);
   assert.deepEqual(evidence.crossedOutText, ['划掉内容']);
+});
+
+test('requires a provisional Paddle-based score even when recognition conflicts', () => {
+  const prompt = buildTrialGradingPrompt({ questions: [], submissions: [] }, []);
+  assert.match(prompt, /依据 PaddleOCR 主证据给出暂定分数/);
+  assert.match(prompt, /不能成为拒绝给暂定分数的理由/);
 });
