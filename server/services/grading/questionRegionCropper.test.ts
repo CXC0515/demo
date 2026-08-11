@@ -156,6 +156,8 @@ test('splits a merged Paddle block using image rows instead of averaged coordina
     assert.equal(region.locationStatus, 'located');
     assert.ok(region.region.y >= 325 && region.region.y < 345, JSON.stringify(region.region));
     assert.ok(region.region.y + region.region.height <= 365);
+    assert.equal(region.paddleText, '4 [A] [B] [C] [D]');
+    assert.equal(region.evidenceUnits[0].paddleText, '4 [A] [B] [C] [D]');
   } finally {
     await rm(page.sourceImagePath, { force: true });
     await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
@@ -238,6 +240,7 @@ test('keeps continuation blocks in the same column when other columns interleave
     );
     assert.ok(region.region.x + region.region.width < 380, JSON.stringify(region.region));
     assert.ok(region.region.y <= 700 && region.region.y + region.region.height >= 765);
+    assert.equal(region.paddleText, '5. ① 活动名称\n② 活动说明');
   } finally {
     await rm(page.sourceImagePath, { force: true });
     await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });

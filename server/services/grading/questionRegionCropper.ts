@@ -41,6 +41,8 @@ export interface LocatedEvidence {
   region: PixelRegion & { pageNumber: number };
   cropPath: string;
   cropUrl: string;
+  paddleText: string;
+  paddleTextShared: boolean;
   provisionalText: string;
   confidence: number;
   needsReview: boolean;
@@ -81,12 +83,31 @@ const writeCrop = async (sourcePath: string, targetPath: string, region: PixelRe
 
 interface PaddleRow {
   key: string;
+  textKey: string;
   region: PixelRegion;
+  text: string;
   lineIndex?: number;
   lineCount?: number;
 }
 
 const circledNumbers = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
+
+const extractPaddleFieldText = (line: string, marker: string) => {
+  const start = line.indexOf(marker);
+  if (start < 0) return line.trim();
+  const afterMarker = line.slice(start + marker.length);
+  const nextMarkerIndex = circledNumbers
+    .map(candidate => afterMarker.indexOf(candidate))
+    .filter(index => index >= 0)
+    .sort((first, second) => first - second)[0];
+  const fieldText = nextMarkerIndex === undefined ? afterMarker : afterMarker.slice(0, nextMarkerIndex);
+  return fieldText
+    .replace(/\\(?:underline|text)/g, ' ')
+    .replace(/[${}]/g, ' ')
+    .replace(/^\s*[.、:：-]+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
 
 const answerRowFromPaddle = (
   artifact: PaddleParserArtifact,
@@ -104,17 +125,21 @@ const answerRowFromPaddle = (
     block: (typeof orderedBlocks)[number],
     blockIndex: number,
     lineIndex?: number,
-    lineCount?: number
+    lineCount?: number,
+    lineText?: string,
+    textKey?: string
   ): PaddleRow => {
     const [left, top, right, bottom] = block.block_bbox;
     return {
       key: lineIndex === undefined ? `${blockIndex}` : `${blockIndex}:${lineIndex}`,
+      textKey: textKey ?? (lineIndex === undefined ? `${blockIndex}` : `${blockIndex}:${lineIndex}`),
       region: {
         x: left,
         y: top,
         width: Math.max(1, right - left),
         height: Math.max(1, bottom - top)
       },
+      text: (lineText ?? block.block_content).trim(),
       lineIndex,
       lineCount
     };
@@ -124,7 +149,7 @@ const answerRowFromPaddle = (
     for (const [blockIndex, block] of orderedBlocks.entries()) {
       const lines = block.block_content.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
       const lineIndex = lines.findIndex(line => line.match(/^(\d+)(?:\s|[.、\[])/)?.[1] === displayNo && /\[[A-Z]\]/i.test(line));
-      if (lineIndex >= 0) choices.push(blockRegion(block, blockIndex, lineIndex, lines.length));
+      if (lineIndex >= 0) choices.push(blockRegion(block, blockIndex, lineIndex, lines.length, lines[lineIndex]));
     }
     const nearest = choices.sort((first, second) => {
       const center = (region: PixelRegion) => region.y + region.height / 2;
@@ -163,6 +188,7 @@ const answerRowFromPaddle = (
   const questionBlocks = orderedBlocks
     .map((block, index) => ({ block, index }))
     .filter(({ block }) => block.block_bbox[3] >= startTop && block.block_bbox[1] < nextAnchorTop && sameLane(block));
+  if (evidenceId.endsWith('-answer')) return blockRegion(start.block, start.index);
   const embeddedMarker = evidenceId.match(/[①②③④⑤⑥⑦⑧⑨⑩]/)?.[0];
   const fieldIndex = Number(evidenceId.match(/-(\d+)$/)?.[1] ?? 0);
   const marker = embeddedMarker ?? circledNumbers[fieldIndex - 1];
@@ -170,7 +196,14 @@ const answerRowFromPaddle = (
   for (const { block, index: blockIndex } of questionBlocks) {
     const lines = block.block_content.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     const lineIndex = lines.findIndex(line => line.includes(marker));
-    if (lineIndex >= 0 && lines.length === 1) return blockRegion(block, blockIndex);
+    if (lineIndex >= 0) return blockRegion(
+      block,
+      blockIndex,
+      lineIndex,
+      lines.length,
+      extractPaddleFieldText(lines[lineIndex], marker),
+      `${blockIndex}:${lineIndex}:${marker}`
+    );
   }
   return undefined;
 };
@@ -233,6 +266,31 @@ const overlapRatio = (first: PixelRegion, second: PixelRegion) => {
   const width = Math.max(0, Math.min(first.x + first.width, second.x + second.width) - Math.max(first.x, second.x));
   const height = Math.max(0, Math.min(first.y + first.height, second.y + second.height) - Math.max(first.y, second.y));
   return (width * height) / Math.max(1, Math.min(first.width * first.height, second.width * second.height));
+};
+
+const paddleTextInsideRegion = (
+  artifact: PaddleParserArtifact,
+  pageNumber: number,
+  region: PixelRegion
+) => {
+  const page = artifact.pages.find(candidate => candidate.pageNumber === pageNumber);
+  if (!page) return '';
+  const candidates = page.prunedResult.parsing_res_list
+    .map(block => {
+      const [left, top, right, bottom] = block.block_bbox;
+      return { block, region: { x: left, y: top, width: right - left, height: bottom - top } };
+    })
+    .filter(({ block, region: blockRegion }) => block.block_content.trim() && overlapRatio(blockRegion, region) >= 0.2)
+    .sort((first, second) => first.region.y - second.region.y || first.region.x - second.region.x);
+  return candidates
+    .filter(({ block }, index) => !candidates.some(({ block: other }, otherIndex) =>
+      otherIndex !== index
+      && other.block_content.trim().length > block.block_content.trim().length
+      && other.block_content.includes(block.block_content.trim())
+    ))
+    .map(({ block }) => block.block_content.trim())
+    .filter((text, index, all) => all.indexOf(text) === index)
+    .join('\n');
 };
 
 const emptyPanelFromPaddle = (
@@ -305,11 +363,14 @@ export const createVisionLocatedRegions = async (
     }] : []);
     const evidencePlans = await Promise.all(sourceEvidence.map(async evidence => {
       const locatedRow = fallbackChoiceRow ?? (artifact ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, evidence.evidenceId, evidence.kind, visualQuestion) : undefined);
-      const paddleRow = locatedRow ? await alignBlockLineToInk(page.sourceImagePath, locatedRow) : undefined;
+      const usePaddleGeometry = locatedRow && (evidence.kind === 'choice' || locatedRow.lineCount === 1);
+      const paddleRow = usePaddleGeometry ? await alignBlockLineToInk(page.sourceImagePath, locatedRow) : undefined;
       return {
         evidence,
         visualRegion: toPixels(evidence.boundingBox, metadata.width!, metadata.height!),
-        paddleRow
+        paddleRow,
+        paddleText: locatedRow?.text ?? '',
+        paddleTextKey: locatedRow?.textKey
       };
     }));
     const paddleRows = evidencePlans.flatMap(plan => plan.paddleRow ? [plan.paddleRow.region] : []);
@@ -328,7 +389,9 @@ export const createVisionLocatedRegions = async (
 
     const rowUseCount = new Map<string, number>();
     for (const plan of evidencePlans) if (plan.paddleRow) rowUseCount.set(plan.paddleRow.key, (rowUseCount.get(plan.paddleRow.key) ?? 0) + 1);
-    const evidenceUnits = await Promise.all(evidencePlans.map(async ({ evidence, visualRegion, paddleRow }, evidenceIndex) => {
+    const textUseCount = new Map<string, number>();
+    for (const plan of evidencePlans) if (plan.paddleTextKey) textUseCount.set(plan.paddleTextKey, (textUseCount.get(plan.paddleTextKey) ?? 0) + 1);
+    const evidenceUnits = await Promise.all(evidencePlans.map(async ({ evidence, visualRegion, paddleRow, paddleText, paddleTextKey }, evidenceIndex) => {
       const rawRegion = answerPanel && evidence.evidenceId.endsWith('-answer')
         ? answerPanel
         : paddleRow
@@ -357,6 +420,8 @@ export const createVisionLocatedRegions = async (
         region: { ...boundedRegion, pageNumber: page.pageNumber },
         cropPath,
         cropUrl: `/uploads/validation/${encodeURIComponent(taskId)}/${encodeURIComponent(assetId)}/${encodeURIComponent(fileName)}`,
+        paddleText,
+        paddleTextShared: Boolean(paddleTextKey && (textUseCount.get(paddleTextKey) ?? 0) > 1),
         provisionalText: evidence.provisionalText,
         confidence: evidence.confidence,
         needsReview: evidence.needsReview || reviewReasons.length > 0,
@@ -370,13 +435,19 @@ export const createVisionLocatedRegions = async (
       ...(vision?.needsReview ? [vision.reason || '整页视觉定位需要核验'] : []),
       ...(missingIds.length ? [`缺少答案证据：${missingIds.join('、')}`] : [])
     ];
+    const evidencePaddleText = [...new Set(evidenceUnits.map(unit => unit.paddleText.trim()).filter(Boolean))].join('\n');
+    const paddleText = evidenceUnits.length && evidenceUnits.every(unit => unit.kind === 'choice')
+      ? evidencePaddleText
+      : artifact
+        ? paddleTextInsideRegion(artifact, page.pageNumber, questionRegion) || evidencePaddleText
+        : evidencePaddleText;
     return {
       displayNo,
       region: { ...questionRegion, pageNumber: page.pageNumber },
       locatorSource: fallbackChoiceRow ? 'paddle-layout' : 'vision-layout',
       locationStatus: locationReasons.length ? 'needs-teacher' : 'located',
       locationReasons,
-      paddleText: '',
+      paddleText,
       cropPath: questionPath,
       cropUrl: `/uploads/validation/${encodeURIComponent(taskId)}/${encodeURIComponent(assetId)}/${encodeURIComponent(questionFileName)}`,
       evidenceUnits

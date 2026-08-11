@@ -26,7 +26,7 @@ import { OpenAICompatibleTrialGrader } from '../services/grading/OpenAICompatibl
 import { OpenAICompatibleVisionRecognizer } from '../services/grading/OpenAICompatibleVisionRecognizer';
 import { OpenAICompatibleVisionRegionLocator } from '../services/grading/OpenAICompatibleVisionRegionLocator';
 import { createVisionLocatedRegions } from '../services/grading/questionRegionCropper';
-import { getObservedAnswer, resolveTrialConfidence, resolveTrialScore, trialNeedsTeacherReview } from '../services/grading/trialScore';
+import { getObservedAnswer, hasSuspiciousRepeatedShortAnswer, resolveTrialConfidence, resolveTrialScore, trialNeedsTeacherReview } from '../services/grading/trialScore';
 import { buildExpectedAnswerFields } from '../services/grading/answerFieldSchema';
 import { MaterialParserError } from '../services/materials/MaterialParser';
 import { parseMaterial } from '../services/materials/materialParserRegistry';
@@ -302,22 +302,37 @@ router.post('/:taskId/vision-validation', async (request, response) => {
           const literalText = unit.kind === 'choice' || unit.evidenceId.endsWith('-answer')
             ? item?.selectedOption ?? item?.recognizedAnswer ?? ''
             : field?.text ?? '';
-          const normalizeCandidate = (value: string) => value.replace(/[\s\[\]（）()。,.，]/g, '').toUpperCase();
-          const candidatesConflict = Boolean(
-            unit.provisionalText
-            && literalText
-            && normalizeCandidate(unit.provisionalText) !== normalizeCandidate(literalText)
+          const normalizeCandidate = (value: string) => value.replace(/[\s\[\]（）()。,.，_:：;；、\\$\-]/g, '').toUpperCase();
+          const paddleCandidate = unit.paddleText;
+          const paddleNormalized = normalizeCandidate(paddleCandidate);
+          const lunaNormalized = normalizeCandidate(literalText);
+          const candidatesAgree = Boolean(
+            paddleNormalized
+            && lunaNormalized
+            && (paddleNormalized === lunaNormalized || (unit.paddleTextShared && (paddleNormalized.includes(lunaNormalized) || lunaNormalized.includes(paddleNormalized))))
           );
+          const candidatesConflict = Boolean(
+            unit.kind !== 'choice'
+            &&
+            paddleCandidate
+            && literalText
+            && !candidatesAgree
+          );
+          const suspiciousPaddleRepetition = hasSuspiciousRepeatedShortAnswer(paddleCandidate);
           return {
           evidenceId: unit.evidenceId,
           kind: unit.kind,
           region: unit.region,
           cropUrl: unit.cropUrl,
-          provisionalText: unit.provisionalText,
+          provisionalText: paddleCandidate,
           literalText,
           confidence: Math.min(unit.confidence, transcriptionConfidence ?? 0),
-          needsReview: unit.needsReview || candidatesConflict || (transcriptionNeedsReview ?? true),
-          reviewReasons: [...unit.reviewReasons, ...(candidatesConflict ? ['页级识别与局部转写不一致'] : [])]
+          needsReview: unit.needsReview || candidatesConflict || suspiciousPaddleRepetition || (transcriptionNeedsReview ?? true),
+          reviewReasons: [...new Set([
+            ...unit.reviewReasons,
+            ...(candidatesConflict ? ['PaddleOCR 与 Luna 视觉复核不一致'] : []),
+            ...(suspiciousPaddleRepetition ? ['PaddleOCR 短答案存在连续重复，需核验'] : [])
+          ])]
           };
         });
         return {
@@ -466,6 +481,7 @@ router.post('/:taskId/trial-grading', async (request, response) => {
       const visionItem = getVisionValidationResult(request.params.taskId, material.id)?.items.find(item => item.displayNo === question.displayNo);
       if (!visionItem) throw new Error('VISION_RESULT_REFERENCE_MISSING');
       const ocrText = getObservedAnswer(visionItem);
+      const recognitionConflict = visionItem.evidenceUnits?.some(unit => unit.reviewReasons.includes('PaddleOCR 与 Luna 视觉复核不一致')) ?? false;
       const gradingConfidence = resolveTrialConfidence(sample.confidence, visionItem);
       const needsTeacherReview = trialNeedsTeacherReview(sample.needsTeacherReview, visionItem);
       const scoreRatio = question.fullScore > 0 && score !== null ? score / question.fullScore : 0;
@@ -486,6 +502,8 @@ router.post('/:taskId/trial-grading', async (request, response) => {
         rawImageDescription: `${material.fileName} · 第 ${question.displayNo} 题截图`,
         rawOcrText: ocrText,
         ocrText,
+        lunaReviewText: visionItem.lunaText,
+        recognitionConflict,
         ocrConfidence: visionItem.confidence,
         aiScore: score,
         fullScore: question.fullScore,

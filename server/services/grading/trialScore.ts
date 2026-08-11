@@ -5,13 +5,23 @@
 
 import { GradingRubricPoint, VisionValidationItem } from '../../../src/domain/types';
 
-export const getObservedAnswer = (item: VisionValidationItem) => item.lunaText || item.selectedOption || '';
+export const formatPaddleTextForDisplay = (value: string) => value
+  .replace(/\$?\s*\\underline\s*\{\s*\\text\s*\{([^{}]*)\}\s*\}\s*\$?/g, '$1')
+  .replace(/\$?\s*\\underline\s*\{([^{}]*)\}\s*\$?/g, '$1')
+  .replace(/\s+/g, ' ')
+  .replace(/\s+([①②③④⑤⑥⑦⑧⑨⑩])/g, ' $1')
+  .trim();
+
+export const getObservedAnswer = (item: VisionValidationItem) =>
+  item.selectedOption || formatPaddleTextForDisplay(item.paddleText) || item.lunaText || '';
 
 export const resolveTrialConfidence = (gradingConfidence: number, item: VisionValidationItem) =>
   Math.min(gradingConfidence, item.confidence);
 
 export const trialNeedsTeacherReview = (modelNeedsReview: boolean, item: VisionValidationItem) =>
   modelNeedsReview || item.needsReview || item.locationStatus !== 'located';
+
+export const hasSuspiciousRepeatedShortAnswer = (value: string) => /^([\p{Script=Han}A-Za-z0-9])\1$/u.test(value.trim());
 
 export const resolveTrialScore = (
   fullScore: number,

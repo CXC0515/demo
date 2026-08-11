@@ -170,6 +170,8 @@ export interface CalibrationSample {
   rawImageDescription: string;
   rawOcrText?: string;
   teacherCorrectedText?: string;
+  lunaReviewText?: string;
+  recognitionConflict?: boolean;
   ocrText: string;
   ocrConfidence: number;
   aiScore: number | null;

@@ -20,8 +20,10 @@ export class OpenAICompatibleVisionRecognizer {
     const content: Array<Record<string, unknown>> = [{
       type: 'text',
       text: [
-        '你是无上下文的答题证据逐字转写器。每张图片是一道题的完整作答区域，不提供题干和标准答案。',
-        '你的唯一任务是报告图片中实际可见的字、符号、公式、选项或图形信息。禁止根据常识、诗文、语法、固定搭配或学科知识补全和纠正。',
+        '你是无标准答案的答题证据复核器。每张图片是一道题的完整作答区域，并提供 PaddleOCR 的前置识别候选。',
+        '先对照图片核验 PaddleOCR 候选，再报告图片中实际可见的字、符号、公式、选项或图形信息。禁止根据常识、诗文、语法、固定搭配或学科知识补全和纠正。',
+        'PaddleOCR 只是候选而不是事实，可能有重复字、漏字、错字或上下行错序。必须独立看图核验，尤其不要机械复述连续重复的短答案。',
+        '候选与图片一致时原样确认；确有字形差异时按图片逐字返回；不能确认时写“[看不清]”并标记 needsReview，不得为了语句通顺改写。',
         '字形不能确认时写“[看不清]”，confidence 降低并 needsReview=true；空白证据必须返回空字符串，不得猜答案。',
         '划掉内容仅放入 crossedOutText。教师分数、勾叉和批注仅放入 existingMarkings。',
         '按照图片中实际可见的题号、圈号和上下顺序对应 evidenceId。evidenceId 以“-answer”结尾时写入 recognizedAnswer；其他 evidenceId 原样写入 answerFields.fieldId。',
@@ -32,7 +34,7 @@ export class OpenAICompatibleVisionRecognizer {
     for (const region of regions) {
       content.push({
         type: 'text',
-        text: `题组 ${region.displayNo}；待转写字段：${JSON.stringify(region.evidenceUnits.map(unit => ({ evidenceId: unit.evidenceId, kind: unit.kind })))}`
+        text: `题组 ${region.displayNo}；PaddleOCR 整题原文：${JSON.stringify(region.paddleText)}；待复核字段及候选：${JSON.stringify(region.evidenceUnits.map(unit => ({ evidenceId: unit.evidenceId, kind: unit.kind, paddleText: unit.paddleText })))}`
       });
       const image = await readFile(region.cropPath);
       content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image.toString('base64')}`, detail: 'high' } });
