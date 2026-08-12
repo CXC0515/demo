@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { AnalysisEvidenceRef, CalibrationSample, FirstSectionAnalysis, TrialGradingResult, VisionValidationResult } from '../../src/domain/types';
 import { getModelConfig, isModelConfigured } from '../config/modelConfig';
 import { deleteFirstSectionAnalysis, getFirstSectionAnalysis, saveFirstSectionAnalysis } from '../repositories/analysisRepository';
-import { getMaterials, replaceMaterialsForKind, StoredMaterial, updateMaterial } from '../repositories/materialRepository';
+import { appendMaterials, getMaterials, replaceMaterialsForKind, StoredMaterial, updateMaterial } from '../repositories/materialRepository';
 import { getTaskRubrics, saveTaskRubric } from '../repositories/gradingRubricRepository';
 import { getParserArtifact } from '../repositories/parserArtifactRepository';
 import { deleteTrialGradingResult, getTrialGradingResult, saveTrialGradingResult } from '../repositories/trialGradingRepository';
@@ -368,7 +368,8 @@ router.post('/:taskId/materials', upload.array('files'), (request, response) => 
     diskPath: file.path,
     publicUrl: `/uploads/${file.filename}`
   }));
-  replaceMaterialsForKind(request.params.taskId, kind, assets);
+  if (kind === 'student-submission') appendMaterials(request.params.taskId, assets);
+  else replaceMaterialsForKind(request.params.taskId, kind, assets);
   deleteTrialGradingResult(request.params.taskId);
   if (kind !== 'student-submission') deleteFirstSectionAnalysis(request.params.taskId);
   assets.forEach(material => { void parseUploadedMaterial(material); });
