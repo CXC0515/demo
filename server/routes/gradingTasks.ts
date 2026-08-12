@@ -28,6 +28,7 @@ import { OpenAICompatibleVisionRegionLocator } from '../services/grading/OpenAIC
 import { createVisionLocatedRegions } from '../services/grading/questionRegionCropper';
 import { getObservedAnswer, hasSuspiciousRepeatedShortAnswer, recognitionTextsConflict, resolveTrialConfidence, resolveTrialScore, trialNeedsTeacherReview } from '../services/grading/trialScore';
 import { buildExpectedAnswerFields } from '../services/grading/answerFieldSchema';
+import { findSubmissionsNeedingTrialGrading, mergeCurrentTrialSamples } from '../services/grading/trialResultReconciler';
 import { MaterialParserError } from '../services/materials/MaterialParser';
 import { parseMaterial } from '../services/materials/materialParserRegistry';
 
@@ -370,8 +371,10 @@ router.post('/:taskId/materials', upload.array('files'), (request, response) => 
   }));
   if (kind === 'student-submission') appendMaterials(request.params.taskId, assets);
   else replaceMaterialsForKind(request.params.taskId, kind, assets);
-  deleteTrialGradingResult(request.params.taskId);
-  if (kind !== 'student-submission') deleteFirstSectionAnalysis(request.params.taskId);
+  if (kind !== 'student-submission') {
+    deleteTrialGradingResult(request.params.taskId);
+    deleteFirstSectionAnalysis(request.params.taskId);
+  }
   assets.forEach(material => { void parseUploadedMaterial(material); });
   response.status(201).json({ assets: assets.map(toPublicAsset) });
 });
@@ -440,16 +443,34 @@ router.post('/:taskId/trial-grading', async (request, response) => {
     return;
   }
   try {
+    const existingResult = getTrialGradingResult(request.params.taskId);
+    const submissionsToGrade = findSubmissionsNeedingTrialGrading(existingResult, parsed.data);
+    if (!submissionsToGrade.length) {
+      const result: TrialGradingResult = {
+        taskId: request.params.taskId,
+        model: existingResult?.model ?? config.visionModel,
+        samples: mergeCurrentTrialSamples(existingResult, parsed.data, []),
+        createdAt: new Date().toISOString()
+      };
+      saveTrialGradingResult(result);
+      response.json({ result });
+      return;
+    }
     const grader = new OpenAICompatibleTrialGrader(config);
-    const modelResult = await grader.grade(request.params.taskId, parsed.data, materials);
+    const modelSamples = [];
+    for (const submission of submissionsToGrade) {
+      const incrementalRequest = { ...parsed.data, submissions: [submission] };
+      const partialResult = await grader.grade(request.params.taskId, incrementalRequest, materials);
+      modelSamples.push(...partialResult.samples);
+    }
     const questionsById = new Map(parsed.data.questions.map(question => [question.questionId, question]));
-    const submissionsById = new Map(parsed.data.submissions.map(submission => [submission.assetId, submission]));
-    const expectedKeys = new Set(parsed.data.questions.flatMap(question => parsed.data.submissions.map(submission => `${question.questionId}:${submission.assetId}`)));
-    const returnedKeys = new Set(modelResult.samples.map(sample => `${sample.questionId}:${sample.assetId}`));
+    const submissionsById = new Map(submissionsToGrade.map(submission => [submission.assetId, submission]));
+    const expectedKeys = new Set(parsed.data.questions.flatMap(question => submissionsToGrade.map(submission => `${question.questionId}:${submission.assetId}`)));
+    const returnedKeys = new Set(modelSamples.map(sample => `${sample.questionId}:${sample.assetId}`));
     if (returnedKeys.size !== expectedKeys.size || [...expectedKeys].some(key => !returnedKeys.has(key))) {
       throw new Error('MODEL_OUTPUT_INCOMPLETE');
     }
-    const samples: CalibrationSample[] = modelResult.samples.map(sample => {
+    const samples: CalibrationSample[] = modelSamples.map(sample => {
       const question = questionsById.get(sample.questionId);
       const submission = submissionsById.get(sample.assetId);
       const material = materialsById.get(sample.assetId);
@@ -507,7 +528,7 @@ router.post('/:taskId/trial-grading', async (request, response) => {
     const result: TrialGradingResult = {
       taskId: request.params.taskId,
       model: config.visionModel,
-      samples,
+      samples: mergeCurrentTrialSamples(existingResult, parsed.data, samples),
       createdAt: new Date().toISOString()
     };
     saveTrialGradingResult(result);

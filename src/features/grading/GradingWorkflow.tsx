@@ -91,10 +91,7 @@ const stages: { id: StageId; label: string }[] = [
   { id: 'assignment', label: '作业内容' },
   { id: 'rubric', label: '评分依据' },
   { id: 'intake', label: '上传质检' },
-  { id: 'calibration', label: '试批校准' },
-  { id: 'grading', label: '批量批改' },
-  { id: 'review', label: '异常复核' },
-  { id: 'diagnosis', label: '结果诊断' }
+  { id: 'calibration', label: '试批校准' }
 ];
 
 const sampleTypeLabel: Record<CalibrationSample['sampleType'], string> = {
@@ -520,6 +517,7 @@ export default function GradingWorkflow({
       onUpdateState({
         assignment: {
           ...workflowState.assignment,
+          status: assignmentAssets.length ? 'assigned' : workflowState.assignment.status,
           questionFileNames,
           answerFileNames,
           assets: materials.assets,
@@ -781,13 +779,7 @@ export default function GradingWorkflow({
 
   const setSampleTarget = (target: 3 | 5) => {
     if (!currentQuestionState || !currentQuestion) return;
-    let nextSamples = currentQuestionState.calibrationSamples;
-    if (target > nextSamples.length) {
-      const sourcePool = workflowState.calibrationSamples ?? [];
-      const additions = sourcePool.slice(nextSamples.length, target).map((sample, index) => ({ ...sample, id: `${currentQuestion.id}-extra-${index}`, questionId: currentQuestion.id, fullScore: currentQuestion.score, status: 'pending' as const, resultSource: undefined, teacherScore: undefined, isFinal: false }));
-      nextSamples = [...nextSamples, ...additions];
-    }
-    updateQuestionState({ ...currentQuestionState, sampleTarget: target, calibrationSamples: nextSamples });
+    updateQuestionState({ ...currentQuestionState, sampleTarget: target });
   };
 
   const selectSample = (sample: CalibrationSample) => {
@@ -1037,8 +1029,8 @@ export default function GradingWorkflow({
       {activeStage === 'calibration' && (!currentQuestionState || !selectedSample) ? (
         <section className={`${panelClass} flex min-h-96 flex-col items-center justify-center p-8 text-center`}>
           <Sparkles className={`h-8 w-8 text-emerald-700 ${trialGradingPhase === 'loading' ? 'animate-pulse' : ''}`} />
-          <h2 className="mt-4 font-black text-slate-900 dark:text-white">{trialGradingPhase === 'loading' ? 'Luna 正在试批第一部分' : trialGradingPhase === 'error' ? '试批没有完成' : '尚未生成试批样本'}</h2>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">{trialGradingPhase === 'loading' ? '正在从三份真实答卷中提取各题答案，并依据当前评分依据逐题评分。已有分数和批注不会作为评分依据。' : trialGradingPhase === 'error' ? `处理失败（${trialGradingError}），可以保留当前材料直接重试。` : '请先完成答卷匹配，再运行真实试批。'}</p>
+          <h2 className="mt-4 font-black text-slate-900 dark:text-white">{trialGradingPhase === 'loading' ? 'Luna 正在更新试批结果' : trialGradingPhase === 'error' ? '试批没有完成' : '尚未生成试批样本'}</h2>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">{trialGradingPhase === 'loading' ? `正在核对 ${matchedStudentCount} 份真实答卷；已有学生结果保留，只补充新增或评分依据变化的结果。` : trialGradingPhase === 'error' ? `处理失败（${trialGradingError}），可以保留当前材料直接重试。` : '请先完成答卷匹配，再运行真实试批。'}</p>
           {trialGradingPhase !== 'loading' ? <button type="button" onClick={() => void prepareTrialCalibration(true)} className="mt-5 rounded-2xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white">重新运行试批</button> : null}
         </section>
       ) : null}
@@ -1062,16 +1054,6 @@ export default function GradingWorkflow({
             </div>
           </div>
         </section>
-      ) : null}
-
-      {activeStage === 'grading' ? (
-        <section className="space-y-4"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[['已完成', `${gradedCount} / ${expectedStudentCount}`], ['正常结果', Math.max(gradedCount - pendingReviews, 0)], ['异常隔离', pendingReviews], ['批改方式', modeOptions.find(option => option.id === gradingMode)?.label ?? '未选择']].map(([label, value]) => <div key={String(label)} className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">{label}</span><strong className="mt-2 block text-2xl text-slate-900 dark:text-white">{value}</strong></div>)}</div><div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]"><section className={`${panelClass} p-6`}><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-black">AI 正在继续处理正常答卷</h2><p className="mt-1 text-sm text-slate-500">单份异常已隔离，系统性 OCR 异常才会暂停整批。</p></div><button type="button" onClick={() => setIsPaused(value => !value)} className="flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-bold dark:border-zinc-700">{isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}{isPaused ? '继续' : '暂停'}</button></div><div className="mt-8 h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800"><div className="h-full rounded-full bg-emerald-600" style={{ width: `${expectedStudentCount ? Math.round((gradedCount / expectedStudentCount) * 100) : 0}%` }} /></div><div className="mt-5 flex justify-end"><button type="button" onClick={() => { setGradedCount(expectedStudentCount); onShowToast('正常答卷已完成，异常项等待教师复核'); }} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">完成模拟批改</button></div></section><aside className={`${panelClass} p-5`}><div className="flex items-center justify-between"><h2 className="flex items-center gap-2 font-black"><ShieldCheck className="h-4 w-4 text-rose-600" />异常复核</h2><span className="text-sm font-black text-rose-700">{pendingReviews} 项</span></div><p className="mt-2 text-xs leading-5 text-slate-500">当前任务的 OCR、评分分歧和抽检项目。</p><button type="button" onClick={() => setActiveStage('review')} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white">进入本任务异常复核<ArrowRight className="h-4 w-4" /></button></aside></div></section>
-      ) : null}
-
-      {activeStage === 'review' ? <ReviewQueuePage reviewQueue={reviewQueue} onConfirmReview={onConfirmReview} onBounceToOcr={onBounceToOcr} onMarkAsSample={onMarkAsSample} onShowToast={onShowToast} /> : null}
-
-      {activeStage === 'diagnosis' ? (
-        <section className="space-y-4"><div className="grid gap-4 lg:grid-cols-2"><div className={`${panelClass} p-5`}><div className="flex items-start justify-between"><div><h2 className="font-black">班级总体情况</h2><p className="mt-1 text-xs text-slate-500">只呈现支持教学决策的班级信息。</p></div><span className="rounded-xl bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">AI 诊断草稿</span></div><div className="mt-6 grid grid-cols-3 text-center"><div><strong className="text-2xl">78.6</strong><span className="mt-1 block text-xs text-slate-500">班级平均分</span></div><div><strong className="text-2xl">41%</strong><span className="mt-1 block text-xs text-slate-500">象征意义命中率</span></div><div><strong className="text-2xl">35%</strong><span className="mt-1 block text-xs text-slate-500">未结合文本</span></div></div></div><div className={`${panelClass} p-5`}><h2 className="font-black">班级共性问题</h2><div className="mt-4 space-y-3">{['第三个采分点是本次主要失分来源。', '观点正确但缺少文本证据，是最常见的边界情况。', '标题表层含义掌握较好，人物与主旨连接不足。'].map((text, index) => <div key={text} className="flex gap-3"><span className="flex h-6 w-6 flex-none items-center justify-center rounded-xl bg-amber-100 text-xs font-black text-amber-800">{index + 1}</span><p className="text-sm leading-6 text-slate-600 dark:text-slate-300">{text}</p></div>)}</div></div></div><div className="grid gap-4 lg:grid-cols-2"><div className={`${panelClass} p-5`}><h2 className="font-black">典型答卷</h2><div className="mt-4 space-y-2">{[['林子涵', '典型优秀答案', '三层含义完整且结合文本'], ['陈梓睿', '典型共性错误', '停留在景物层面'], ['张雨轩', '典型边界答案', '同义表达是否算分']].map(item => <button key={item[0]} type="button" onClick={() => { const sample = currentQuestionState?.calibrationSamples.find(value => value.studentName === item[0]); if (sample) { selectSample(sample); setActiveStage('calibration'); } }} className="grid w-full grid-cols-[80px_110px_1fr] items-center rounded-2xl border border-slate-200 px-3 py-3 text-left text-xs hover:bg-slate-50 dark:border-zinc-800 dark:hover:bg-zinc-900"><strong>{item[0]}</strong><span className="font-bold text-emerald-700">{item[1]}</span><span className="text-slate-500">{item[2]}</span></button>)}</div></div><div className={`${panelClass} p-5`}><h2 className="font-black">重点个体</h2><p className="mt-1 text-xs text-slate-500">同时包括突出优秀和问题严重，只展示有明确证据的偏离。</p><div className="mt-4 space-y-3"><div className="flex gap-3 rounded-2xl bg-emerald-50 p-3 text-xs leading-5 text-emerald-900"><Eye className="h-4 w-4 flex-none text-emerald-700" /><p><strong>林子涵：</strong>高难采分点表达完整，可作为讲评样本。</p></div><div className="flex gap-3 rounded-2xl bg-rose-50 p-3 text-xs leading-5 text-rose-900"><AlertTriangle className="h-4 w-4 flex-none text-rose-700" /><p><strong>陈梓睿：</strong>“主旨理解”已出现第 2 次同类证据，写入薄弱知识点证据记录。</p></div></div></div></div><div className={`${panelClass} flex flex-wrap items-center justify-between gap-4 p-5`}><div><h2 className="font-black">讲评摘要</h2><p className="mt-1 text-sm text-slate-500">优先讲清标题三层含义，并用边界答案讨论评分尺度。</p></div><div className="flex gap-2"><button type="button" onClick={() => onShowToast('已根据班级共性问题生成讲评教案草稿')} className="flex items-center gap-2 rounded-2xl border border-slate-200 px-3 py-2.5 text-xs font-bold dark:border-zinc-700"><Layers3 className="h-4 w-4" />生成讲评教案</button><button type="button" disabled={diagnosisConfirmed} onClick={() => { setDiagnosisConfirmed(true); onSyncToProfiles(workflowState.aiResults); onShowToast('本次结果已确认，证据已写入薄弱知识点记录'); }} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60">{diagnosisConfirmed ? '结果已确认' : '确认本次结果'}</button></div></div></section>
       ) : null}
 
       {showModeDialog ? (

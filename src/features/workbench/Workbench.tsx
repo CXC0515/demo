@@ -84,7 +84,6 @@ export default function Workbench({
             </h1>
             <p className="text-sm text-slate-600 dark:text-slate-400 max-w-xl">
               今日工作重心：您有 <span className="font-semibold text-emerald-700 dark:text-emerald-400">{pendingTasks.length}</span> 项待处理的教学任务。
-              七年级 3 班《驿路梨花》阅读理解检测已被 AI 自动批改完成，包含 4 份低置信度答案，等待您的最终人工复核。
             </p>
           </div>
           <div className="mt-6 flex flex-wrap gap-3 z-10">

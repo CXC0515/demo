@@ -18,3 +18,6 @@ export const orderCalibrationSamplesForTrial = (samples: CalibrationSample[]) =>
   }
   return ordered;
 };
+
+export const selectCalibrationSamples = (samples: CalibrationSample[], target: 3 | 5) =>
+  orderCalibrationSamplesForTrial(samples).slice(0, target);

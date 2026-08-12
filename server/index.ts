@@ -10,6 +10,7 @@ import path from 'node:path';
 import gradingTasksRouter from './routes/gradingTasks';
 import rosterRouter from './routes/roster';
 import classroomRouter from './routes/classroom';
+import gradingTaskManagementRouter from './routes/gradingTaskManagement';
 import { getModelConfig, isModelConfigured } from './config/modelConfig';
 
 const app = express();
@@ -22,6 +23,7 @@ app.use('/uploads', express.static(uploadDirectory, { index: false, fallthrough:
 app.get('/api/health', (_request, response) => response.json({ ok: true, multimodalConfigured: isModelConfigured(getModelConfig()) }));
 app.use('/api', rosterRouter);
 app.use('/api', classroomRouter);
+app.use('/api', gradingTaskManagementRouter);
 app.use('/api/grading-tasks', gradingTasksRouter);
 
 app.listen(port, () => {
