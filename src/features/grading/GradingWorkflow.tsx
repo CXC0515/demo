@@ -91,7 +91,10 @@ const stages: { id: StageId; label: string }[] = [
   { id: 'assignment', label: '作业内容' },
   { id: 'rubric', label: '评分依据' },
   { id: 'intake', label: '上传质检' },
-  { id: 'calibration', label: '试批校准' }
+  { id: 'calibration', label: '试批校准' },
+  { id: 'grading', label: '批量批改' },
+  { id: 'review', label: '异常复核' },
+  { id: 'diagnosis', label: '结果诊断' }
 ];
 
 const sampleTypeLabel: Record<CalibrationSample['sampleType'], string> = {
@@ -475,7 +478,9 @@ export default function GradingWorkflow({
   const issueRows = matchRows.filter(row => row.status !== 'matched' || row.rosterMatchStatus !== 'matched');
   const displayedRows = showOnlyOcrIssues ? issueRows : matchRows;
   const missingRows = workflowState.missingSubmissions ?? [];
-  const pendingReviews = reviewQueue.filter(item => item.status === 'pending').length;
+  const trialSamples = questionStates.flatMap(state => state.calibrationSamples);
+  const reviewSamples = trialSamples.filter(sample => sample.needsTeacherReview || sample.recognitionConflict || sample.gradingConfidence < lowConfidenceThreshold);
+  const pendingReviews = reviewSamples.length;
   const allCalibrationComplete = questionStates.length > 0 && questionStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget);
   const assignmentReady = workflowState.assignment.status === 'assigned';
   const gradingDataReady = workflowState.questions.length > 0 && matchRows.length > 0 && rosterMatchPhase === 'ready' && !issueRows.some(row => row.rosterMatchStatus !== 'matched');
@@ -1053,6 +1058,44 @@ export default function GradingWorkflow({
               <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-slate-500">{allCalibrationComplete ? '所有题目的试批样本均已完成。' : '批改方式将在所有题目的试批样本完成后统一选择。'}</p>{allCalibrationComplete ? <button type="button" onClick={() => setShowModeDialog(true)} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">选择本次批改方式</button> : null}</div>
             </div>
           </div>
+        </section>
+      ) : null}
+
+      {activeStage === 'grading' ? (
+        <section className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              ['已匹配答卷', `${matchedStudentCount} 份`],
+              ['已完成试批', `${new Set(trialSamples.map(sample => sample.studentId)).size} 人`],
+              ['待复核证据', `${pendingReviews} 项`],
+              ['批改方式', modeOptions.find(option => option.id === gradingMode)?.label ?? '未选择']
+            ].map(([label, value]) => <div key={label} className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">{label}</span><strong className="mt-2 block text-2xl text-slate-900 dark:text-white">{value}</strong></div>)}
+          </div>
+          <section className={`${panelClass} flex min-h-80 flex-col items-center justify-center p-8 text-center`}>
+            <Layers3 className="h-9 w-9 text-emerald-700" />
+            <h2 className="mt-4 font-black text-slate-900 dark:text-white">批量批改尚未开始</h2>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">当前页面保留真实任务状态。完成试批确认并锁定评分依据后，批量批改结果会在这里按学生持续更新。</p>
+            {!allCalibrationComplete ? <button type="button" onClick={() => setActiveStage('calibration')} className="mt-5 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">继续试批校准</button> : <button type="button" onClick={() => setShowModeDialog(true)} className="mt-5 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">选择批改方式</button>}
+          </section>
+        </section>
+      ) : null}
+
+      {activeStage === 'review' ? (
+        <section className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-black text-slate-900 dark:text-white">本任务异常证据</h2><p className="mt-1 text-xs text-slate-500">来自当前真实试批结果中的 OCR 差异、低置信度和教师待核验项。</p></div><span className="rounded-xl bg-rose-100 px-3 py-1.5 text-xs font-bold text-rose-800">{pendingReviews} 项待复核</span></div>
+          {reviewSamples.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{reviewSamples.map(sample => {
+            const question = workflowState.questions.find(item => item.id === sample.questionId);
+            return <article key={sample.id} className={`${panelClass} p-5`}><div className="flex items-start justify-between gap-3"><div><strong className="text-base text-slate-900 dark:text-white">{sample.studentName}</strong><p className="mt-1 text-xs font-bold text-slate-500">第 {question ? workflowState.questions.indexOf(question) + 1 : '-'} 题 · {sample.aiScore ?? '待定'} / {sample.fullScore} 分</p></div><span className="rounded-xl bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800">{sample.recognitionConflict ? '识别有差异' : '待教师核验'}</span></div><p className="mt-4 line-clamp-3 text-xs leading-5 text-slate-600 dark:text-slate-300">{sample.gradingReason || '当前结果需要教师结合原图确认。'}</p><div className="mt-4 flex items-center justify-between border-t border-slate-200/70 pt-3 text-xs dark:border-zinc-800"><span className="text-slate-400">评分置信度 {Math.round(sample.gradingConfidence * 100)}%</span>{sample.sourcePreviewUrl ? <a href={sample.sourcePreviewUrl} target="_blank" rel="noreferrer" className="font-bold text-emerald-700">查看原图依据</a> : <span className="text-slate-400">暂无原图</span>}</div></article>;
+          })}</div> : <section className={`${panelClass} flex min-h-72 flex-col items-center justify-center p-8 text-center`}><CheckCircle2 className="h-10 w-10 text-emerald-500" /><h2 className="mt-4 font-black">当前没有待复核项</h2><p className="mt-2 text-sm text-slate-500">批量批改产生的新异常也会归入本任务。</p></section>}
+        </section>
+      ) : null}
+
+      {activeStage === 'diagnosis' ? (
+        <section className={`${panelClass} flex min-h-96 flex-col items-center justify-center p-8 text-center`}>
+          <BookOpenCheck className="h-10 w-10 text-emerald-700" />
+          <h2 className="mt-4 font-black text-slate-900 dark:text-white">等待形成班级诊断</h2>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">完成批量批改和异常复核后，这里将根据真实评分结果汇总班级情况、共性问题、典型答卷和重点个体。</p>
+          <div className="mt-5 flex flex-wrap justify-center gap-2"><span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500 dark:bg-zinc-800">班级总体情况</span><span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500 dark:bg-zinc-800">共性问题</span><span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500 dark:bg-zinc-800">典型答卷</span><span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500 dark:bg-zinc-800">重点个体</span></div>
         </section>
       ) : null}
 
