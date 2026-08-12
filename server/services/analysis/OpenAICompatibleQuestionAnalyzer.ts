@@ -4,6 +4,7 @@
  */
 
 import { ModelConfig } from '../../config/modelConfig';
+import { extractJson } from '../model/extractJson';
 import { firstSectionModelOutputSchema } from '../../schemas/firstSectionAnalysis';
 import { StoredMaterial } from '../../repositories/materialRepository';
 
@@ -14,10 +15,6 @@ interface KnowledgeCatalogItem {
   description: string;
 }
 
-const extractJson = (value: string) => {
-  const fenced = value.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-  return JSON.parse((fenced ?? value).trim());
-};
 
 const selectScopeBlocks = (material: StoredMaterial) => {
   const blocks = material.normalizedDocument?.blocks ?? [];

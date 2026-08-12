@@ -8,11 +8,7 @@ import { FirstSectionAnalysis } from '../../../src/domain/types';
 import { ModelConfig } from '../../config/modelConfig';
 import { visionRegionLocatorOutputSchema } from '../../schemas/paddleParserArtifact';
 import { buildExpectedAnswerFields } from './answerFieldSchema';
-
-const extractJson = (value: string) => {
-  const fenced = value.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-  return JSON.parse((fenced ?? value).trim());
-};
+import { extractJson } from '../model/extractJson';
 
 export class OpenAICompatibleVisionRegionLocator {
   constructor(private readonly config: ModelConfig) {}

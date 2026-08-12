@@ -46,7 +46,7 @@ export const visionRecognitionOutputSchema = z.object({
       needsReview: z.boolean()
     })).default([]),
     crossedOutText: z.array(z.string()).default([]),
-    selectedOption: z.string().nullable().default(null),
+    selectedOption: z.preprocess(value => Array.isArray(value) ? (value.length === 1 ? value[0] : null) : value, z.string().nullable().default(null)),
     visualEvidence: z.string().default(''),
     existingMarkings: z.array(z.string()).default([]),
     confidence: z.number().min(0).max(1),

@@ -26,15 +26,15 @@ const makePage = async (pageNumber: number) => {
   return { pageNumber, sourceImagePath: sourcePath };
 };
 
-const makeChoicePage = async () => {
+const makeChoicePage = async (pageNumber = 1) => {
   await mkdir(sourceDirectory, { recursive: true });
-  const sourcePath = path.join(sourceDirectory, `${assetId}-choices.jpg`);
+  const sourcePath = path.join(sourceDirectory, `${assetId}-choices-${pageNumber}.jpg`);
   const ink = Buffer.from('<svg width="800" height="1000"><text x="70" y="320" font-size="24">3 [A] [B] [C] [D]</text><text x="70" y="350" font-size="24">4 [A] [B] [C] [D]</text></svg>');
   await sharp({ create: { width: 800, height: 1000, channels: 3, background: 'white' } })
     .composite([{ input: ink }])
     .jpeg()
     .toFile(sourcePath);
-  return { pageNumber: 1, sourceImagePath: sourcePath };
+  return { pageNumber, sourceImagePath: sourcePath };
 };
 
 const located = (overrides: Partial<VisionLocatedRegion> = {}): VisionLocatedRegion => ({
@@ -152,12 +152,41 @@ test('splits a merged Paddle block using image rows instead of averaged coordina
       })],
       artifact
     );
-    assert.equal(region.locatorSource, 'vision-layout');
+    assert.equal(region.locatorSource, 'paddle-layout');
     assert.equal(region.locationStatus, 'located');
     assert.ok(region.region.y >= 325 && region.region.y < 345, JSON.stringify(region.region));
     assert.ok(region.region.y + region.region.height <= 365);
     assert.equal(region.paddleText, '4 [A] [B] [C] [D]');
     assert.equal(region.evidenceUnits[0].paddleText, '4 [A] [B] [C] [D]');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('rejects numbered instructions and uses the Paddle choice row on another page', async () => {
+  const first = await makeChoicePage(1);
+  const second = await makeChoicePage(2);
+  const artifact: PaddleParserArtifact = { model: 'PaddleOCR-VL-1.6', pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [{ block_label: 'text', block_content: '3. 必须在题号对应区域作答。', block_bbox: [60, 260, 360, 300], block_id: 1 }] } }, { pageNumber: 2, prunedResult: { width: 800, height: 1000, parsing_res_list: [{ block_label: 'text', block_content: '3 [A] [B] [C] [D]', block_bbox: [60, 330, 350, 365], block_id: 2 }] } }] };
+  try {
+    const [region] = await createVisionLocatedRegions(taskId, assetId, [first, second], ['3'], new Map([['3', ['3-answer']]]), [located({ displayNo: '3', pageNumber: 1, boundingBox: { x: 0.07, y: 0.26, width: 0.4, height: 0.04 }, evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '3-answer', kind: 'choice' }] })], artifact);
+    assert.equal(region.region.pageNumber, 2);
+    assert.equal(region.paddleText, '3 [A] [B] [C] [D]');
+    assert.equal(region.locatorSource, 'paddle-layout');
+  } finally {
+    await rm(first.sourceImagePath, { force: true });
+    await rm(second.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('recovers a misread choice number from the following choice row', async () => {
+  const page = await makeChoicePage();
+  const artifact: PaddleParserArtifact = { model: 'PaddleOCR-VL-1.6', pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [{ block_label: 'text', block_content: '1 [A] [B] [C] [D]\n4 [A] [B] [C] [D]', block_bbox: [60, 300, 350, 360], block_id: 1 }] } }] };
+  try {
+    const [region] = await createVisionLocatedRegions(taskId, assetId, [page], ['3'], new Map([['3', ['3-answer']]]), [located({ displayNo: '3', evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '3-answer', kind: 'choice' }] })], artifact);
+    assert.equal(region.locatorSource, 'paddle-layout');
+    assert.equal(region.paddleText, '1 [A] [B] [C] [D]');
   } finally {
     await rm(page.sourceImagePath, { force: true });
     await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });

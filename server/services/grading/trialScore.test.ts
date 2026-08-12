@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { VisionValidationItem } from '../../../src/domain/types';
-import { formatPaddleTextForDisplay, getObservedAnswer, hasSuspiciousRepeatedShortAnswer, recognitionTextsConflict, resolveTrialConfidence, resolveTrialScore, trialNeedsTeacherReview } from './trialScore';
+import { formatPaddleTextForDisplay, getObservedAnswer, hasSuspiciousRepeatedShortAnswer, inferAnswerCardOption, recognitionTextsConflict, resolveTrialConfidence, resolveTrialScore, trialNeedsTeacherReview } from './trialScore';
 
 const points = ['一', '二', '三'].map(point => ({ point, score: 1, description: '' }));
 
@@ -48,6 +48,13 @@ test('propagates recognition risk into trial grading', () => {
 test('flags a duplicated single-character OCR candidate without correcting it', () => {
   assert.equal(hasSuspiciousRepeatedShortAnswer('默默'), true);
   assert.equal(hasSuspiciousRepeatedShortAnswer('山重水复'), false);
+});
+
+test('infers the filled answer-card option from the only missing bracketed option', () => {
+  assert.equal(inferAnswerCardOption('3 [A] [C] [D]'), 'B');
+  assert.equal(inferAnswerCardOption('4 [B] [C] [D]'), 'A');
+  assert.equal(inferAnswerCardOption('4 [H] [C] [D]'), 'A');
+  assert.equal(inferAnswerCardOption('3 B'), null);
 });
 
 test('removes Paddle formatting without changing recognized characters', () => {

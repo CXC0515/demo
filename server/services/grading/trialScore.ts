@@ -12,6 +12,18 @@ export const formatPaddleTextForDisplay = (value: string) => value
   .replace(/\s+([①②③④⑤⑥⑦⑧⑨⑩])/g, ' $1')
   .trim();
 
+export const inferAnswerCardOption = (value: string) => {
+  const tokens = [...value.toUpperCase().matchAll(/\[\s*([A-Z])\s*\]/g)].map(match => match[1]);
+  if (tokens.length !== 3) return null;
+  const normalizedTokens = tokens.join('') === 'HCD' ? ['B', 'C', 'D'] : tokens;
+  const options = ['A', 'B', 'C', 'D'];
+  const candidates = options.filter(missing => {
+    const visible = options.filter(option => option !== missing);
+    return normalizedTokens.every((token, index) => token === visible[index]);
+  });
+  return candidates.length === 1 ? candidates[0] : null;
+};
+
 export const getObservedAnswer = (item: VisionValidationItem) =>
   item.selectedOption || formatPaddleTextForDisplay(item.paddleText) || item.lunaText || '';
 

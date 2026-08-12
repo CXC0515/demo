@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { DocumentAsset, FirstSectionAnalysis, KnowledgeNode, NormalizedDocument, TaskQuestionRubric, TrialGradingQuestionInput, TrialGradingResult, TrialGradingSubmissionInput, VisionValidationResult } from '../domain/types';
+import { CalibrationSample, DocumentAsset, FirstSectionAnalysis, GradingBatch, GradingDiagnosis, GradingMode, GradingQuestion, KnowledgeNode, NormalizedDocument, TaskQuestionRubric, TrialGradingQuestionInput, TrialGradingResult, TrialGradingSubmissionInput, VisionValidationResult } from '../domain/types';
 
 const readErrorCode = async (response: Response) => {
   const body = await response.json().catch(() => ({})) as { code?: string };
@@ -18,6 +18,11 @@ export const uploadTaskMaterials = async (taskId: string, kind: 'assignment' | '
   if (!response.ok) throw new Error(await readErrorCode(response));
   const body = await response.json() as { assets: DocumentAsset[] };
   return body.assets;
+};
+
+export const clearStudentSubmissions = async (taskId: string) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/student-submissions`, { method: 'DELETE' });
+  if (!response.ok) throw new Error(await readErrorCode(response));
 };
 
 export interface TaskMaterialsResult {
@@ -106,6 +111,37 @@ export const getTaskTrialGrading = async (taskId: string) => {
   if (!response.ok) throw new Error(await readErrorCode(response));
   const body = await response.json() as { result: TrialGradingResult };
   return body.result;
+};
+
+export const correctTrialOcr = async (taskId: string, sampleId: string, correctedText: string, question: TrialGradingQuestionInput, submission: TrialGradingSubmissionInput) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/trial-grading/${encodeURIComponent(sampleId)}/ocr-correction`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ correctedText, question, submission }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  const body = await response.json() as { sample: CalibrationSample };
+  return body.sample;
+};
+
+export const getBatchGrading = async (taskId: string) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/batch-grading`);
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { batch: GradingBatch }).batch;
+};
+
+export const startBatchGrading = async (taskId: string, mode: GradingMode, questions: TrialGradingQuestionInput[], submissions: TrialGradingSubmissionInput[]) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/batch-grading/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode, questions, submissions }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return response.json() as Promise<{ batch: GradingBatch; result: TrialGradingResult }>;
+};
+
+export const setBatchGradingAction = async (taskId: string, action: 'pause' | 'resume') => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/batch-grading/${action}`, { method: 'POST' });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { batch: GradingBatch }).batch;
+};
+
+export const getGradingDiagnosis = async (taskId: string, questions: GradingQuestion[]) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/diagnosis`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: questions.map(({ id, displayNo, score }) => ({ id, displayNo, score })) }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { diagnosis: GradingDiagnosis }).diagnosis;
 };
 
 export const runVisionValidation = async (taskId: string, assetId: string, questionNos = ['2', '3', '4', '5', '6']) => {

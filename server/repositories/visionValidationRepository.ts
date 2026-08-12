@@ -45,3 +45,9 @@ export const saveVisionValidationResult = (result: VisionValidationResult) => {
   persist();
   return result;
 };
+
+export const deleteVisionValidationForTask = (taskId: string) => {
+  let changed = false;
+  for (const key of results.keys()) if (key.startsWith(`${taskId}:`)) { results.delete(key); changed = true; }
+  if (changed) persist();
+};

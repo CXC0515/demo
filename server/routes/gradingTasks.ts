@@ -9,26 +9,28 @@ import { Router } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
 import { z } from 'zod';
-import { AnalysisEvidenceRef, CalibrationSample, FirstSectionAnalysis, TrialGradingResult, VisionValidationResult } from '../../src/domain/types';
+import { AnalysisEvidenceRef, FirstSectionAnalysis, GradingMode, TrialGradingResult, VisionValidationResult } from '../../src/domain/types';
 import { getModelConfig, isModelConfigured } from '../config/modelConfig';
 import { deleteFirstSectionAnalysis, getFirstSectionAnalysis, saveFirstSectionAnalysis } from '../repositories/analysisRepository';
-import { appendMaterials, getMaterials, replaceMaterialsForKind, StoredMaterial, updateMaterial } from '../repositories/materialRepository';
+import { appendMaterials, getMaterials, removeMaterialsForKind, replaceMaterialsForKind, StoredMaterial, updateMaterial } from '../repositories/materialRepository';
 import { getTaskRubrics, saveTaskRubric } from '../repositories/gradingRubricRepository';
+import { deleteGradingBatch, getGradingBatch, saveGradingBatch } from '../repositories/gradingBatchRepository';
 import { getParserArtifact } from '../repositories/parserArtifactRepository';
-import { deleteTrialGradingResult, getTrialGradingResult, saveTrialGradingResult } from '../repositories/trialGradingRepository';
-import { getVisionValidationResult, NON_CHOICE_RECOGNITION_VERSION, saveVisionValidationResult } from '../repositories/visionValidationRepository';
+import { deleteTrialGradingResult, getTrialGradingResult, invalidateAiGradingForAsset, saveTrialGradingResult } from '../repositories/trialGradingRepository';
+import { deleteVisionValidationForTask, getVisionValidationResult, NON_CHOICE_RECOGNITION_VERSION, saveVisionValidationResult } from '../repositories/visionValidationRepository';
 import { paddleParserArtifactSchema, visionValidationRequestSchema } from '../schemas/paddleParserArtifact';
 import { trialGradingRequestSchema } from '../schemas/trialGrading';
 import { gradingRubricInputSchema } from '../schemas/gradingRubric';
 import { OpenAICompatibleQuestionAnalyzer } from '../services/analysis/OpenAICompatibleQuestionAnalyzer';
 import { resolveSourceEvidence } from '../services/evidence/sourceEvidenceResolver';
-import { OpenAICompatibleTrialGrader } from '../services/grading/OpenAICompatibleTrialGrader';
 import { OpenAICompatibleVisionRecognizer } from '../services/grading/OpenAICompatibleVisionRecognizer';
 import { OpenAICompatibleVisionRegionLocator } from '../services/grading/OpenAICompatibleVisionRegionLocator';
 import { createVisionLocatedRegions } from '../services/grading/questionRegionCropper';
-import { getObservedAnswer, hasSuspiciousRepeatedShortAnswer, recognitionTextsConflict, resolveTrialConfidence, resolveTrialScore, trialNeedsTeacherReview } from '../services/grading/trialScore';
+import { hasSuspiciousRepeatedShortAnswer, inferAnswerCardOption } from '../services/grading/trialScore';
 import { buildExpectedAnswerFields } from '../services/grading/answerFieldSchema';
 import { findSubmissionsNeedingTrialGrading, mergeCurrentTrialSamples } from '../services/grading/trialResultReconciler';
+import { gradeTrialSubmissions } from '../services/grading/trialGradingService';
+import { buildGradingDiagnosis } from '../services/grading/gradingDiagnosis';
 import { MaterialParserError } from '../services/materials/MaterialParser';
 import { parseMaterial } from '../services/materials/materialParserRegistry';
 
@@ -55,6 +57,16 @@ const knowledgeCatalogSchema = z.array(z.object({
   type: z.string().min(1),
   description: z.string()
 })).max(2000);
+
+const ocrCorrectionSchema = z.object({
+  correctedText: z.string().max(10_000),
+  question: trialGradingRequestSchema.shape.questions.element,
+  submission: trialGradingRequestSchema.shape.submissions.element
+});
+
+const batchRequestSchema = trialGradingRequestSchema.extend({
+  mode: z.enum(['per-submission', 'batch-checkpoint', 'auto-continue'])
+});
 
 const evidenceCropQuerySchema = z.object({
   page: z.coerce.number().int().positive(),
@@ -128,6 +140,14 @@ router.get('/:taskId/materials', (request, response) => {
     assets: materials.map(toPublicAsset),
     documents: materials.flatMap(material => material.normalizedDocument ? [material.normalizedDocument] : [])
   });
+});
+
+router.delete('/:taskId/student-submissions', (request, response) => {
+  const removed = removeMaterialsForKind(request.params.taskId, 'student-submission');
+  deleteVisionValidationForTask(request.params.taskId);
+  deleteTrialGradingResult(request.params.taskId);
+  deleteGradingBatch(request.params.taskId);
+  response.json({ removed: removed.map(toPublicAsset) });
 });
 
 router.get('/:taskId/rubrics', (request, response) => {
@@ -291,15 +311,17 @@ router.post('/:taskId/vision-validation', async (request, response) => {
           ...field,
           label: expectedFields.find(candidate => candidate.fieldId === field.fieldId)?.label ?? field.fieldId
         })) ?? [];
-        const structuredText = item?.selectedOption
-          ? item.selectedOption
+        const paddleSelectedOption = inferAnswerCardOption(region.paddleText);
+        const selectedOption = paddleSelectedOption ?? item?.selectedOption ?? null;
+        const structuredText = selectedOption
+          ? selectedOption
           : answerFields.length
           ? answerFields.map(field => `${field.label}：${field.text || '[未填写]'}`).join('\n')
           : item?.recognizedAnswer ?? '';
         const evidenceUnits = region.evidenceUnits.map(unit => {
           const transcriptionConfidence = unit.kind === 'choice' ? item?.confidence : undefined;
           const transcriptionNeedsReview = unit.kind === 'choice' ? item?.needsReview : false;
-          const literalText = unit.kind === 'choice' ? item?.selectedOption ?? '' : '';
+          const literalText = unit.kind === 'choice' ? selectedOption ?? '' : '';
           const paddleCandidate = unit.paddleText;
           const suspiciousPaddleRepetition = hasSuspiciousRepeatedShortAnswer(paddleCandidate);
           return {
@@ -330,7 +352,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
           lunaText: structuredText,
           answerFields,
           crossedOutText: item?.crossedOutText ?? [],
-          selectedOption: item?.selectedOption ?? null,
+          selectedOption,
           visualEvidence: item?.visualEvidence ?? '',
           existingMarkings: item?.existingMarkings ?? [],
           confidence: item?.confidence ?? 0,
@@ -340,6 +362,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
       createdAt: new Date().toISOString()
     };
     saveVisionValidationResult(result);
+    invalidateAiGradingForAsset(request.params.taskId, material.id);
     response.json({ result });
   } catch (error) {
     console.error(JSON.stringify({ event: 'vision_validation_failed', taskId: request.params.taskId, assetId: parsedRequest.data.assetId, error: error instanceof Error ? error.message : String(error) }));
@@ -412,6 +435,80 @@ router.get('/:taskId/trial-grading', (request, response) => {
   response.json({ result });
 });
 
+router.put('/:taskId/trial-grading/:sampleId/ocr-correction', async (request, response) => {
+  const parsed = ocrCorrectionSchema.safeParse(request.body);
+  const existing = getTrialGradingResult(request.params.taskId);
+  const current = existing?.samples.find(sample => sample.id === request.params.sampleId);
+  const config = getModelConfig();
+  if (!parsed.success) { response.status(400).json({ code: 'INVALID_OCR_CORRECTION' }); return; }
+  if (!existing || !current || !current.sourceAssetId) { response.status(404).json({ code: 'TRIAL_SAMPLE_NOT_FOUND' }); return; }
+  if (!isModelConfigured(config)) { response.status(503).json({ code: 'MODEL_NOT_CONFIGURED' }); return; }
+  if (current.resultSource === 'teacher-manual') { response.status(409).json({ code: 'TEACHER_FINAL_RESULT_LOCKED' }); return; }
+  try {
+    const correctionRequest = { questions: [parsed.data.question], submissions: [parsed.data.submission] };
+    const rawText = current.rawOcrText ?? current.ocrText;
+    const overrides = parsed.data.correctedText === rawText
+      ? new Map<string, string>()
+      : new Map([[`${parsed.data.submission.assetId}:${parsed.data.question.displayNo}`, parsed.data.correctedText]]);
+    const [rescored] = await gradeTrialSubmissions(request.params.taskId, correctionRequest, getMaterials(request.params.taskId), config, overrides);
+    const updated = { ...rescored, status: current.status, resultSource: current.resultSource, teacherScore: current.teacherScore, teacherReason: current.teacherReason, isFinal: current.isFinal };
+    const result = saveTrialGradingResult({ ...existing, samples: existing.samples.map(sample => sample.id === current.id ? updated : sample), createdAt: new Date().toISOString() });
+    response.json({ sample: updated, result });
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'ocr_correction_rescore_failed', taskId: request.params.taskId, sampleId: request.params.sampleId, error: error instanceof Error ? error.message : String(error) }));
+    response.status(502).json({ code: 'OCR_CORRECTION_RESCORE_FAILED' });
+  }
+});
+
+router.get('/:taskId/batch-grading', (request, response) => {
+  response.json({ batch: getGradingBatch(request.params.taskId) ?? { taskId: request.params.taskId, status: 'idle', mode: 'batch-checkpoint', totalStudents: 0, processedStudents: 0, failedStudentIds: [], updatedAt: new Date().toISOString() } });
+});
+
+router.post('/:taskId/batch-grading/start', async (request, response) => {
+  const parsed = batchRequestSchema.safeParse(request.body);
+  const config = getModelConfig();
+  if (!parsed.success) { response.status(400).json({ code: 'INVALID_BATCH_GRADING_REQUEST' }); return; }
+  if (!isModelConfigured(config)) { response.status(503).json({ code: 'MODEL_NOT_CONFIGURED' }); return; }
+  const startedAt = new Date().toISOString();
+  saveGradingBatch({ taskId: request.params.taskId, status: 'running', mode: parsed.data.mode as GradingMode, totalStudents: parsed.data.submissions.length, processedStudents: 0, failedStudentIds: [], startedAt, updatedAt: startedAt });
+  try {
+    const existing = getTrialGradingResult(request.params.taskId);
+    const missing = findSubmissionsNeedingTrialGrading(existing, parsed.data);
+    const refreshed = [];
+    const failedStudentIds: string[] = [];
+    for (const submission of missing) {
+      const currentBatch = getGradingBatch(request.params.taskId);
+      if (currentBatch?.status === 'paused') { response.json({ batch: currentBatch, result: existing }); return; }
+      try {
+        refreshed.push(...await gradeTrialSubmissions(request.params.taskId, { questions: parsed.data.questions, submissions: [submission] }, getMaterials(request.params.taskId), config));
+      } catch { failedStudentIds.push(submission.studentId); }
+      saveGradingBatch({ ...currentBatch!, processedStudents: parsed.data.submissions.length - missing.length + refreshed.length / parsed.data.questions.length + failedStudentIds.length, failedStudentIds, updatedAt: new Date().toISOString() });
+    }
+    const result = saveTrialGradingResult({ taskId: request.params.taskId, model: config.visionModel, samples: mergeCurrentTrialSamples(existing, parsed.data, refreshed), createdAt: new Date().toISOString() });
+    const completedAt = new Date().toISOString();
+    const batch = saveGradingBatch({ taskId: request.params.taskId, status: failedStudentIds.length ? 'failed' : 'completed', mode: parsed.data.mode as GradingMode, totalStudents: parsed.data.submissions.length, processedStudents: parsed.data.submissions.length, failedStudentIds, startedAt, completedAt, updatedAt: completedAt });
+    response.json({ batch, result });
+  } catch (error) {
+    const batch = saveGradingBatch({ taskId: request.params.taskId, status: 'failed', mode: parsed.data.mode as GradingMode, totalStudents: parsed.data.submissions.length, processedStudents: 0, failedStudentIds: parsed.data.submissions.map(item => item.studentId), startedAt, updatedAt: new Date().toISOString() });
+    response.status(502).json({ code: 'BATCH_GRADING_FAILED', batch });
+  }
+});
+
+router.post('/:taskId/batch-grading/:action', (request, response) => {
+  const current = getGradingBatch(request.params.taskId);
+  if (!current || (request.params.action !== 'pause' && request.params.action !== 'resume')) { response.status(404).json({ code: 'BATCH_ACTION_NOT_AVAILABLE' }); return; }
+  const batch = saveGradingBatch({ ...current, status: request.params.action === 'pause' ? 'paused' : 'running', updatedAt: new Date().toISOString() });
+  response.json({ batch });
+});
+
+router.post('/:taskId/diagnosis', (request, response) => {
+  const questions = z.array(z.object({ id: z.string(), displayNo: z.string(), score: z.number() })).safeParse(request.body.questions);
+  const result = getTrialGradingResult(request.params.taskId);
+  if (!questions.success || !result) { response.status(409).json({ code: 'DIAGNOSIS_INPUT_NOT_READY' }); return; }
+  const normalized = questions.data.map(item => ({ ...item, title: '', knowledgePoint: '', knowledgeLinks: [], desc: '', parseConfidence: 1, sourceEvidenceIds: [] }));
+  response.json({ diagnosis: buildGradingDiagnosis(request.params.taskId, normalized, result.samples) });
+});
+
 router.post('/:taskId/trial-grading', async (request, response) => {
   const parsed = trialGradingRequestSchema.safeParse(request.body);
   if (!parsed.success) {
@@ -456,79 +553,15 @@ router.post('/:taskId/trial-grading', async (request, response) => {
       response.json({ result });
       return;
     }
-    const grader = new OpenAICompatibleTrialGrader(config);
-    const modelSamples = [];
+    const refreshedSamples = [];
     for (const submission of submissionsToGrade) {
       const incrementalRequest = { ...parsed.data, submissions: [submission] };
-      const partialResult = await grader.grade(request.params.taskId, incrementalRequest, materials);
-      modelSamples.push(...partialResult.samples);
+      refreshedSamples.push(...await gradeTrialSubmissions(request.params.taskId, incrementalRequest, materials, config));
     }
-    const questionsById = new Map(parsed.data.questions.map(question => [question.questionId, question]));
-    const submissionsById = new Map(submissionsToGrade.map(submission => [submission.assetId, submission]));
-    const expectedKeys = new Set(parsed.data.questions.flatMap(question => submissionsToGrade.map(submission => `${question.questionId}:${submission.assetId}`)));
-    const returnedKeys = new Set(modelSamples.map(sample => `${sample.questionId}:${sample.assetId}`));
-    if (returnedKeys.size !== expectedKeys.size || [...expectedKeys].some(key => !returnedKeys.has(key))) {
-      throw new Error('MODEL_OUTPUT_INCOMPLETE');
-    }
-    const samples: CalibrationSample[] = modelSamples.map(sample => {
-      const question = questionsById.get(sample.questionId);
-      const submission = submissionsById.get(sample.assetId);
-      const material = materialsById.get(sample.assetId);
-      if (!question || !submission || !material) throw new Error('MODEL_OUTPUT_INVALID_REFERENCE');
-      const score = resolveTrialScore(
-        question.fullScore,
-        question.rubricPoints,
-        sample.matchedPoints,
-        sample.missedPoints,
-        sample.score
-      );
-      const visionItem = getVisionValidationResult(request.params.taskId, material.id)?.items.find(item => item.displayNo === question.displayNo);
-      if (!visionItem) throw new Error('VISION_RESULT_REFERENCE_MISSING');
-      const ocrText = getObservedAnswer(visionItem);
-      const recognitionConflict = !visionItem.selectedOption && recognitionTextsConflict(visionItem.paddleText, visionItem.lunaText);
-      const gradingConfidence = resolveTrialConfidence(sample.confidence, visionItem);
-      const needsTeacherReview = trialNeedsTeacherReview(sample.needsTeacherReview, visionItem);
-      const scoreRatio = question.fullScore > 0 && score !== null ? score / question.fullScore : 0;
-      const sampleType: CalibrationSample['sampleType'] = needsTeacherReview || gradingConfidence < 0.65
-        ? 'ocr-risk'
-        : scoreRatio >= 0.8
-          ? 'high'
-          : scoreRatio <= 0.4
-            ? 'low'
-            : 'middle';
-      return {
-        id: `${sample.questionId}-${sample.assetId}`,
-        questionId: sample.questionId,
-        studentId: submission.studentId,
-        studentName: submission.studentName,
-        studentNo: submission.studentNo,
-        sampleType,
-        rawImageDescription: `${material.fileName} · 第 ${question.displayNo} 题截图`,
-        rawOcrText: ocrText,
-        ocrText,
-        lunaReviewText: visionItem.lunaText,
-        recognitionConflict,
-        ocrSource: visionItem.selectedOption ? 'choice-vision' : visionItem.paddleText ? 'paddle' : 'luna',
-        ocrConfidence: visionItem.confidence,
-        aiScore: score,
-        fullScore: question.fullScore,
-        gradingConfidence,
-        needsTeacherReview,
-        matchedPoints: sample.matchedPoints,
-        missedPoints: sample.missedPoints,
-        gradingReason: sample.reason,
-        sourceAssetId: material.id,
-        sourceFileName: `${material.fileName} · 第 ${question.displayNo} 题`,
-        sourcePreviewUrl: visionItem.cropUrl,
-        sourcePreviewType: 'image',
-        status: 'pending',
-        rubricVersion: question.rubricVersion
-      };
-    });
     const result: TrialGradingResult = {
       taskId: request.params.taskId,
       model: config.visionModel,
-      samples: mergeCurrentTrialSamples(existingResult, parsed.data, samples),
+      samples: mergeCurrentTrialSamples(existingResult, parsed.data, refreshedSamples),
       createdAt: new Date().toISOString()
     };
     saveTrialGradingResult(result);

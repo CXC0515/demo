@@ -39,3 +39,12 @@ export const deleteTrialGradingResult = (taskId: string) => {
   if (!results.delete(taskId)) return;
   persist();
 };
+
+export const invalidateAiGradingForAsset = (taskId: string, assetId: string) => {
+  const result = results.get(taskId);
+  if (!result) return;
+  const samples = result.samples.filter(sample => sample.sourceAssetId !== assetId || sample.resultSource === 'teacher-manual');
+  if (samples.length === result.samples.length) return;
+  results.set(taskId, { ...result, samples, createdAt: new Date().toISOString() });
+  persist();
+};

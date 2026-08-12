@@ -59,3 +59,11 @@ export const updateMaterial = (taskId: string, materialId: string, update: Parti
   persistMaterials();
   return next;
 };
+
+export const removeMaterialsForKind = (taskId: string, kind: StoredMaterial['kind']) => {
+  const current = taskMaterials.get(taskId) ?? [];
+  const removed = current.filter(material => material.kind === kind);
+  taskMaterials.set(taskId, current.filter(material => material.kind !== kind));
+  persistMaterials();
+  return removed;
+};

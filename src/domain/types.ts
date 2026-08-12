@@ -550,6 +550,38 @@ export interface ReviewItem {
   aiReviews?: AiReviewOpinion[];
 }
 
+export type GradingBatchStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
+
+export interface GradingBatch {
+  taskId: string;
+  status: GradingBatchStatus;
+  mode: GradingMode;
+  totalStudents: number;
+  processedStudents: number;
+  failedStudentIds: string[];
+  startedAt?: string;
+  completedAt?: string;
+  updatedAt: string;
+}
+
+export interface GradingDiagnosis {
+  taskId: string;
+  studentCount: number;
+  gradedStudentCount: number;
+  averageScore: number | null;
+  averageFullScore: number;
+  questionPerformance: Array<{
+    questionId: string;
+    displayNo: string;
+    averageScore: number;
+    fullScore: number;
+    scoreRate: number;
+    reviewCount: number;
+  }>;
+  commonIssues: Array<{ label: string; count: number }>;
+  typicalStudents: Array<{ studentId: string; studentName: string; totalScore: number; role: '优秀示例' | '需要关注' }>;
+}
+
 export interface KnowledgeNode {
   id: string;
   name: string;

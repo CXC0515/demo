@@ -76,7 +76,16 @@ const toPixels = (
 const writeCrop = async (sourcePath: string, targetPath: string, region: PixelRegion) => {
   await sharp(sourcePath)
     .extract({ left: region.x, top: region.y, width: region.width, height: region.height })
-    .resize({ width: region.width * 3, height: region.height * 3, kernel: sharp.kernel.lanczos3 })
+    .jpeg({ quality: 95 })
+    .toFile(targetPath);
+};
+
+const writeRecognitionCrop = async (sourcePath: string, targetPath: string, region: PixelRegion) => {
+  await sharp(sourcePath)
+    .extract({ left: region.x, top: region.y, width: region.width, height: region.height })
+    .greyscale()
+    .normalize()
+    .sharpen({ sigma: 0.8 })
     .jpeg({ quality: 95 })
     .toFile(targetPath);
 };
@@ -91,6 +100,37 @@ interface PaddleRow {
 }
 
 const circledNumbers = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
+const choiceLinePattern = (displayNo: string) => new RegExp(`^${displayNo}(?:\\s|[.、\\[])`);
+const hasChoiceStructure = (line: string) => /\[[A-Z]\]|(?:^|\s)[A-D][.、)]/i.test(line);
+
+const choiceRowAcrossPages = (artifact: PaddleParserArtifact, displayNo: string) => {
+  for (const page of [...artifact.pages].sort((a, b) => a.pageNumber - b.pageNumber)) {
+    const blocks = [...page.prunedResult.parsing_res_list].sort((a, b) => a.block_bbox[1] - b.block_bbox[1] || a.block_bbox[0] - b.block_bbox[0]);
+    for (const [blockIndex, block] of blocks.entries()) {
+      const lines = block.block_content.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      let lineIndex = lines.findIndex(line => choiceLinePattern(displayNo).test(line) && hasChoiceStructure(line));
+      if (lineIndex < 0) {
+        const nextNumber = String(Number(displayNo) + 1);
+        const nextIndex = lines.findIndex(line => choiceLinePattern(nextNumber).test(line) && hasChoiceStructure(line));
+        if (nextIndex > 0 && hasChoiceStructure(lines[nextIndex - 1])) lineIndex = nextIndex - 1;
+      }
+      if (lineIndex < 0) continue;
+      const [left, top, right, bottom] = block.block_bbox;
+      return {
+        pageNumber: page.pageNumber,
+        row: {
+          key: `${blockIndex}:${lineIndex}`,
+          textKey: `${blockIndex}:${lineIndex}`,
+          region: { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) },
+          text: lines[lineIndex],
+          lineIndex,
+          lineCount: lines.length
+        } satisfies PaddleRow
+      };
+    }
+  }
+  return undefined;
+};
 
 const extractPaddleFieldText = (line: string, marker: string) => {
   const start = line.indexOf(marker);
@@ -356,16 +396,18 @@ export const createVisionLocatedRegions = async (
 
   return Promise.all(requestedQuestionNos.map(async displayNo => {
     const vision = bestRegionByNo.get(displayNo);
-    const page = vision ? pageByNumber.get(vision.pageNumber) : pageSources[0];
+    const visionIsChoice = Boolean(vision?.evidenceUnits.length && vision.evidenceUnits.every(unit => unit.kind === 'choice'));
+    const paddleChoice = visionIsChoice && artifact ? choiceRowAcrossPages(artifact, displayNo) : undefined;
+    const page = paddleChoice ? pageByNumber.get(paddleChoice.pageNumber) : vision ? pageByNumber.get(vision.pageNumber) : pageSources[0];
     if (!page) throw new Error('SOURCE_PAGE_NOT_FOUND');
     const metadata = await sharp(page.sourceImagePath).metadata();
     if (!metadata.width || !metadata.height) throw new Error('SOURCE_PAGE_INVALID');
     const fullPage = { x: 0, y: 0, width: metadata.width, height: metadata.height };
     const visualQuestion = vision ? toPixels(vision.boundingBox, metadata.width, metadata.height) : fullPage;
     const expectedIds = expectedEvidenceIds.get(displayNo) ?? [];
-    const fallbackChoiceRow = !vision && artifact && expectedIds.length === 1
+    const fallbackChoiceRow = paddleChoice?.row ?? (!vision && artifact && expectedIds.length === 1
       ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, expectedIds[0], 'choice', visualQuestion)
-      : undefined;
+      : undefined);
     const answerPanel = vision && artifact && vision.evidenceUnits.length === 1 && vision.evidenceUnits[0].evidenceId.endsWith('-answer')
       ? emptyPanelFromPaddle(artifact, page.pageNumber, visualQuestion)
       : undefined;
@@ -403,6 +445,8 @@ export const createVisionLocatedRegions = async (
     const questionFileName = `question-${displayNo}.jpg`;
     const questionPath = path.join(cropDirectory, questionFileName);
     await writeCrop(page.sourceImagePath, questionPath, questionRegion);
+    const recognitionPath = path.join(cropDirectory, `question-${displayNo}-recognition.jpg`);
+    await writeRecognitionCrop(page.sourceImagePath, recognitionPath, questionRegion);
 
     const rowUseCount = new Map<string, number>();
     for (const plan of evidencePlans) if (plan.paddleRow) rowUseCount.set(plan.paddleRow.key, (rowUseCount.get(plan.paddleRow.key) ?? 0) + 1);
@@ -470,7 +514,7 @@ export const createVisionLocatedRegions = async (
       locationStatus: locationReasons.length ? 'needs-teacher' : 'located',
       locationReasons,
       paddleText,
-      cropPath: questionPath,
+      cropPath: recognitionPath,
       cropUrl: `/uploads/validation/${encodeURIComponent(taskId)}/${encodeURIComponent(assetId)}/${encodeURIComponent(questionFileName)}`,
       evidenceUnits
     };

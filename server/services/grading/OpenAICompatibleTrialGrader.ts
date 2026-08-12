@@ -9,11 +9,7 @@ import { getVisionValidationResult } from '../../repositories/visionValidationRe
 import { trialGradingModelOutputSchema, TrialGradingRequest } from '../../schemas/trialGrading';
 import { VisionValidationItem } from '../../../src/domain/types';
 import { formatPaddleTextForDisplay, recognitionTextsConflict } from './trialScore';
-
-const extractJson = (value: string) => {
-  const fenced = value.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-  return JSON.parse((fenced ?? value).trim());
-};
+import { extractJson } from '../model/extractJson';
 
 export const buildTrialAnswerEvidence = (item: VisionValidationItem) => {
   const paddleAnswer = formatPaddleTextForDisplay(item.paddleText);
@@ -52,7 +48,7 @@ export const buildTrialGradingPrompt = (request: TrialGradingRequest, submission
 export class OpenAICompatibleTrialGrader {
   constructor(private readonly config: ModelConfig) {}
 
-  async grade(taskId: string, request: TrialGradingRequest, materials: StoredMaterial[]) {
+  async grade(taskId: string, request: TrialGradingRequest, materials: StoredMaterial[], answerOverrides = new Map<string, string>()) {
     const submissionById = new Map(request.submissions.map(item => [item.assetId, item]));
     const submissions = materials.flatMap(material => {
       const student = submissionById.get(material.id);
@@ -61,7 +57,11 @@ export class OpenAICompatibleTrialGrader {
         assetId: material.id,
         studentName: student.studentName,
         studentNo: student.studentNo,
-        recognizedAnswers: (getVisionValidationResult(taskId, material.id)?.items ?? []).map(buildTrialAnswerEvidence)
+        recognizedAnswers: (getVisionValidationResult(taskId, material.id)?.items ?? []).map(item => {
+          const evidence = buildTrialAnswerEvidence(item);
+          const corrected = answerOverrides.get(`${material.id}:${item.displayNo}`);
+          return corrected === undefined ? evidence : { ...evidence, answer: corrected, paddleAnswer: corrected, recognitionConflict: false, needsReview: false };
+        })
       }];
     });
     const prompt = buildTrialGradingPrompt(request, submissions);

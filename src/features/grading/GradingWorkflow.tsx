@@ -41,6 +41,8 @@ import {
   CalibrationSample,
   DocumentAsset,
   FirstSectionAnalysis,
+  GradingBatch,
+  GradingDiagnosis,
   GradingMode,
   GradingQuestion,
   KnowledgeNode,
@@ -58,9 +60,8 @@ import {
   WorkflowState
 } from '../../domain/types';
 import { orderCalibrationSamplesForTrial } from '../../domain/calibrationSamples';
-import ReviewQueuePage from './ReviewQueuePage';
 import SourceEvidenceViewer from './SourceEvidenceViewer';
-import { analyzeTaskMaterials, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, runVisionValidation, saveTaskRubric, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
+import { analyzeTaskMaterials, correctTrialOcr, getBatchGrading, getGradingDiagnosis, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, runVisionValidation, saveTaskRubric, setBatchGradingAction, startBatchGrading, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
 import { listRosterClasses, listRosterStudents, matchRosterSubmissions } from '../../services/rosterApi';
 import { buildSubmissionPages, getReadableStudentNos, reconcileSubmissionRoster } from '../../domain/submissionRoster';
 
@@ -467,6 +468,12 @@ export default function GradingWorkflow({
   const [visionValidationByAsset, setVisionValidationByAsset] = useState<Record<string, VisionValidationResult>>({});
   const [visionValidationPhase, setVisionValidationPhase] = useState<Record<string, 'idle' | 'loading' | 'ready' | 'error'>>({});
   const [visionValidationError, setVisionValidationError] = useState<Record<string, string>>({});
+  const [batch, setBatch] = useState<GradingBatch | null>(null);
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const [diagnosis, setDiagnosis] = useState<GradingDiagnosis | null>(null);
+  const [reviewStage, setReviewStage] = useState<'all' | 'intake' | 'calibration' | 'grading' | 'teacher' | 'resolved'>('all');
+  const [reviewSampleId, setReviewSampleId] = useState<string | null>(null);
+  const [ocrCorrectionPhase, setOcrCorrectionPhase] = useState<'idle' | 'saving'>('idle');
 
   const currentClass = rosterClass ?? classes.find(item => item.id === selectedTask.classId) ?? null;
   const currentQuestion = workflowState.questions.find(item => item.id === selectedQuestionId) ?? workflowState.questions[0];
@@ -480,6 +487,7 @@ export default function GradingWorkflow({
   const missingRows = workflowState.missingSubmissions ?? [];
   const trialSamples = questionStates.flatMap(state => state.calibrationSamples);
   const reviewSamples = trialSamples.filter(sample => sample.needsTeacherReview || sample.recognitionConflict || sample.gradingConfidence < lowConfidenceThreshold);
+  const selectedReviewSample = reviewSamples.find(sample => sample.id === reviewSampleId) ?? null;
   const pendingReviews = reviewSamples.length;
   const allCalibrationComplete = questionStates.length > 0 && questionStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget);
   const assignmentReady = workflowState.assignment.status === 'assigned';
@@ -499,6 +507,13 @@ export default function GradingWorkflow({
   const updateAssignment = (updated: Partial<WorkflowState['assignment']>) => {
     onUpdateState({ assignment: { ...workflowState.assignment, ...updated } });
   };
+
+  const gradingQuestions = () => workflowState.questions.map(question => {
+    const state = questionStates.find(item => item.questionId === question.id);
+    return { questionId: question.id, displayNo: question.displayNo, stem: question.stem ?? question.desc, fullScore: question.score, standardAnswer: state?.standardAnswer ?? '', rubricPoints: state?.gradingRubric ?? [], teacherRules: state?.teacherRules ?? [], rubricVersion: state?.rubricVersion ?? 1 };
+  });
+
+  const gradingSubmissions = () => matchRows.filter(page => page.rosterMatchStatus === 'matched' && page.studentId).map(page => ({ assetId: page.id, studentId: page.studentId!, studentName: page.expectedStudentName, studentNo: page.detectedStudentNo }));
 
   useEffect(() => {
     let active = true;
@@ -535,6 +550,18 @@ export default function GradingWorkflow({
     }).catch(() => undefined);
     return () => { active = false; };
   }, [selectedTask.id]);
+
+  useEffect(() => {
+    void getBatchGrading(selectedTask.id).then(result => {
+      setBatch(result);
+      if (result.status !== 'idle') setGradingMode(result.mode);
+    }).catch(() => undefined);
+  }, [selectedTask.id]);
+
+  useEffect(() => {
+    if (activeStage !== 'diagnosis') return;
+    void getGradingDiagnosis(selectedTask.id, workflowState.questions).then(setDiagnosis).catch(() => setDiagnosis(null));
+  }, [activeStage, selectedTask.id, workflowState.questions]);
 
   useEffect(() => {
     let active = true;
@@ -872,20 +899,40 @@ export default function GradingWorkflow({
     if (nextStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget)) setShowModeDialog(true);
   };
 
-  const saveOcrCorrection = () => {
+  const saveOcrCorrection = async () => {
     if (!selectedSample || !currentQuestionState) return;
     const rawOcrText = selectedSample.rawOcrText ?? selectedSample.ocrText;
     const teacherCorrectedText = editedOcr === rawOcrText ? undefined : editedOcr;
-    const nextState = {
-      ...currentQuestionState,
-      calibrationSamples: currentQuestionState.calibrationSamples.map(sample => sample.id === selectedSample.id
-        ? { ...sample, rawOcrText, teacherCorrectedText, ocrText: teacherCorrectedText ?? rawOcrText }
-        : sample)
-    };
-    const nextStates = questionStates.map(item => item.questionId === nextState.questionId ? nextState : item);
-    setQuestionStates(nextStates);
-    onUpdateState({ questionGradingStates: nextStates });
-    onShowToast(teacherCorrectedText === undefined ? 'OCR 文本已恢复为 AI 原始识别' : '教师 OCR 修正已保存');
+    const question = gradingQuestions().find(item => item.questionId === selectedSample.questionId);
+    const submission = gradingSubmissions().find(item => item.studentId === selectedSample.studentId);
+    if (!question || !submission) { onShowToast('无法找到当前题目或学生答卷'); return; }
+    setOcrCorrectionPhase('saving');
+    try {
+      const updated = await correctTrialOcr(selectedTask.id, selectedSample.id, teacherCorrectedText ?? rawOcrText, question, submission);
+      const nextStates = questionStates.map(state => state.questionId === updated.questionId ? { ...state, calibrationSamples: state.calibrationSamples.map(sample => sample.id === updated.id ? updated : sample) } : state);
+      setQuestionStates(nextStates);
+      setTeacherScore(updated.aiScore ?? 0);
+      onUpdateState({ questionGradingStates: nextStates });
+      onShowToast(`OCR 修正已保存，AI 已重新评分为 ${updated.aiScore ?? '待定'} 分`);
+    } catch { onShowToast('OCR 修正保存或重新评分失败'); }
+    finally { setOcrCorrectionPhase('idle'); }
+  };
+
+  const runBatch = async () => {
+    setBatchError(null);
+    try {
+      const result = await startBatchGrading(selectedTask.id, gradingMode, gradingQuestions(), gradingSubmissions());
+      setBatch(result.batch);
+      const nextStates = applyTrialSamples(questionStates, result.result);
+      setQuestionStates(nextStates);
+      onUpdateState({ questionGradingStates: nextStates });
+      onShowToast(result.batch.status === 'completed' ? '批量批改已完成' : '批量批改完成，部分答卷需要处理');
+    } catch (error) { setBatchError(error instanceof Error ? error.message : 'BATCH_GRADING_FAILED'); }
+  };
+
+  const controlBatch = async (action: 'pause' | 'resume') => {
+    try { setBatch(await setBatchGradingAction(selectedTask.id, action)); }
+    catch { onShowToast(action === 'pause' ? '暂停失败' : '继续失败'); }
   };
 
   const persistRubric = (state: QuestionGradingState) => saveTaskRubric(selectedTask.id, {
@@ -925,6 +972,7 @@ export default function GradingWorkflow({
     setShowModeDialog(false);
     setActiveStage('grading');
     onShowToast(`开始按“${modeOptions.find(option => option.id === gradingMode)?.label}”批改`);
+    void runBatch();
   };
 
   const questionNumber = currentQuestion ? workflowState.questions.findIndex(item => item.id === currentQuestion.id) + 1 : 1;
@@ -1049,7 +1097,7 @@ export default function GradingWorkflow({
             <div className="space-y-4">
               <div className="grid gap-3 lg:grid-cols-3">
                 <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><FileImage className="h-4 w-4 text-emerald-700" />本题答卷截图</h3>{selectedSample.sourcePreviewUrl ? <a href={selectedSample.sourcePreviewUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-emerald-700">新窗口打开</a> : <span className="text-xs text-slate-400">可核对</span>}</div>{selectedSample.sourcePreviewUrl ? selectedSample.sourcePreviewType === 'image' ? <img src={selectedSample.sourcePreviewUrl} alt={`${selectedSample.studentName} 本题答卷截图`} className="mt-4 max-h-[520px] w-full border border-slate-200 bg-white object-contain" /> : <object data={selectedSample.sourcePreviewUrl} type="application/pdf" className="mt-4 h-[520px] w-full border border-slate-200 bg-white"><a href={selectedSample.sourcePreviewUrl} target="_blank" rel="noreferrer" className="p-4 text-sm font-bold text-emerald-700">打开 {selectedSample.sourceFileName}</a></object> : <div className="relative mx-auto mt-4 min-h-64 max-w-xs border border-slate-300 bg-[#fffdf7] p-5 shadow-sm"><span className="absolute right-4 top-3 font-mono text-xs text-slate-500">{selectedSample.studentNo.slice(-4)}</span><p className="mt-8 font-serif text-sm leading-8 text-slate-700">{selectedSample.ocrText}</p></div>}</section>
-                <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><ScanLine className="h-4 w-4 text-emerald-700" />{selectedSample.ocrSource === 'choice-vision' ? '视觉识别结果' : selectedSample.ocrSource === 'luna' ? 'Luna 主识别' : 'PaddleOCR 主识别'}</h3><span className={`rounded-xl px-2 py-1 text-xs font-bold ${selectedSample.needsTeacherReview || selectedSample.ocrConfidence < ocrHumanReviewThreshold ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600'}`}>{selectedSample.needsTeacherReview ? '待核验 · ' : ''}{Math.round(selectedSample.ocrConfidence * 100)}%</span></div><textarea value={editedOcr} onChange={event => setEditedOcr(event.target.value)} rows={9} className={`${inputClass} mt-4 resize-none leading-7`} />{selectedSample.ocrSource !== 'choice-vision' && selectedSample.lunaReviewText ? <div className={`mt-3 rounded-lg border p-3 text-xs leading-5 ${selectedSample.recognitionConflict ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}><strong>Luna 视觉复核{selectedSample.recognitionConflict ? ' · 与 PaddleOCR 有差异' : ''}</strong><p className="mt-1 whitespace-pre-line">{selectedSample.lunaReviewText}</p></div> : null}<button type="button" onClick={saveOcrCorrection} className="mt-3 rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold dark:border-zinc-700">保存 OCR 修正</button></section>
+                <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><ScanLine className="h-4 w-4 text-emerald-700" />{selectedSample.ocrSource === 'choice-vision' ? '视觉识别结果' : selectedSample.ocrSource === 'luna' ? 'Luna 主识别' : 'PaddleOCR 主识别'}</h3><span className={`rounded-xl px-2 py-1 text-xs font-bold ${selectedSample.needsTeacherReview || selectedSample.ocrConfidence < ocrHumanReviewThreshold ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600'}`}>{selectedSample.needsTeacherReview ? '待核验 · ' : ''}{Math.round(selectedSample.ocrConfidence * 100)}%</span></div><textarea value={editedOcr} onChange={event => setEditedOcr(event.target.value)} rows={9} className={`${inputClass} mt-4 resize-none leading-7`} />{selectedSample.ocrSource !== 'choice-vision' && selectedSample.lunaReviewText ? <div className={`mt-3 rounded-lg border p-3 text-xs leading-5 ${selectedSample.recognitionConflict ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}><strong>Luna 视觉复核{selectedSample.recognitionConflict ? ' · 与 PaddleOCR 有差异' : ''}</strong><p className="mt-1 whitespace-pre-line">{selectedSample.lunaReviewText}</p></div> : null}<button type="button" disabled={ocrCorrectionPhase === 'saving'} onClick={() => void saveOcrCorrection()} className="mt-3 rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-50 dark:border-zinc-700">{ocrCorrectionPhase === 'saving' ? '正在保存并重新评分...' : '保存修正并重新评分'}</button></section>
                 <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><Sparkles className="h-4 w-4 text-emerald-700" />AI 评分</h3><span className="text-xs text-slate-400">置信度 {Math.round(selectedSample.gradingConfidence * 100)}%</span></div><div className="mt-5 flex items-end gap-1"><strong className="text-3xl text-slate-900 dark:text-white">{selectedSample.aiScore ?? '待定'}</strong><span className="pb-1 text-sm text-slate-400">/ {selectedSample.fullScore} 分</span></div>{selectedSample.gradingReason ? <p className="mt-4 text-xs leading-5 text-slate-600 dark:text-slate-300">{selectedSample.gradingReason}</p> : null}<div className="mt-5 space-y-2">{selectedSample.matchedPoints.map(point => <div key={point} className="flex gap-2 rounded-xl bg-emerald-50 p-2.5 text-xs text-emerald-800"><Check className="h-3.5 w-3.5 flex-none" />{point}</div>)}{selectedSample.missedPoints.map(point => <div key={point} className="flex gap-2 rounded-xl bg-amber-50 p-2.5 text-xs text-amber-800"><AlertTriangle className="h-3.5 w-3.5 flex-none" />{point}</div>)}</div></section>
               </div>
               <section className={`${panelClass} p-5`}>
@@ -1066,38 +1114,29 @@ export default function GradingWorkflow({
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
               ['已匹配答卷', `${matchedStudentCount} 份`],
-              ['已完成试批', `${new Set(trialSamples.map(sample => sample.studentId)).size} 人`],
+              ['已完成批改', `${batch?.processedStudents ?? 0} / ${batch?.totalStudents || matchedStudentCount}`],
               ['待复核证据', `${pendingReviews} 项`],
               ['批改方式', modeOptions.find(option => option.id === gradingMode)?.label ?? '未选择']
             ].map(([label, value]) => <div key={label} className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">{label}</span><strong className="mt-2 block text-2xl text-slate-900 dark:text-white">{value}</strong></div>)}
           </div>
-          <section className={`${panelClass} flex min-h-80 flex-col items-center justify-center p-8 text-center`}>
-            <Layers3 className="h-9 w-9 text-emerald-700" />
-            <h2 className="mt-4 font-black text-slate-900 dark:text-white">批量批改尚未开始</h2>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">当前页面保留真实任务状态。完成试批确认并锁定评分依据后，批量批改结果会在这里按学生持续更新。</p>
-            {!allCalibrationComplete ? <button type="button" onClick={() => setActiveStage('calibration')} className="mt-5 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">继续试批校准</button> : <button type="button" onClick={() => setShowModeDialog(true)} className="mt-5 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">选择批改方式</button>}
-          </section>
+          <section className={`${panelClass} p-6`}><div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="font-black text-slate-900 dark:text-white">{batch?.status === 'completed' ? '批量批改已完成' : batch?.status === 'running' ? 'AI 正在批量批改' : batch?.status === 'paused' ? '批量批改已暂停' : batch?.status === 'failed' ? '批量批改有未完成项' : '准备批量批改'}</h2><p className="mt-1 text-sm text-slate-500">已完成结果会复用；单份异常隔离后进入本任务复核。</p></div><div className="flex gap-2">{batch?.status === 'running' ? <button type="button" onClick={() => void controlBatch('pause')} className="flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-bold"><Pause className="h-4 w-4" />暂停</button> : null}{batch?.status === 'paused' ? <button type="button" onClick={() => void runBatch()} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white"><Play className="h-4 w-4" />继续</button> : null}{!batch || batch.status === 'idle' || batch.status === 'failed' ? <button type="button" onClick={() => void runBatch()} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">开始批量批改</button> : null}</div></div><div className="mt-7 h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800"><div className="h-full bg-emerald-600 transition-all" style={{ width: `${batch?.totalStudents ? Math.round(batch.processedStudents / batch.totalStudents * 100) : 0}%` }} /></div><div className="mt-3 flex justify-between text-xs text-slate-500"><span>{batch?.processedStudents ?? 0} 人已处理</span><span>{batch?.failedStudentIds.length ?? 0} 人处理失败</span></div>{batchError ? <p className="mt-4 text-xs font-bold text-rose-700">批改失败：{batchError}</p> : null}</section>
         </section>
       ) : null}
 
       {activeStage === 'review' ? (
         <section className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-black text-slate-900 dark:text-white">本任务异常证据</h2><p className="mt-1 text-xs text-slate-500">来自当前真实试批结果中的 OCR 差异、低置信度和教师待核验项。</p></div><span className="rounded-xl bg-rose-100 px-3 py-1.5 text-xs font-bold text-rose-800">{pendingReviews} 项待复核</span></div>
-          {reviewSamples.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{reviewSamples.map(sample => {
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-black text-slate-900 dark:text-white">本任务异常证据</h2><p className="mt-1 text-xs text-slate-500">先按发生环节筛选，再查看具体原因和原图。</p></div><span className="rounded-xl bg-rose-100 px-3 py-1.5 text-xs font-bold text-rose-800">{pendingReviews} 项待复核</span></div>
+          <div className="flex flex-wrap gap-2">{([['all','全部'],['intake','上传质检'],['calibration','试批校准'],['grading','批量批改'],['teacher','教师复核'],['resolved','已处理']] as const).map(([id,label]) => <button key={id} type="button" onClick={() => setReviewStage(id)} className={`rounded-2xl px-4 py-2 text-xs font-bold ${reviewStage === id ? 'bg-emerald-700 text-white' : 'border border-slate-200 text-slate-500 dark:border-zinc-800'}`}>{label}</button>)}</div>
+          {(reviewStage === 'all' || reviewStage === 'calibration') && reviewSamples.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{reviewSamples.map(sample => {
             const question = workflowState.questions.find(item => item.id === sample.questionId);
-            return <article key={sample.id} className={`${panelClass} p-5`}><div className="flex items-start justify-between gap-3"><div><strong className="text-base text-slate-900 dark:text-white">{sample.studentName}</strong><p className="mt-1 text-xs font-bold text-slate-500">第 {question ? workflowState.questions.indexOf(question) + 1 : '-'} 题 · {sample.aiScore ?? '待定'} / {sample.fullScore} 分</p></div><span className="rounded-xl bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800">{sample.recognitionConflict ? '识别有差异' : '待教师核验'}</span></div><p className="mt-4 line-clamp-3 text-xs leading-5 text-slate-600 dark:text-slate-300">{sample.gradingReason || '当前结果需要教师结合原图确认。'}</p><div className="mt-4 flex items-center justify-between border-t border-slate-200/70 pt-3 text-xs dark:border-zinc-800"><span className="text-slate-400">评分置信度 {Math.round(sample.gradingConfidence * 100)}%</span>{sample.sourcePreviewUrl ? <a href={sample.sourcePreviewUrl} target="_blank" rel="noreferrer" className="font-bold text-emerald-700">查看原图依据</a> : <span className="text-slate-400">暂无原图</span>}</div></article>;
-          })}</div> : <section className={`${panelClass} flex min-h-72 flex-col items-center justify-center p-8 text-center`}><CheckCircle2 className="h-10 w-10 text-emerald-500" /><h2 className="mt-4 font-black">当前没有待复核项</h2><p className="mt-2 text-sm text-slate-500">批量批改产生的新异常也会归入本任务。</p></section>}
+            return <button type="button" onClick={() => setReviewSampleId(sample.id)} key={sample.id} className={`${panelClass} overflow-hidden text-left`}><div className="h-36 bg-slate-100 dark:bg-zinc-900">{sample.sourcePreviewUrl ? <img src={sample.sourcePreviewUrl} alt={`${sample.studentName} 第 ${question?.displayNo} 题`} className="h-full w-full object-contain" /> : null}</div><div className="p-4"><div className="flex items-start justify-between gap-3"><div><strong className="text-base">{sample.studentName}</strong><p className="mt-1 text-xs text-slate-500">第 {question?.displayNo ?? '-'} 题 · {sample.aiScore ?? '待定'} / {sample.fullScore} 分</p></div><span className="rounded-xl bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800">{sample.recognitionConflict ? '两次识别不一致' : sample.gradingConfidence < lowConfidenceThreshold ? '评分把握较低' : '等待老师确认'}</span></div><p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-500">{sample.gradingReason}</p></div></button>;
+          })}</div> : <section className={`${panelClass} flex min-h-56 flex-col items-center justify-center p-8 text-center`}><CheckCircle2 className="h-9 w-9 text-emerald-500" /><p className="mt-3 text-sm font-bold text-slate-600">当前环节没有异常</p></section>}
+          {selectedReviewSample ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" role="dialog" aria-modal="true"><div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-[24px] bg-white p-5 shadow-2xl dark:bg-zinc-950"><div className="flex items-start justify-between"><div><h2 className="text-lg font-black">{selectedReviewSample.studentName} · 异常复核</h2><p className="mt-1 text-xs text-slate-500">原图、两路识别和当前评分在同一处核对。</p></div><button type="button" aria-label="关闭异常详情" onClick={() => setReviewSampleId(null)} className="rounded-xl p-2"><X className="h-4 w-4" /></button></div><div className="mt-4 grid gap-4 lg:grid-cols-2"><div className="border border-slate-200 bg-white p-3">{selectedReviewSample.sourcePreviewUrl ? <img src={selectedReviewSample.sourcePreviewUrl} alt="答卷原图依据" className="max-h-[520px] w-full object-contain" /> : null}</div><div className="space-y-3 text-sm"><div className="rounded-2xl bg-slate-50 p-4 dark:bg-zinc-900"><strong>PaddleOCR 主识别</strong><p className="mt-2 whitespace-pre-wrap leading-6">{selectedReviewSample.rawOcrText}</p></div>{selectedReviewSample.lunaReviewText ? <div className="rounded-2xl bg-amber-50 p-4 text-amber-900"><strong>Luna 视觉复核</strong><p className="mt-2 whitespace-pre-wrap leading-6">{selectedReviewSample.lunaReviewText}</p></div> : null}<div className="rounded-2xl bg-emerald-50 p-4 text-emerald-900"><strong>AI 评分：{selectedReviewSample.aiScore ?? '待定'} / {selectedReviewSample.fullScore}</strong><p className="mt-2 leading-6">{selectedReviewSample.gradingReason}</p></div></div></div></div></div> : null}
         </section>
       ) : null}
 
-      {activeStage === 'diagnosis' ? (
-        <section className={`${panelClass} flex min-h-96 flex-col items-center justify-center p-8 text-center`}>
-          <BookOpenCheck className="h-10 w-10 text-emerald-700" />
-          <h2 className="mt-4 font-black text-slate-900 dark:text-white">等待形成班级诊断</h2>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">完成批量批改和异常复核后，这里将根据真实评分结果汇总班级情况、共性问题、典型答卷和重点个体。</p>
-          <div className="mt-5 flex flex-wrap justify-center gap-2"><span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500 dark:bg-zinc-800">班级总体情况</span><span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500 dark:bg-zinc-800">共性问题</span><span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500 dark:bg-zinc-800">典型答卷</span><span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500 dark:bg-zinc-800">重点个体</span></div>
-        </section>
-      ) : null}
+      {activeStage === 'diagnosis' && diagnosis ? <section className="space-y-4"><div className="grid gap-3 sm:grid-cols-3"><div className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">完成批改</span><strong className="mt-2 block text-2xl">{diagnosis.gradedStudentCount} 人</strong></div><div className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">班级平均分</span><strong className="mt-2 block text-2xl">{diagnosis.averageScore?.toFixed(1) ?? '-'} / {diagnosis.averageFullScore}</strong></div><div className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">待复核证据</span><strong className="mt-2 block text-2xl">{pendingReviews} 项</strong></div></div><div className="grid gap-4 lg:grid-cols-2"><section className={`${panelClass} p-5`}><h2 className="font-black">各题表现</h2><div className="mt-4 space-y-3">{diagnosis.questionPerformance.map(item => <div key={item.questionId}><div className="flex justify-between text-xs"><strong>第 {item.displayNo} 题</strong><span>{Math.round(item.scoreRate * 100)}%</span></div><div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-emerald-600" style={{width:`${Math.round(item.scoreRate * 100)}%`}} /></div></div>)}</div></section><section className={`${panelClass} p-5`}><h2 className="font-black">主要失分点</h2><div className="mt-4 space-y-2">{diagnosis.commonIssues.length ? diagnosis.commonIssues.map(item => <div key={item.label} className="flex items-start justify-between gap-4 rounded-2xl bg-amber-50 p-3 text-xs text-amber-900"><span>{item.label}</span><strong>{item.count} 人次</strong></div>) : <p className="text-sm text-slate-500">暂无明确共性失分点。</p>}</div></section></div><section className={`${panelClass} p-5`}><h2 className="font-black">典型学生</h2><div className="mt-4 grid gap-3 sm:grid-cols-2">{diagnosis.typicalStudents.map(item => <div key={`${item.role}-${item.studentId}`} className="rounded-2xl border border-slate-200 p-4"><span className="text-xs font-bold text-emerald-700">{item.role}</span><strong className="mt-1 block">{item.studentName}</strong><span className="mt-1 block text-xs text-slate-500">总分 {item.totalScore} / {diagnosis.averageFullScore}</span></div>)}</div></section></section> : null}
+      {activeStage === 'diagnosis' && !diagnosis ? <section className={`${panelClass} flex min-h-80 flex-col items-center justify-center p-8 text-center`}><BookOpenCheck className="h-10 w-10 text-emerald-700" /><h2 className="mt-4 font-black">正在汇总真实批改结果</h2></section> : null}
 
       {showModeDialog ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="选择本次批改方式">

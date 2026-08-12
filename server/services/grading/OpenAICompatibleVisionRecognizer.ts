@@ -7,11 +7,7 @@ import { readFile } from 'node:fs/promises';
 import { ModelConfig } from '../../config/modelConfig';
 import { visionRecognitionOutputSchema } from '../../schemas/paddleParserArtifact';
 import { LocatedRegion } from './questionRegionCropper';
-
-const extractJson = (value: string) => {
-  const fenced = value.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-  return JSON.parse((fenced ?? value).trim());
-};
+import { extractJson } from '../model/extractJson';
 
 export const getWholeQuestionAnswer = (recognizedAnswer: string, answerFields: Array<{ text: string }>) =>
   recognizedAnswer.trim() || [...new Set(answerFields.map(field => field.text.trim()).filter(Boolean))].join('\n');

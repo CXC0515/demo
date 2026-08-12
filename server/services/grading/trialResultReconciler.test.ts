@@ -30,3 +30,10 @@ test('retains current samples, adds new samples and removes deleted students', (
   const merged = mergeCurrentTrialSamples(result(['a', 'b', 'removed']), request(['a', 'b', 'c']), [sample('c')]);
   assert.deepEqual(merged.map(item => item.sourceAssetId), ['a', 'b', 'c']);
 });
+
+test('retains other questions when only one question is regraded', () => {
+  const previous = result(['a']);
+  previous.samples.push({ ...sample('a'), id: 'q2-a', questionId: 'q2' });
+  const merged = mergeCurrentTrialSamples(previous, request(['a']), [sample('a')]);
+  assert.deepEqual(merged.map(item => item.questionId).sort(), ['q1', 'q2']);
+});
