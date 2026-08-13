@@ -407,3 +407,43 @@ test('uses the overlapping answer block when Paddle omits the printed question n
     await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
   }
 });
+
+test('keeps the complete visual question when Paddle merges the previous answer into one block', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [
+          { block_label: 'text', block_content: '8. 上一题长答案\n9. 第一空 第二空', block_bbox: [420, 260, 750, 400], block_id: 1, block_order: 1 },
+          { block_label: 'text', block_content: '10. 下一题', block_bbox: [420, 415, 620, 440], block_id: 2, block_order: 2 }
+        ]
+      }
+    }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['9'],
+      new Map([['9', ['9-answer']]]),
+      [located({
+        displayNo: '9',
+        boundingBox: { x: 0.51, y: 0.35, width: 0.44, height: 0.07 },
+        evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '9-answer', boundingBox: { x: 0.53, y: 0.36, width: 0.4, height: 0.05 } }]
+      })],
+      artifact
+    );
+    assert.ok(region.region.y <= 350, JSON.stringify(region.region));
+    assert.ok(region.region.y + region.region.height >= 390, JSON.stringify(region.region));
+    assert.ok(region.region.y > 300, JSON.stringify(region.region));
+    assert.equal(region.locationStatus, 'located');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});

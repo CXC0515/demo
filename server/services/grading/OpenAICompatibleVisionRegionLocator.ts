@@ -7,7 +7,6 @@ import { readFile } from 'node:fs/promises';
 import { FirstSectionAnalysis } from '../../../src/domain/types';
 import { ModelConfig } from '../../config/modelConfig';
 import { visionRegionLocatorOutputSchema } from '../../schemas/paddleParserArtifact';
-import { buildExpectedAnswerFields } from './answerFieldSchema';
 import { extractJson } from '../model/extractJson';
 
 export class OpenAICompatibleVisionRegionLocator {
@@ -25,15 +24,12 @@ export class OpenAICompatibleVisionRegionLocator {
   ) {
     const questions = analysis.questions
       .filter(question => questionNos.includes(question.displayNo))
-      .map(question => {
-        const fields = buildExpectedAnswerFields(question);
-        return {
+      .map(question => ({
           displayNo: question.displayNo,
           stem: question.stem,
           subquestions: question.subquestions.map(unit => ({ displayNo: unit.displayNo, stem: unit.stem })),
-          expectedEvidence: fields.length ? fields.map(field => ({ evidenceId: field.fieldId, label: field.label, source: field.stem })) : [{ evidenceId: `${question.displayNo}-answer`, label: '完整作答', source: question.stem }]
-        };
-      });
+          expectedEvidence: [{ evidenceId: `${question.displayNo}-answer`, label: '完整作答', source: question.stem }]
+        }));
     const image = await readFile(sourceImagePath);
     const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -47,8 +43,7 @@ export class OpenAICompatibleVisionRegionLocator {
             text: [
               '你负责从整张答题卡建立题目与学生作答证据的对应关系，不评分、不使用标准答案纠正学生。',
               '每题 boundingBox 必须包含题号以及该题全部手写、填涂、划除内容，不得包含相邻题目。',
-              'evidenceUnits 只框学生实际作答，不要框题干、印刷提示、教师分数、勾叉或批注。填空题每个空单独框；开放题将连续作答区作为一个证据单元。',
-              'evidenceId 必须来自 expectedEvidence。一个答案跨多行时，boundingBox 必须覆盖全部行；不能把续行误分给另一个 evidenceId。',
+              '每题只返回一个 evidenceUnit，evidenceId 使用“题号-answer”。它必须覆盖该题全部实际作答，包括多个空、跨行答案、填涂和划除；不要在定位阶段拆分逐空字段。',
               '选择题的 evidenceUnits 必须框住该题从题号到全部选项的完整一行，不能只框涂黑方块。题号相邻时必须以图片中真实题号核对纵坐标，不能按顺序猜测。',
               'kind 只能是 text、choice、formula、diagram、table、mixed。',
               'provisionalText 只做页级原样识别候选，不得按题意、诗文、常见搭配或知识补全。看不清可为空并 needsReview=true。',

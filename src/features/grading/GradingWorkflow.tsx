@@ -542,6 +542,8 @@ export default function GradingWorkflow({
   const [visionValidationError, setVisionValidationError] = useState<Record<string, string>>({});
   const [batch, setBatch] = useState<GradingBatch | null>(null);
   const [batchError, setBatchError] = useState<string | null>(null);
+  const [batchQuestionId, setBatchQuestionId] = useState('');
+  const [batchStudentId, setBatchStudentId] = useState('');
   const [diagnosis, setDiagnosis] = useState<GradingDiagnosis | null>(null);
   const [reviewStage, setReviewStage] = useState<'all' | 'intake' | 'calibration' | 'grading' | 'teacher' | 'resolved'>('all');
   const [reviewSampleId, setReviewSampleId] = useState<string | null>(null);
@@ -560,7 +562,8 @@ export default function GradingWorkflow({
   const persistedCurrentQuestionState = workflowState.questionGradingStates?.find(item => item.questionId === currentQuestionState?.questionId);
   const questionEvidence = currentQuestion?.sourceEvidenceIds.map(id => workflowState.sourceEvidence.find(item => item.id === id)).find(Boolean);
   const answerEvidence = currentQuestionState?.standardAnswerSourceIds?.map(id => workflowState.sourceEvidence.find(item => item.id === id)).find(Boolean);
-  const selectedSample = currentQuestionState?.calibrationSamples.find(sample => sample.id === selectedSampleId) ?? currentQuestionState?.calibrationSamples[0];
+  const currentTrialSamples = currentQuestionState?.calibrationSamples.slice(0, currentQuestionState.sampleTarget) ?? [];
+  const selectedSample = currentTrialSamples.find(sample => sample.id === selectedSampleId) ?? currentTrialSamples[0];
   const matchRows = workflowState.submissionPages ?? [];
   const issueRows = matchRows.filter(row => row.status !== 'matched' || row.rosterMatchStatus !== 'matched');
   const displayedRows = showOnlyOcrIssues ? issueRows : matchRows;
@@ -572,7 +575,12 @@ export default function GradingWorkflow({
   const visibleReviewSamples = reviewStage === 'resolved' ? resolvedReviewSamples : reviewStage === 'all' || reviewStage === 'calibration' ? pendingReviewSamples : [];
   const selectedReviewSample = reviewSamples.find(sample => sample.id === reviewSampleId) ?? null;
   const pendingReviews = pendingReviewSamples.length;
-  const allCalibrationComplete = selectedQuestionStates.length > 0 && selectedQuestionStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget);
+  const allCalibrationComplete = selectedQuestionStates.length > 0 && selectedQuestionStates.every(state => state.calibrationSamples.slice(0, state.sampleTarget).every(sample => sample.status === 'confirmed'));
+  const batchSamples = selectedQuestionStates.flatMap(state => state.calibrationSamples);
+  const activeBatchQuestionId = batchQuestionId || selectedQuestionStates[0]?.questionId || '';
+  const batchStudents = [...batchSamples.reduce((students, sample) => students.set(sample.studentId, sample), new Map<string, CalibrationSample>()).values()];
+  const activeBatchStudentId = batchStudentId || batchStudents[0]?.studentId || '';
+  const selectedBatchSample = batchSamples.find(sample => sample.questionId === activeBatchQuestionId && sample.studentId === activeBatchStudentId);
   const assignmentReady = workflowState.assignment.status === 'assigned';
   const gradingDataReady = selectedQuestions.length > 0 && matchRows.length > 0 && rosterMatchPhase === 'ready' && !issueRows.some(row => row.rosterMatchStatus !== 'matched');
   const normalizedDocuments = workflowState.assignment.documents ?? [];
@@ -932,7 +940,8 @@ export default function GradingWorkflow({
 
   const selectQuestion = (questionId: string) => {
     const nextState = questionStates.find(item => item.questionId === questionId);
-    const nextSample = nextState?.calibrationSamples.find(sample => sample.status === 'pending') ?? nextState?.calibrationSamples[0];
+    const trialSamples = nextState?.calibrationSamples.slice(0, nextState.sampleTarget) ?? [];
+    const nextSample = trialSamples.find(sample => sample.status === 'pending') ?? trialSamples[0];
     setSelectedQuestionId(questionId);
     setSelectedSampleId(nextSample?.id ?? '');
     setEditedOcr(nextSample?.ocrText ?? '');
@@ -1151,8 +1160,24 @@ export default function GradingWorkflow({
       const nextStates = replaceSample(updated);
       setGradingAction('none');
       onShowToast(source === 'teacher-manual' ? `${selectedSample.studentName} 已完成教师终评，并作为本题校准锚点` : `${selectedSample.studentName} 的试批结果已确认`);
-      if (nextStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget)) setShowModeDialog(true);
+      if (nextStates.every(state => state.calibrationSamples.slice(0, state.sampleTarget).every(sample => sample.status === 'confirmed'))) setShowModeDialog(true);
     } catch { onShowToast('教师评分保存失败'); }
+  };
+
+  const goToNextTrialStep = () => {
+    if (!currentQuestionState || !selectedSample) return;
+    const trialSamples = currentQuestionState.calibrationSamples.slice(0, currentQuestionState.sampleTarget);
+    const currentIndex = trialSamples.findIndex(sample => sample.id === selectedSample.id);
+    const nextSample = trialSamples.slice(currentIndex + 1).find(sample => sample.status !== 'confirmed')
+      ?? trialSamples.find(sample => sample.status !== 'confirmed');
+    if (nextSample) {
+      selectSample(nextSample);
+      return;
+    }
+    const questionIndex = selectedQuestionStates.findIndex(state => state.questionId === currentQuestionState.questionId);
+    const nextQuestion = selectedQuestionStates.slice(questionIndex + 1).find(state => state.calibrationSamples.slice(0, state.sampleTarget).some(sample => sample.status !== 'confirmed'));
+    if (nextQuestion) selectQuestion(nextQuestion.questionId);
+    else setShowModeDialog(true);
   };
 
   const openReviewSample = (sample: CalibrationSample) => {
@@ -1219,6 +1244,8 @@ export default function GradingWorkflow({
       setBatch(result.batch);
       const nextStates = applyTrialSamples(questionStates, result.result);
       setQuestionStates(nextStates);
+      setBatchQuestionId(nextStates[0]?.questionId ?? '');
+      setBatchStudentId(result.result.samples[0]?.studentId ?? '');
       onUpdateState({ questionGradingStates: nextStates });
       onShowToast(result.batch.status === 'completed' ? '批量批改已完成' : '批量批改完成，部分答卷需要处理');
     } catch (error) { setBatchError(error instanceof Error ? error.message : 'BATCH_GRADING_FAILED'); }
@@ -1396,6 +1423,7 @@ export default function GradingWorkflow({
               <section className={`${panelClass} p-5`}>
                 <div className="grid items-start gap-5 xl:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.2fr)]"><div className="xl:border-r xl:border-slate-200 xl:pr-5 dark:xl:border-zinc-800"><div className="flex flex-wrap items-center gap-2"><h3 className="flex items-center gap-2 text-sm font-black"><Sparkles className="h-4 w-4 text-emerald-700" />AI 评分</h3><strong className="text-xl text-slate-900 dark:text-white">{selectedSample.aiScore ?? '待定'} <span className="text-xs font-normal text-slate-400">/ {selectedSample.fullScore} 分</span></strong><span className="text-xs text-slate-400">置信度 {Math.round(selectedSample.gradingConfidence * 100)}%</span></div>{selectedSample.gradingReason ? <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-300">{selectedSample.gradingReason}</p> : null}{selectedSample.matchedPoints.length || selectedSample.missedPoints.length ? <div className="mt-3 flex flex-wrap gap-2">{selectedSample.matchedPoints.map(point => <span key={point} className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 px-2 py-1.5 text-xs text-emerald-800"><Check className="h-3.5 w-3.5" />{point}</span>)}{selectedSample.missedPoints.map(point => <span key={point} className="inline-flex items-center gap-1 rounded-xl bg-amber-50 px-2 py-1.5 text-xs text-amber-800"><AlertTriangle className="h-3.5 w-3.5" />{point}</span>)}</div> : null}</div><div>{selectedSample.resultSource === 'teacher-manual' ? <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-start gap-3"><LockKeyhole className="mt-0.5 h-5 w-5 text-amber-600" /><div><h3 className="font-black">教师终评 {selectedSample.teacherScore} 分，已作为本题锚点</h3><p className="mt-1 text-xs text-slate-500">{selectedSample.teacherReason?.replace(/[。！？.!?]+$/, '')}。后续评分依据变化不会覆盖此结果。</p></div></div><button type="button" onClick={() => setGradingAction('manual')} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold dark:border-zinc-700">重新打开</button></div> : selectedSample.status === 'confirmed' && gradingAction === 'none' ? <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-start gap-3"><CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-700" /><div><h3 className="font-black">试批结果已确认 · {selectedSample.teacherScore ?? selectedSample.aiScore} 分</h3><p className="mt-1 text-xs text-slate-500">{selectedSample.resultSource === 'teacher-adjusted' ? '教师已调整 AI 结果' : '教师已采用 AI 结果'}，当前结果已计入本题试批进度。</p></div></div><button type="button" onClick={() => setGradingAction('adjust')} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold dark:border-zinc-700">重新打开</button></div> : gradingAction === 'none' ? <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-black">确认这份试批样本</h3><p className="mt-1 text-xs text-slate-500">教师亲批会成为本题最终结果和校准锚点。</p></div><div className="flex flex-wrap gap-2"><button type="button" disabled={selectedSample.aiScore === null} onClick={() => { if (selectedSample.aiScore !== null) updateSample('ai-confirmed', selectedSample.aiScore, '教师确认 AI 评分'); }} className="rounded-2xl border border-slate-200 px-3 py-2.5 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700">采用 AI 结果</button><button type="button" onClick={() => { setRuleAddedNotice(false); setGradingAction('adjust'); }} className="rounded-2xl border border-slate-200 px-3 py-2.5 text-xs font-bold dark:border-zinc-700">调整 AI 结果</button><button type="button" onClick={() => setGradingAction('manual')} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-3 py-2.5 text-xs font-bold text-white"><UserCheck className="h-4 w-4" />由我批改</button></div></div> : <div className="space-y-4"><div className="flex items-center justify-between"><div><h3 className="font-black">{gradingAction === 'manual' ? '教师亲自批改' : '调整 AI 结果'}</h3><p className="mt-1 text-xs text-slate-500">保存分数、理由、原图和当前评分依据版本。</p></div><button type="button" title="取消" aria-label="取消" onClick={() => setGradingAction('none')} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button></div><div className="grid gap-3 sm:grid-cols-[120px_1fr]"><label className="space-y-1"><span className="text-xs font-bold text-slate-500">最终分数</span><input type="number" min={0} max={selectedSample.fullScore} value={teacherScore} onChange={event => setTeacherScore(Number(event.target.value))} className={inputClass} /></label><label className="space-y-1"><span className="text-xs font-bold text-slate-500">评分理由与证据</span><input value={teacherReason} onChange={event => { setTeacherReason(event.target.value); setRuleAddedNotice(false); }} className={inputClass} placeholder="说明采用或调整分数的依据" /></label></div><div className="flex flex-wrap items-center justify-end gap-2">{ruleAddedNotice ? <span className="mr-auto flex items-center gap-1.5 text-xs font-bold text-emerald-700"><CheckCircle2 className="h-4 w-4" />已加入本题评分细则，可继续确认调整</span> : null}{gradingAction === 'adjust' ? <button type="button" disabled={ruleAddedNotice} onClick={() => { updateQuestionState({ ...currentQuestionState, teacherRules: [...currentQuestionState.teacherRules, teacherReason || '从当前边界样本补充的评分规则'] }); setRuleAddedNotice(true); onShowToast('已加入本题评分细则'); }} className="rounded-2xl border border-slate-200 px-4 py-2.5 text-xs font-bold disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-700 dark:border-zinc-700">{ruleAddedNotice ? '已加入评分细则' : '加入本题评分细则'}</button> : null}<button type="button" onClick={() => updateSample(gradingAction === 'manual' ? 'teacher-manual' : 'teacher-adjusted', teacherScore, teacherReason || '教师完成分项判断')} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white">{gradingAction === 'manual' ? '完成教师批改' : '确认调整'}</button></div></div>}</div></div>
               </section>
+              {selectedSample.status === 'confirmed' ? <div className="flex justify-end"><button type="button" onClick={goToNextTrialStep} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">{currentTrialSamples.some(sample => sample.status !== 'confirmed') ? '下一份' : '下一题'}<ChevronRight className="h-4 w-4" /></button></div> : null}
               <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-slate-500">{allCalibrationComplete ? '所有题目的试批样本均已完成。' : '批改方式将在所有题目的试批样本完成后统一选择。'}</p>{allCalibrationComplete ? <button type="button" onClick={() => setShowModeDialog(true)} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">选择本次批改方式</button> : null}</div>
             </div>
           </div>
@@ -1413,6 +1441,7 @@ export default function GradingWorkflow({
             ].map(([label, value]) => <div key={label} className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">{label}</span><strong className="mt-2 block text-2xl text-slate-900 dark:text-white">{value}</strong></div>)}
           </div>
           <section className={`${panelClass} p-6`}><div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="font-black text-slate-900 dark:text-white">{batch?.status === 'completed' ? '批量批改已完成' : batch?.status === 'running' ? 'AI 正在批量批改' : batch?.status === 'paused' ? '批量批改已暂停' : batch?.status === 'failed' ? '批量批改有未完成项' : '准备批量批改'}</h2><p className="mt-1 text-sm text-slate-500">已完成结果会复用；单份异常隔离后进入本任务复核。</p></div><div className="flex gap-2">{batch?.status === 'running' ? <button type="button" onClick={() => void controlBatch('pause')} className="flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-bold"><Pause className="h-4 w-4" />暂停</button> : null}{batch?.status === 'paused' ? <button type="button" onClick={() => void runBatch()} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white"><Play className="h-4 w-4" />继续</button> : null}{!batch || batch.status === 'idle' || batch.status === 'failed' ? <button type="button" onClick={() => void runBatch()} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">开始批量批改</button> : null}</div></div><div className="mt-7 h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800"><div className="h-full bg-emerald-600 transition-all" style={{ width: `${batch?.totalStudents ? Math.round(batch.processedStudents / batch.totalStudents * 100) : 0}%` }} /></div><div className="mt-3 flex justify-between text-xs text-slate-500"><span>{batch?.processedStudents ?? 0} 人已处理</span><span>{batch?.failedStudentIds.length ?? 0} 人处理失败</span></div>{batchError ? <p className="mt-4 text-xs font-bold text-rose-700">批改失败：{batchError}</p> : null}</section>
+          {batchSamples.length ? <section className={`${panelClass} p-5`}><div className="flex flex-wrap gap-3"><label className="space-y-1"><span className="block text-xs font-bold text-slate-500">学生</span><select value={activeBatchStudentId} onChange={event => setBatchStudentId(event.target.value)} className={inputClass}>{batchStudents.map(sample => <option key={sample.studentId} value={sample.studentId}>{sample.studentName}</option>)}</select></label><label className="space-y-1"><span className="block text-xs font-bold text-slate-500">题目</span><select value={activeBatchQuestionId} onChange={event => setBatchQuestionId(event.target.value)} className={inputClass}>{selectedQuestionStates.map(state => <option key={state.questionId} value={state.questionId}>第 {selectedQuestions.find(question => question.id === state.questionId)?.displayNo} 题</option>)}</select></label></div>{selectedBatchSample ? <div className="mt-5 grid gap-4 lg:grid-cols-2"><div className="border border-slate-200 bg-slate-50 p-3 dark:border-zinc-800 dark:bg-zinc-950">{selectedBatchSample.sourcePreviewUrl ? <img src={selectedBatchSample.sourcePreviewUrl} alt={`${selectedBatchSample.studentName} 答卷截图`} className="max-h-[520px] w-full object-contain" /> : null}</div><div className="space-y-3"><section className="rounded-lg border border-slate-200 p-4 dark:border-zinc-800"><strong>PaddleOCR 主识别</strong><p className="mt-2 whitespace-pre-wrap text-sm leading-6">{selectedBatchSample.ocrText || '未识别到作答'}</p></section>{selectedBatchSample.lunaReviewText ? <section className="rounded-lg bg-amber-50 p-4 text-amber-900"><strong>Luna 视觉复核</strong><p className="mt-2 whitespace-pre-wrap text-sm leading-6">{selectedBatchSample.lunaReviewText}</p></section> : null}<section className="rounded-lg bg-emerald-50 p-4 text-emerald-900"><strong>AI 评分：{selectedBatchSample.aiScore ?? '待定'} / {selectedBatchSample.fullScore}</strong><p className="mt-2 text-sm leading-6">{selectedBatchSample.gradingReason}</p></section></div></div> : null}</section> : null}
         </section>
       ) : null}
 

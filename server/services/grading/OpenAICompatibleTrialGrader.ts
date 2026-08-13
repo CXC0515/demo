@@ -50,6 +50,7 @@ export class OpenAICompatibleTrialGrader {
 
   async grade(taskId: string, request: TrialGradingRequest, materials: StoredMaterial[], answerOverrides = new Map<string, string>()) {
     const submissionById = new Map(request.submissions.map(item => [item.assetId, item]));
+    const requestedQuestionNos = new Set(request.questions.map(item => item.displayNo));
     const submissions = materials.flatMap(material => {
       const student = submissionById.get(material.id);
       if (!student || material.kind !== 'student-submission' || !material.normalizedDocument) return [];
@@ -57,7 +58,7 @@ export class OpenAICompatibleTrialGrader {
         assetId: material.id,
         studentName: student.studentName,
         studentNo: student.studentNo,
-        recognizedAnswers: (getVisionValidationResult(taskId, material.id)?.items ?? []).map(item => {
+        recognizedAnswers: (getVisionValidationResult(taskId, material.id)?.items ?? []).filter(item => requestedQuestionNos.has(item.displayNo)).map(item => {
           const evidence = buildTrialAnswerEvidence(item);
           const corrected = answerOverrides.get(`${material.id}:${item.displayNo}`);
           return corrected === undefined ? evidence : { ...evidence, answer: corrected, paddleAnswer: corrected, recognitionConflict: false, needsReview: false };

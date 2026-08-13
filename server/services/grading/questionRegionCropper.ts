@@ -141,7 +141,12 @@ const questionPageFromPaddle = (
   for (const page of [...artifact.pages].sort((a, b) => a.pageNumber - b.pageNumber)) {
     const fullPage = { x: 0, y: 0, width: page.prunedResult.width, height: page.prunedResult.height };
     const row = answerRowFromPaddle(artifact, page.pageNumber, displayNo, evidenceId, kind, fullPage);
-    if (row) return { pageNumber: page.pageNumber, row };
+    if (row) {
+      const numberedLines = row.text.split(/\r?\n/)
+        .map(line => line.trim().match(/^(\d+)(?:\s|[.、（(\[])/u)?.[1])
+        .filter((value): value is string => Boolean(value));
+      if (!numberedLines.length || numberedLines[0] === displayNo) return { pageNumber: page.pageNumber, row };
+    }
   }
   return undefined;
 };
@@ -247,6 +252,19 @@ const answerRowFromPaddle = (
     .map((block, index) => ({ block, index }))
     .filter(({ block }) => block.block_bbox[3] >= startTop && block.block_bbox[1] < nextAnchorTop && sameLane(block));
   if (evidenceId.endsWith('-answer')) {
+    const startLines = start.block.block_content.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    const targetLineIndex = startLines.findIndex(line => line.match(/^(\d+)(?:\s|[.、（(\[])/u)?.[1] === displayNo);
+    const numberedLineCount = startLines.filter(line => /^(\d+)(?:\s|[.、（(\[])/u.test(line)).length;
+    if (questionBlocks.length === 1 && targetLineIndex >= 0 && numberedLineCount > 1) {
+      const nextLineIndex = startLines.findIndex((line, index) => index > targetLineIndex && /^(\d+)(?:\s|[.、（(\[])/u.test(line));
+      return blockRegion(
+        start.block,
+        start.index,
+        targetLineIndex,
+        startLines.length,
+        startLines.slice(targetLineIndex, nextLineIndex < 0 ? undefined : nextLineIndex).join('\n')
+      );
+    }
     const regions = questionBlocks.map(({ block }) => {
       const [left, top, right, bottom] = block.block_bbox;
       return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
