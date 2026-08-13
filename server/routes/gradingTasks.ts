@@ -31,6 +31,7 @@ import { buildExpectedAnswerFields } from '../services/grading/answerFieldSchema
 import { findSubmissionsNeedingTrialGrading, mergeCurrentTrialSamples } from '../services/grading/trialResultReconciler';
 import { gradeTrialSubmissions } from '../services/grading/trialGradingService';
 import { buildGradingDiagnosis } from '../services/grading/gradingDiagnosis';
+import { applyTeacherReviewDecision } from '../services/grading/teacherReviewDecision';
 import { MaterialParserError } from '../services/materials/MaterialParser';
 import { parseMaterial } from '../services/materials/materialParserRegistry';
 
@@ -62,6 +63,13 @@ const ocrCorrectionSchema = z.object({
   correctedText: z.string().max(10_000),
   question: trialGradingRequestSchema.shape.questions.element,
   submission: trialGradingRequestSchema.shape.submissions.element
+});
+
+const teacherReviewSchema = z.object({
+  finalScore: z.number().nonnegative(),
+  reason: z.string().trim().min(1).max(2_000),
+  resultSource: z.enum(['ai-confirmed', 'teacher-adjusted', 'teacher-manual']),
+  correctedText: z.string().max(10_000).optional()
 });
 
 const batchRequestSchema = trialGradingRequestSchema.extend({
@@ -458,6 +466,23 @@ router.put('/:taskId/trial-grading/:sampleId/ocr-correction', async (request, re
     console.error(JSON.stringify({ event: 'ocr_correction_rescore_failed', taskId: request.params.taskId, sampleId: request.params.sampleId, error: error instanceof Error ? error.message : String(error) }));
     response.status(502).json({ code: 'OCR_CORRECTION_RESCORE_FAILED' });
   }
+});
+
+router.put('/:taskId/trial-grading/:sampleId/teacher-review', (request, response) => {
+  const parsed = teacherReviewSchema.safeParse(request.body);
+  const existing = getTrialGradingResult(request.params.taskId);
+  const current = existing?.samples.find(sample => sample.id === request.params.sampleId);
+  if (!parsed.success) { response.status(400).json({ code: 'INVALID_TEACHER_REVIEW' }); return; }
+  if (!existing || !current) { response.status(404).json({ code: 'TRIAL_SAMPLE_NOT_FOUND' }); return; }
+  let updated;
+  try { updated = applyTeacherReviewDecision(current, parsed.data); }
+  catch (error) {
+    const code = error instanceof Error ? error.message : 'INVALID_TEACHER_REVIEW';
+    response.status(code === 'AI_SCORE_CONFIRMATION_MISMATCH' ? 409 : 400).json({ code });
+    return;
+  }
+  const result = saveTrialGradingResult({ ...existing, samples: existing.samples.map(sample => sample.id === current.id ? updated : sample), createdAt: new Date().toISOString() });
+  response.json({ sample: updated, result });
 });
 
 router.get('/:taskId/batch-grading', (request, response) => {

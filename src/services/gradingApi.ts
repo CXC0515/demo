@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { CalibrationSample, DocumentAsset, FirstSectionAnalysis, GradingBatch, GradingDiagnosis, GradingMode, GradingQuestion, KnowledgeNode, NormalizedDocument, TaskQuestionRubric, TrialGradingQuestionInput, TrialGradingResult, TrialGradingSubmissionInput, VisionValidationResult } from '../domain/types';
+import { CalibrationResultSource, CalibrationSample, DocumentAsset, FirstSectionAnalysis, GradingBatch, GradingDiagnosis, GradingMode, GradingQuestion, KnowledgeNode, NormalizedDocument, TaskQuestionRubric, TrialGradingQuestionInput, TrialGradingResult, TrialGradingSubmissionInput, VisionValidationResult } from '../domain/types';
 
 const readErrorCode = async (response: Response) => {
   const body = await response.json().catch(() => ({})) as { code?: string };
@@ -118,6 +118,16 @@ export const correctTrialOcr = async (taskId: string, sampleId: string, correcte
   if (!response.ok) throw new Error(await readErrorCode(response));
   const body = await response.json() as { sample: CalibrationSample };
   return body.sample;
+};
+
+export const saveTeacherReview = async (taskId: string, sampleId: string, finalScore: number, reason: string, resultSource: CalibrationResultSource, correctedText?: string) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/trial-grading/${encodeURIComponent(sampleId)}/teacher-review`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ finalScore, reason, resultSource, correctedText })
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { sample: CalibrationSample }).sample;
 };
 
 export const getBatchGrading = async (taskId: string) => {

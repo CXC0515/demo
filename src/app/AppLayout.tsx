@@ -41,8 +41,8 @@ export default function AppLayout({
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 dark:bg-zinc-950 text-slate-800 dark:text-slate-100 font-sans flex flex-col antialiased">
-      <header className="h-16 bg-white/75 dark:bg-zinc-900/75 backdrop-blur-2xl border-b border-slate-200/70 dark:border-zinc-800/80 px-3 sm:px-6 flex items-center justify-between z-30 sticky top-0">
+    <div className="h-dvh overflow-hidden bg-slate-100 dark:bg-zinc-950 text-slate-800 dark:text-slate-100 font-sans flex flex-col antialiased">
+      <header className="h-16 flex-none bg-white/75 dark:bg-zinc-900/75 backdrop-blur-2xl border-b border-slate-200/70 dark:border-zinc-800/80 px-3 sm:px-6 flex items-center justify-between z-30">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -98,7 +98,7 @@ export default function AppLayout({
         </div>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="min-h-0 flex-1 flex overflow-hidden">
         {mobileNavOpen && (
           <button
             type="button"
@@ -107,7 +107,7 @@ export default function AppLayout({
             aria-label="关闭导航"
           />
         )}
-        <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl border-r border-slate-200/70 dark:border-zinc-800/80 flex flex-col justify-between p-4 flex-shrink-0 select-none transition-transform lg:static lg:z-20 lg:bg-white/70 lg:dark:bg-zinc-900/70 lg:translate-x-0 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <aside className={`fixed inset-y-0 left-0 z-50 w-72 overflow-y-auto bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl border-r border-slate-200/70 dark:border-zinc-800/80 flex flex-col justify-between p-4 flex-shrink-0 select-none transition-transform lg:static lg:h-full lg:z-20 lg:bg-white/70 lg:dark:bg-zinc-900/70 lg:translate-x-0 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="space-y-2">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-3">导航</span>

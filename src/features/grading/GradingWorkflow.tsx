@@ -35,6 +35,7 @@ import {
   X
 } from 'lucide-react';
 import { Fragment, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AnalyzedQuestionUnit,
   CalibrationResultSource,
@@ -61,7 +62,7 @@ import {
 } from '../../domain/types';
 import { orderCalibrationSamplesForTrial } from '../../domain/calibrationSamples';
 import SourceEvidenceViewer from './SourceEvidenceViewer';
-import { analyzeTaskMaterials, correctTrialOcr, getBatchGrading, getGradingDiagnosis, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, runVisionValidation, saveTaskRubric, setBatchGradingAction, startBatchGrading, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
+import { analyzeTaskMaterials, correctTrialOcr, getBatchGrading, getGradingDiagnosis, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, runVisionValidation, saveTaskRubric, saveTeacherReview, setBatchGradingAction, startBatchGrading, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
 import { listRosterClasses, listRosterStudents, matchRosterSubmissions } from '../../services/rosterApi';
 import { buildSubmissionPages, getReadableStudentNos, reconcileSubmissionRoster } from '../../domain/submissionRoster';
 
@@ -474,6 +475,10 @@ export default function GradingWorkflow({
   const [reviewStage, setReviewStage] = useState<'all' | 'intake' | 'calibration' | 'grading' | 'teacher' | 'resolved'>('all');
   const [reviewSampleId, setReviewSampleId] = useState<string | null>(null);
   const [ocrCorrectionPhase, setOcrCorrectionPhase] = useState<'idle' | 'saving'>('idle');
+  const [reviewEditedOcr, setReviewEditedOcr] = useState('');
+  const [reviewScore, setReviewScore] = useState(0);
+  const [reviewReason, setReviewReason] = useState('');
+  const [reviewSaving, setReviewSaving] = useState<'idle' | 'ocr' | 'decision'>('idle');
 
   const currentClass = rosterClass ?? classes.find(item => item.id === selectedTask.classId) ?? null;
   const currentQuestion = workflowState.questions.find(item => item.id === selectedQuestionId) ?? workflowState.questions[0];
@@ -487,8 +492,11 @@ export default function GradingWorkflow({
   const missingRows = workflowState.missingSubmissions ?? [];
   const trialSamples = questionStates.flatMap(state => state.calibrationSamples);
   const reviewSamples = trialSamples.filter(sample => sample.needsTeacherReview || sample.recognitionConflict || sample.gradingConfidence < lowConfidenceThreshold);
+  const pendingReviewSamples = reviewSamples.filter(sample => sample.status !== 'confirmed');
+  const resolvedReviewSamples = reviewSamples.filter(sample => sample.status === 'confirmed');
+  const visibleReviewSamples = reviewStage === 'resolved' ? resolvedReviewSamples : reviewStage === 'all' || reviewStage === 'calibration' ? pendingReviewSamples : [];
   const selectedReviewSample = reviewSamples.find(sample => sample.id === reviewSampleId) ?? null;
-  const pendingReviews = reviewSamples.length;
+  const pendingReviews = pendingReviewSamples.length;
   const allCalibrationComplete = questionStates.length > 0 && questionStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget);
   const assignmentReady = workflowState.assignment.status === 'assigned';
   const gradingDataReady = workflowState.questions.length > 0 && matchRows.length > 0 && rosterMatchPhase === 'ready' && !issueRows.some(row => row.rosterMatchStatus !== 'matched');
@@ -562,6 +570,19 @@ export default function GradingWorkflow({
     if (activeStage !== 'diagnosis') return;
     void getGradingDiagnosis(selectedTask.id, workflowState.questions).then(setDiagnosis).catch(() => setDiagnosis(null));
   }, [activeStage, selectedTask.id, workflowState.questions]);
+
+  useEffect(() => {
+    if (!selectedReviewSample) return;
+    const previousOverflow = document.body.style.overflow;
+    const main = document.querySelector('main');
+    const previousMainOverflow = main instanceof HTMLElement ? main.style.overflow : '';
+    document.body.style.overflow = 'hidden';
+    if (main instanceof HTMLElement) main.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (main instanceof HTMLElement) main.style.overflow = previousMainOverflow;
+    };
+  }, [selectedReviewSample]);
 
   useEffect(() => {
     let active = true;
@@ -886,17 +907,64 @@ export default function GradingWorkflow({
     }
   };
 
-  const updateSample = (source: CalibrationResultSource, score: number, reason: string) => {
-    if (!selectedSample || !currentQuestionState) return;
-    const nextState = {
-      ...currentQuestionState,
-      calibrationSamples: currentQuestionState.calibrationSamples.map(sample => sample.id === selectedSample.id ? { ...sample, teacherCorrectedText: editedOcr, ocrText: editedOcr, status: 'confirmed' as const, resultSource: source, teacherScore: score, teacherReason: reason, isFinal: true, rubricVersion: currentQuestionState.rubricVersion } : sample)
-    };
-    const nextStates = questionStates.map(item => item.questionId === nextState.questionId ? nextState : item);
+  const replaceSample = (updated: CalibrationSample) => {
+    const nextStates = questionStates.map(state => state.questionId === updated.questionId
+      ? { ...state, calibrationSamples: state.calibrationSamples.map(sample => sample.id === updated.id ? updated : sample) }
+      : state);
     setQuestionStates(nextStates);
-    setGradingAction('none');
-    onShowToast(source === 'teacher-manual' ? `${selectedSample.studentName} 已完成教师终评，并作为本题校准锚点` : `${selectedSample.studentName} 的试批结果已确认`);
-    if (nextStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget)) setShowModeDialog(true);
+    onUpdateState({ questionGradingStates: nextStates });
+    setDiagnosis(null);
+    return nextStates;
+  };
+
+  const updateSample = async (source: CalibrationResultSource, score: number, reason: string) => {
+    if (!selectedSample || !currentQuestionState) return;
+    try {
+      const finalText = source === 'ai-confirmed' ? selectedSample.ocrText : editedOcr;
+      const updated = await saveTeacherReview(selectedTask.id, selectedSample.id, score, reason, source, finalText);
+      const nextStates = replaceSample(updated);
+      setGradingAction('none');
+      onShowToast(source === 'teacher-manual' ? `${selectedSample.studentName} 已完成教师终评，并作为本题校准锚点` : `${selectedSample.studentName} 的试批结果已确认`);
+      if (nextStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget)) setShowModeDialog(true);
+    } catch { onShowToast('教师评分保存失败'); }
+  };
+
+  const openReviewSample = (sample: CalibrationSample) => {
+    setReviewSampleId(sample.id);
+    setReviewEditedOcr(getEffectiveOcrText(sample));
+    setReviewScore(sample.teacherScore ?? sample.aiScore ?? 0);
+    setReviewReason(sample.teacherReason ?? sample.gradingReason ?? '教师根据原图和识别证据完成复核');
+  };
+
+  const saveReviewOcrCorrection = async () => {
+    if (!selectedReviewSample) return;
+    const question = gradingQuestions().find(item => item.questionId === selectedReviewSample.questionId);
+    const submission = gradingSubmissions().find(item => item.studentId === selectedReviewSample.studentId);
+    if (!question || !submission) { onShowToast('无法找到当前题目或学生答卷'); return; }
+    setReviewSaving('ocr');
+    try {
+      const updated = await correctTrialOcr(selectedTask.id, selectedReviewSample.id, reviewEditedOcr, question, submission);
+      replaceSample(updated);
+      setReviewScore(updated.aiScore ?? 0);
+      setReviewReason(updated.gradingReason ?? '教师根据原图和识别证据完成复核');
+      onShowToast(`OCR 修正已保存，AI 已重新评分为 ${updated.aiScore ?? '待定'} 分`);
+    } catch { onShowToast('OCR 修正保存或重新评分失败'); }
+    finally { setReviewSaving('idle'); }
+  };
+
+  const confirmReviewDecision = async (source: CalibrationResultSource) => {
+    if (!selectedReviewSample) return;
+    const finalScore = source === 'ai-confirmed' ? selectedReviewSample.aiScore : reviewScore;
+    if (finalScore === null) { onShowToast('AI 尚未给出可确认分数'); return; }
+    setReviewSaving('decision');
+    try {
+      const finalText = source === 'ai-confirmed' ? selectedReviewSample.ocrText : reviewEditedOcr;
+      const updated = await saveTeacherReview(selectedTask.id, selectedReviewSample.id, finalScore, reviewReason || '教师根据原图和识别证据完成复核', source, finalText);
+      replaceSample(updated);
+      setReviewSampleId(null);
+      onShowToast(`${updated.studentName} 已完成异常复核，最终得分 ${finalScore} 分`);
+    } catch { onShowToast('教师裁定保存失败'); }
+    finally { setReviewSaving('idle'); }
   };
 
   const saveOcrCorrection = async () => {
@@ -1127,11 +1195,12 @@ export default function GradingWorkflow({
         <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-black text-slate-900 dark:text-white">本任务异常证据</h2><p className="mt-1 text-xs text-slate-500">先按发生环节筛选，再查看具体原因和原图。</p></div><span className="rounded-xl bg-rose-100 px-3 py-1.5 text-xs font-bold text-rose-800">{pendingReviews} 项待复核</span></div>
           <div className="flex flex-wrap gap-2">{([['all','全部'],['intake','上传质检'],['calibration','试批校准'],['grading','批量批改'],['teacher','教师复核'],['resolved','已处理']] as const).map(([id,label]) => <button key={id} type="button" onClick={() => setReviewStage(id)} className={`rounded-2xl px-4 py-2 text-xs font-bold ${reviewStage === id ? 'bg-emerald-700 text-white' : 'border border-slate-200 text-slate-500 dark:border-zinc-800'}`}>{label}</button>)}</div>
-          {(reviewStage === 'all' || reviewStage === 'calibration') && reviewSamples.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{reviewSamples.map(sample => {
+          {visibleReviewSamples.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{visibleReviewSamples.map(sample => {
             const question = workflowState.questions.find(item => item.id === sample.questionId);
-            return <button type="button" onClick={() => setReviewSampleId(sample.id)} key={sample.id} className={`${panelClass} overflow-hidden text-left`}><div className="h-36 bg-slate-100 dark:bg-zinc-900">{sample.sourcePreviewUrl ? <img src={sample.sourcePreviewUrl} alt={`${sample.studentName} 第 ${question?.displayNo} 题`} className="h-full w-full object-contain" /> : null}</div><div className="p-4"><div className="flex items-start justify-between gap-3"><div><strong className="text-base">{sample.studentName}</strong><p className="mt-1 text-xs text-slate-500">第 {question?.displayNo ?? '-'} 题 · {sample.aiScore ?? '待定'} / {sample.fullScore} 分</p></div><span className="rounded-xl bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800">{sample.recognitionConflict ? '两次识别不一致' : sample.gradingConfidence < lowConfidenceThreshold ? '评分把握较低' : '等待老师确认'}</span></div><p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-500">{sample.gradingReason}</p></div></button>;
+            const shownScore = sample.status === 'confirmed' ? sample.teacherScore ?? sample.aiScore : sample.aiScore;
+            return <button type="button" onClick={() => openReviewSample(sample)} key={sample.id} className={`${panelClass} overflow-hidden text-left`}><div className="h-36 bg-slate-100 dark:bg-zinc-900">{sample.sourcePreviewUrl ? <img src={sample.sourcePreviewUrl} alt={`${sample.studentName} 第 ${question?.displayNo} 题`} className="h-full w-full object-contain" /> : null}</div><div className="p-4"><div className="flex items-start justify-between gap-3"><div><strong className="text-base">{sample.studentName}</strong><p className="mt-1 text-xs text-slate-500">第 {question?.displayNo ?? '-'} 题 · {shownScore ?? '待定'} / {sample.fullScore} 分</p></div><span className={`rounded-xl px-2 py-1 text-[10px] font-bold ${sample.status === 'confirmed' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{sample.status === 'confirmed' ? '已完成复核' : sample.recognitionConflict ? '两次识别不一致' : sample.gradingConfidence < lowConfidenceThreshold ? '评分把握较低' : '等待老师确认'}</span></div><p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-500">{sample.status === 'confirmed' ? sample.teacherReason : sample.gradingReason}</p></div></button>;
           })}</div> : <section className={`${panelClass} flex min-h-56 flex-col items-center justify-center p-8 text-center`}><CheckCircle2 className="h-9 w-9 text-emerald-500" /><p className="mt-3 text-sm font-bold text-slate-600">当前环节没有异常</p></section>}
-          {selectedReviewSample ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" role="dialog" aria-modal="true"><div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-[24px] bg-white p-5 shadow-2xl dark:bg-zinc-950"><div className="flex items-start justify-between"><div><h2 className="text-lg font-black">{selectedReviewSample.studentName} · 异常复核</h2><p className="mt-1 text-xs text-slate-500">原图、两路识别和当前评分在同一处核对。</p></div><button type="button" aria-label="关闭异常详情" onClick={() => setReviewSampleId(null)} className="rounded-xl p-2"><X className="h-4 w-4" /></button></div><div className="mt-4 grid gap-4 lg:grid-cols-2"><div className="border border-slate-200 bg-white p-3">{selectedReviewSample.sourcePreviewUrl ? <img src={selectedReviewSample.sourcePreviewUrl} alt="答卷原图依据" className="max-h-[520px] w-full object-contain" /> : null}</div><div className="space-y-3 text-sm"><div className="rounded-2xl bg-slate-50 p-4 dark:bg-zinc-900"><strong>PaddleOCR 主识别</strong><p className="mt-2 whitespace-pre-wrap leading-6">{selectedReviewSample.rawOcrText}</p></div>{selectedReviewSample.lunaReviewText ? <div className="rounded-2xl bg-amber-50 p-4 text-amber-900"><strong>Luna 视觉复核</strong><p className="mt-2 whitespace-pre-wrap leading-6">{selectedReviewSample.lunaReviewText}</p></div> : null}<div className="rounded-2xl bg-emerald-50 p-4 text-emerald-900"><strong>AI 评分：{selectedReviewSample.aiScore ?? '待定'} / {selectedReviewSample.fullScore}</strong><p className="mt-2 leading-6">{selectedReviewSample.gradingReason}</p></div></div></div></div></div> : null}
+          {selectedReviewSample ? createPortal(<div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/45 p-2 backdrop-blur-sm sm:p-4" role="dialog" aria-modal="true" aria-label={`${selectedReviewSample.studentName} 异常复核`}><div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[24px] bg-white shadow-2xl sm:max-h-[calc(100dvh-2rem)] dark:bg-zinc-950"><header className="flex flex-none items-start justify-between border-b border-slate-200 px-5 py-4 dark:border-zinc-800"><div><h2 className="text-lg font-black">{selectedReviewSample.studentName} · 异常复核</h2><p className="mt-1 text-xs text-slate-500">原图、识别文本和评分在同一处完成裁定。</p></div><button type="button" aria-label="关闭异常详情" onClick={() => setReviewSampleId(null)} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-zinc-800"><X className="h-4 w-4" /></button></header><div className="min-h-0 flex-1 overflow-y-auto p-4"><div className="grid gap-4 lg:grid-cols-2"><section className="border border-slate-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">{selectedReviewSample.sourcePreviewUrl ? <img src={selectedReviewSample.sourcePreviewUrl} alt="答卷原图依据" className="max-h-[620px] w-full object-contain" /> : <p className="p-8 text-center text-sm text-slate-400">暂无原图</p>}</section><div className="space-y-3 text-sm"><section className="rounded-lg border border-slate-200 p-4 dark:border-zinc-800"><div className="flex items-center justify-between gap-3"><strong>PaddleOCR 主识别</strong><span className="text-xs text-slate-400">可按原图修正</span></div><textarea value={reviewEditedOcr} onChange={event => setReviewEditedOcr(event.target.value)} rows={6} className={`${inputClass} mt-3 h-auto resize-y py-3 leading-6`} /><button type="button" disabled={reviewSaving !== 'idle' || selectedReviewSample.resultSource === 'teacher-manual'} onClick={() => void saveReviewOcrCorrection()} className="mt-3 rounded-2xl border border-slate-200 px-3 py-2.5 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700">{selectedReviewSample.resultSource === 'teacher-manual' ? '教师终评已锁定识别文本' : reviewSaving === 'ocr' ? '正在重新评分...' : '保存修正并重新评分'}</button></section>{selectedReviewSample.lunaReviewText ? <section className="rounded-lg bg-amber-50 p-4 text-amber-900"><strong>Luna 视觉复核</strong><p className="mt-2 whitespace-pre-wrap leading-6">{selectedReviewSample.lunaReviewText}</p></section> : null}<section className="rounded-lg bg-emerald-50 p-4 text-emerald-900"><strong>AI 评分：{selectedReviewSample.aiScore ?? '待定'} / {selectedReviewSample.fullScore}</strong><p className="mt-2 leading-6">{selectedReviewSample.gradingReason}</p></section></div></div></div><footer className="flex-none border-t border-slate-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950"><div className="grid items-end gap-3 lg:grid-cols-[120px_minmax(0,1fr)_auto]"><label className="space-y-1"><span className="text-xs font-bold text-slate-500">教师最终分</span><input type="number" min={0} max={selectedReviewSample.fullScore} value={reviewScore} onChange={event => setReviewScore(Math.min(selectedReviewSample.fullScore, Math.max(0, Number(event.target.value))))} className={inputClass} /></label><label className="space-y-1"><span className="text-xs font-bold text-slate-500">复核理由</span><input value={reviewReason} onChange={event => setReviewReason(event.target.value)} placeholder="说明采用或调整分数的证据" className={inputClass} /></label><div className="flex flex-wrap gap-2"><button type="button" disabled={selectedReviewSample.aiScore === null || reviewSaving !== 'idle'} onClick={() => void confirmReviewDecision('ai-confirmed')} className="h-11 rounded-2xl border border-slate-200 px-4 text-xs font-bold disabled:opacity-50 dark:border-zinc-700">采用 AI 评分</button><button type="button" disabled={!reviewReason.trim() || reviewSaving !== 'idle'} onClick={() => void confirmReviewDecision('teacher-manual')} className="h-11 rounded-2xl bg-emerald-700 px-4 text-xs font-bold text-white disabled:opacity-50">{reviewSaving === 'decision' ? '正在保存...' : '确认教师裁定'}</button></div></div></footer></div></div>, document.body) : null}
         </section>
       ) : null}
 
