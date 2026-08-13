@@ -556,9 +556,9 @@ export default function App() {
               onSelectTask={(task) => {
                 setSelectedClassId(task.classId);
               }}
-              onUpdateTask={(updatedTask) => {
-                setTasks(current => current.map(task => task.id === updatedTask.id ? updatedTask : task));
-                void saveGradingTask(updatedTask).catch(() => triggerToast('任务状态保存失败'));
+              onUpdateTask={async (updatedTask) => {
+                const saved = await saveGradingTask(updatedTask);
+                setTasks(current => current.map(task => task.id === saved.id ? saved : task));
               }}
               onUpdateState={(taskId, updated) => setWorkflowStates(current => ({
                 ...current,

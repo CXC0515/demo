@@ -24,7 +24,7 @@ export const mergeCurrentTrialSamples = (
   const refreshedKeys = new Set(refreshedSamples.map(item => `${item.questionId}:${item.sourceAssetId}`));
   const retained = (result?.samples ?? []).filter(sample =>
     currentAssetIds.has(sample.sourceAssetId)
-    && (!currentQuestions.has(sample.questionId) || currentQuestions.get(sample.questionId) === sample.rubricVersion)
+    && currentQuestions.get(sample.questionId) === sample.rubricVersion
     && !refreshedKeys.has(`${sample.questionId}:${sample.sourceAssetId}`)
   );
   return [...retained, ...refreshedSamples];

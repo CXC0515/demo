@@ -31,9 +31,9 @@ test('retains current samples, adds new samples and removes deleted students', (
   assert.deepEqual(merged.map(item => item.sourceAssetId), ['a', 'b', 'c']);
 });
 
-test('retains other questions when only one question is regraded', () => {
+test('removes questions outside the current authoritative grading range', () => {
   const previous = result(['a']);
   previous.samples.push({ ...sample('a'), id: 'q2-a', questionId: 'q2' });
   const merged = mergeCurrentTrialSamples(previous, request(['a']), [sample('a')]);
-  assert.deepEqual(merged.map(item => item.questionId).sort(), ['q1', 'q2']);
+  assert.deepEqual(merged.map(item => item.questionId), ['q1']);
 });

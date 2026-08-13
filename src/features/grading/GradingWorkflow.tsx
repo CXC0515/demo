@@ -79,7 +79,7 @@ interface GradingWorkflowProps {
   ocrAutoPassThreshold: number;
   onBack: () => void;
   onSelectTask: (task: WorkbenchTask) => void;
-  onUpdateTask: (task: WorkbenchTask) => void;
+  onUpdateTask: (task: WorkbenchTask) => Promise<void>;
   onUpdateState: (newState: Partial<WorkflowState>) => void;
   onSyncToProfiles: (aiResults: WorkflowState['aiResults']) => void;
   onConfirmReview: (reviewId: string, finalScore: number, changeReason: string) => void;
@@ -352,14 +352,14 @@ function QuestionSelector({ questions, states, selectedId, onSelect }: { questio
   return (
     <div className="overflow-x-auto pb-1">
       <div className="flex min-w-max gap-2" role="tablist" aria-label="选择题号">
-        {questions.map((question, index) => {
+        {questions.map(question => {
           const state = states.find(item => item.questionId === question.id);
           const confirmed = state?.calibrationSamples.filter(sample => sample.status === 'confirmed').length ?? 0;
           const target = state?.sampleTarget ?? 3;
           const active = selectedId === question.id;
           return (
             <button key={question.id} type="button" role="tab" aria-selected={active} onClick={() => onSelect(question.id)} className={`min-w-36 rounded-2xl border px-4 py-3 text-left transition-all ${active ? 'border-emerald-700 bg-emerald-700 text-white shadow-md shadow-emerald-700/10' : 'border-slate-200 bg-white/70 text-slate-600 hover:border-emerald-300 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-slate-300'}`}>
-              <span className="block text-sm font-black">第 {index + 1} 题</span>
+              <span className="block text-sm font-black">第 {question.displayNo} 题</span>
               <span className={`mt-1 block max-w-32 truncate text-xs ${active ? 'text-emerald-50' : 'text-slate-400'}`}>{question.title}</span>
               <span className={`mt-2 block text-[11px] font-bold ${active ? 'text-white' : confirmed >= target ? 'text-emerald-700' : 'text-amber-700'}`}>{confirmed >= target ? '试批已完成' : `试批 ${confirmed}/${target}`}</span>
             </button>
@@ -517,6 +517,8 @@ export default function GradingWorkflow({
   const [diagnosisConfirmed, setDiagnosisConfirmed] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisQuestionNo, setAnalysisQuestionNo] = useState(workflowState.assignment.firstSectionAnalysis?.questions[0]?.displayNo ?? '');
+  const [questionSelectionDraft, setQuestionSelectionDraft] = useState<string[]>(selectedTask.selectedQuestionIds ?? workflowState.assignment.selectedQuestionIds ?? workflowState.questions.map(question => question.id));
+  const [questionSelectionSaving, setQuestionSelectionSaving] = useState(false);
   const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
   const [analysisElapsedSeconds, setAnalysisElapsedSeconds] = useState(0);
   const [rosterClass, setRosterClass] = useState<SchoolClass | null>(null);
@@ -545,7 +547,7 @@ export default function GradingWorkflow({
   const [reviewSaving, setReviewSaving] = useState<'idle' | 'ocr' | 'decision'>('idle');
 
   const currentClass = rosterClass ?? classes.find(item => item.id === selectedTask.classId) ?? null;
-  const selectedQuestionIds = workflowState.assignment.selectedQuestionIds ?? workflowState.questions.map(question => question.id);
+  const selectedQuestionIds = selectedTask.selectedQuestionIds ?? workflowState.assignment.selectedQuestionIds ?? workflowState.questions.map(question => question.id);
   const selectedQuestions = workflowState.questions.filter(question => selectedQuestionIds.includes(question.id));
   const selectedQuestionStates = questionStates.filter(state => selectedQuestionIds.includes(state.questionId));
   const currentQuestion = selectedQuestions.find(item => item.id === selectedQuestionId) ?? selectedQuestions[0] ?? workflowState.questions[0];
@@ -578,6 +580,9 @@ export default function GradingWorkflow({
   const matchedStudentCount = new Set(matchRows.filter(row => row.rosterMatchStatus === 'matched').map(row => row.studentId).filter(Boolean)).size;
   const submissionRosterInputKey = matchRows.map(page => `${page.id}:${page.detectedStudentNo}`).join('|');
   const submissionAssets = workflowState.assignment.assets.filter(asset => asset.kind === 'student-submission');
+  const questionSelectionLocked = submissionAssets.length > 0;
+  const allQuestionsSelected = workflowState.questions.length > 0 && questionSelectionDraft.length === workflowState.questions.length;
+  const questionSelectionDirty = JSON.stringify([...questionSelectionDraft].sort()) !== JSON.stringify([...selectedQuestionIds].sort());
   const submissionMaterialKey = submissionAssets.map(asset => `${asset.id}:${asset.status}`).join('|');
   const rubricDirty = Boolean(currentQuestionState && persistedCurrentQuestionState && JSON.stringify({ standardAnswer: currentQuestionState.standardAnswer, gradingRubric: currentQuestionState.gradingRubric, teacherRules: currentQuestionState.teacherRules }) !== JSON.stringify({ standardAnswer: persistedCurrentQuestionState.standardAnswer, gradingRubric: persistedCurrentQuestionState.gradingRubric, teacherRules: persistedCurrentQuestionState.teacherRules }));
 
@@ -632,10 +637,12 @@ export default function GradingWorkflow({
           assets: materials.assets,
           documents: materials.documents,
           firstSectionAnalysis: analysis ?? undefined,
+          selectedQuestionIds: selectedTask.selectedQuestionIds ?? workflowState.assignment.selectedQuestionIds,
           analysisStatus: needsReview ? 'needs-review' : assignmentAssets.length ? 'ready' : workflowState.assignment.analysisStatus
         },
         ...(derivedWorkflow ?? {})
       });
+      if (derivedWorkflow) setQuestionSelectionDraft(selectedTask.selectedQuestionIds ?? workflowState.assignment.selectedQuestionIds ?? derivedWorkflow.questions.map(question => question.id));
     }).catch(() => undefined);
     return () => { active = false; };
   }, [selectedTask.id]);
@@ -924,10 +931,34 @@ export default function GradingWorkflow({
   const toggleQuestionSelection = (displayNo: string) => {
     const question = workflowState.questions.find(item => item.displayNo === displayNo);
     if (!question) return;
-    const nextIds = selectedQuestionIds.includes(question.id)
-      ? selectedQuestionIds.filter(id => id !== question.id)
-      : [...selectedQuestionIds, question.id];
-    updateAssignment({ selectedQuestionIds: nextIds });
+    setQuestionSelectionDraft(current => current.includes(question.id)
+      ? current.filter(id => id !== question.id)
+      : [...current, question.id]);
+  };
+
+  const toggleAllQuestions = () => {
+    const allQuestionIds = workflowState.questions.map(question => question.id);
+    setQuestionSelectionDraft(questionSelectionDraft.length === allQuestionIds.length ? [] : allQuestionIds);
+  };
+
+  const saveQuestionSelection = async () => {
+    if (!questionSelectionDraft.length) {
+      onShowToast('请至少选择一道本次批改题目');
+      return;
+    }
+    setQuestionSelectionSaving(true);
+    try {
+      const updatedTask = { ...selectedTask, selectedQuestionIds: questionSelectionDraft };
+      await onUpdateTask(updatedTask);
+      updateAssignment({ selectedQuestionIds: questionSelectionDraft });
+      const nextQuestionId = questionSelectionDraft.includes(selectedQuestionId) ? selectedQuestionId : questionSelectionDraft[0];
+      setSelectedQuestionId(nextQuestionId);
+      onShowToast(`已保存 ${questionSelectionDraft.length} 道本次批改题目`);
+    } catch {
+      onShowToast('题目范围保存失败，请重试');
+    } finally {
+      setQuestionSelectionSaving(false);
+    }
   };
 
   const saveAnalysisQuestion = async (displayNo: string, correction: { title: string; stem: string; answerRequirement: string; standardAnswer: string }) => {
@@ -1218,7 +1249,7 @@ export default function GradingWorkflow({
     void runBatch();
   };
 
-  const questionNumber = currentQuestion ? workflowState.questions.findIndex(item => item.id === currentQuestion.id) + 1 : 1;
+  const questionNumber = Number(currentQuestion?.displayNo) || 1;
   const assignmentAnalysis = workflowState.assignment.firstSectionAnalysis;
   const selectedAnalysisQuestion = assignmentAnalysis?.questions.find(question => question.displayNo === analysisQuestionNo) ?? assignmentAnalysis?.questions[0];
   const submissionFilePicker = (
@@ -1264,9 +1295,9 @@ export default function GradingWorkflow({
               </div>
               {isAnalyzing ? <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900 dark:bg-emerald-950/20"><div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm text-emerald-900 dark:text-emerald-100">AI 正在识别作业结构</strong><span className="text-xs font-bold text-emerald-700">已用时 {formatElapsed(analysisElapsedSeconds)}</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-emerald-100 dark:bg-emerald-950"><div className="h-full w-1/2 animate-pulse rounded-full bg-emerald-600" /></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-3"><span className="font-bold text-emerald-800">1. 题目与答案材料已就绪</span><span className="font-bold text-emerald-800">2. 正在核对题号、题干和答案</span><span className="text-slate-400">3. 生成评分依据</span></div><p className="mt-3 text-[11px] text-slate-500">模型响应时间无法准确倒计时；这里展示真实处理阶段和已耗时。</p></div> : null}
               {assignmentAnalysis && selectedAnalysisQuestion ? <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 lg:grid-cols-[220px_minmax(0,1fr)] dark:border-zinc-800">
-                <aside className="space-y-2"><div className="flex items-center justify-between text-xs"><strong>本次批改题目</strong><span className="text-slate-400">已选 {selectedQuestionIds.length} / {assignmentAnalysis.questions.length}</span></div>{assignmentAnalysis.questions.map(question => { const questionId = `${selectedTask.id}-q-${question.displayNo}`; const included = selectedQuestionIds.includes(questionId); const active = selectedAnalysisQuestion.displayNo === question.displayNo; return <div key={question.displayNo} className={`flex items-center gap-2 rounded-lg border p-2 ${active ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/20' : 'border-slate-200 dark:border-zinc-800'}`}><input type="checkbox" checked={included} onChange={() => toggleQuestionSelection(question.displayNo)} aria-label={`选择第 ${question.displayNo} 题`} className="h-4 w-4 accent-emerald-700" /><button type="button" onClick={() => setAnalysisQuestionNo(question.displayNo)} className="min-w-0 flex-1 text-left"><strong className="block text-xs">第 {question.displayNo} 题</strong><span className="mt-0.5 block truncate text-[11px] text-slate-500">{question.title || question.stem}</span></button></div>; })}</aside>
+                <aside className="space-y-2"><div className="flex items-center justify-between gap-2 text-xs"><label className="flex items-center gap-2 font-bold"><input type="checkbox" checked={allQuestionsSelected} disabled={questionSelectionLocked} onChange={toggleAllQuestions} aria-label="全选本次批改题目" className="h-4 w-4 accent-emerald-700" />全选</label><span className="text-slate-400">已选 {questionSelectionDraft.length} / {assignmentAnalysis.questions.length}</span></div>{assignmentAnalysis.questions.map(question => { const questionId = `${selectedTask.id}-q-${question.displayNo}`; const included = questionSelectionDraft.includes(questionId); const active = selectedAnalysisQuestion.displayNo === question.displayNo; return <div key={question.displayNo} className={`flex items-center gap-2 rounded-lg border p-2 ${active ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/20' : 'border-slate-200 dark:border-zinc-800'}`}><input type="checkbox" checked={included} disabled={questionSelectionLocked} onChange={() => toggleQuestionSelection(question.displayNo)} aria-label={`选择第 ${question.displayNo} 题`} className="h-4 w-4 accent-emerald-700 disabled:cursor-not-allowed" /><button type="button" onClick={() => setAnalysisQuestionNo(question.displayNo)} className="min-w-0 flex-1 text-left"><strong className="block text-xs">第 {question.displayNo} 题</strong><span className="mt-0.5 block truncate text-[11px] text-slate-500">{question.title || question.stem}</span></button></div>; })}<button type="button" disabled={questionSelectionLocked || !questionSelectionDirty || questionSelectionSaving} onClick={() => void saveQuestionSelection()} className="w-full rounded-2xl bg-emerald-700 px-3 py-2.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">{questionSelectionSaving ? '正在保存...' : questionSelectionLocked ? '已上传答卷，题目范围已锁定' : questionSelectionDirty ? '保存题目范围' : '题目范围已保存'}</button></aside>
                 <AnalysisQuestionCard question={selectedAnalysisQuestion} standardAnswer={questionStates.find(state => state.questionId === `${selectedTask.id}-q-${selectedAnalysisQuestion.displayNo}`)?.standardAnswer ?? selectedAnalysisQuestion.standardAnswer} onSave={correction => saveAnalysisQuestion(selectedAnalysisQuestion.displayNo, correction)} />
-                <label className="sticky bottom-0 space-y-2 border-t border-slate-200 bg-white/95 pt-4 backdrop-blur lg:col-span-2 dark:border-zinc-800 dark:bg-zinc-950/95"><span className="text-xs font-bold text-slate-500">本次批改补充要求 <span className="font-normal text-slate-400">（应用于所有已选题目）</span></span><textarea value={workflowState.assignment.note} onChange={event => updateAssignment({ note: event.target.value })} rows={3} placeholder="例如：开放题允许意思相近；明显划掉的内容不计入答案" className={`${inputClass} resize-none leading-6`} /></label>
+                <label className="space-y-2 border-t border-slate-200 pt-4 lg:col-span-2 dark:border-zinc-800"><span className="text-xs font-bold text-slate-500">本次批改补充要求 <span className="font-normal text-slate-400">（应用于所有已选题目）</span></span><textarea value={workflowState.assignment.note} onChange={event => updateAssignment({ note: event.target.value })} rows={3} placeholder="例如：开放题允许意思相近；明显划掉的内容不计入答案" className={`${inputClass} resize-none leading-6`} /></label>
               </div> : !isAnalyzing ? <p className="mt-4 text-sm text-slate-500">材料解析完成后，点击“开始拆题”识别作业结构。</p> : null}
             </section> : null}
             {!assignmentAnalysis ? <label className="mt-5 block space-y-2"><span className="text-xs font-bold text-slate-500">作业内容补充</span><textarea value={workflowState.assignment.note} onChange={event => updateAssignment({ note: event.target.value })} rows={3} placeholder="没有电子题目时，可在这里补充作业内容" className={`${inputClass} resize-none leading-6`} /></label> : null}
@@ -1331,7 +1362,7 @@ export default function GradingWorkflow({
             <aside className={`${panelClass} overflow-hidden`}><div className="border-b border-slate-200/70 p-4 dark:border-zinc-800"><h2 className="font-black">第 {questionNumber} 题代表样本</h2><p className="mt-1 text-xs text-slate-500">已确认 {currentQuestionState.calibrationSamples.filter(sample => sample.status === 'confirmed').length} / {currentQuestionState.sampleTarget}</p></div>{currentQuestionState.calibrationSamples.slice(0, currentQuestionState.sampleTarget).map(sample => <button key={sample.id} type="button" onClick={() => selectSample(sample)} className={`w-full border-b border-slate-200/60 p-4 text-left last:border-0 dark:border-zinc-800/70 ${sample.id === selectedSample.id ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'hover:bg-slate-50 dark:hover:bg-zinc-900'}`}><div className="flex items-center justify-between gap-2"><strong className="text-sm">{sample.studentName}</strong>{sample.status === 'confirmed' ? <CheckCircle2 className="h-4 w-4 text-emerald-700" /> : null}</div><div className="mt-2 flex items-center justify-between text-xs"><span className="text-slate-500">{sampleTypeLabel[sample.sampleType]}</span><span className={sample.gradingConfidence < lowConfidenceThreshold ? 'font-bold text-rose-700' : 'text-slate-400'}>{Math.round(sample.gradingConfidence * 100)}%</span></div></button>)}</aside>
             <div className="space-y-4">
               <div className="grid gap-3 lg:grid-cols-2">
-                <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><FileImage className="h-4 w-4 text-emerald-700" />本题答卷截图</h3>{selectedSample.sourcePreviewUrl ? <span className="text-xs font-bold text-emerald-700">点击图片放大</span> : <span className="text-xs text-slate-400">可核对</span>}</div>{selectedSample.sourcePreviewUrl ? selectedSample.sourcePreviewType === 'image' ? <a href={selectedSample.sourcePreviewUrl} target="_blank" rel="noreferrer" className="mt-4 flex min-h-56 cursor-zoom-in items-center justify-center bg-slate-50 p-3 dark:bg-zinc-950"><img src={selectedSample.sourcePreviewUrl} alt={`${selectedSample.studentName} 本题答卷截图`} className="max-h-[520px] max-w-full border border-slate-200 bg-white object-contain" /></a> : <object data={selectedSample.sourcePreviewUrl} type="application/pdf" className="mt-4 h-[520px] w-full border border-slate-200 bg-white"><a href={selectedSample.sourcePreviewUrl} target="_blank" rel="noreferrer" className="p-4 text-sm font-bold text-emerald-700">打开 {selectedSample.sourceFileName}</a></object> : <div className="relative mx-auto mt-4 min-h-64 max-w-xs border border-slate-300 bg-[#fffdf7] p-5 shadow-sm"><span className="absolute right-4 top-3 font-mono text-xs text-slate-500">{selectedSample.studentNo.slice(-4)}</span><p className="mt-8 font-serif text-sm leading-8 text-slate-700">{selectedSample.ocrText}</p></div>}</section>
+                <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><FileImage className="h-4 w-4 text-emerald-700" />本题答卷截图</h3>{selectedSample.sourcePreviewUrl ? <span className="text-xs font-bold text-emerald-700">点击图片放大</span> : <span className="text-xs text-slate-400">可核对</span>}</div>{selectedSample.sourcePreviewUrl ? selectedSample.sourcePreviewType === 'image' ? <a href={selectedSample.sourcePreviewUrl} target="_blank" rel="noreferrer" className="mt-4 flex min-h-56 cursor-zoom-in items-center justify-center overflow-auto bg-slate-50 p-3 dark:bg-zinc-950"><img src={selectedSample.sourcePreviewUrl} alt={`${selectedSample.studentName} 本题答卷截图`} className="min-w-72 max-h-[520px] max-w-full border border-slate-200 bg-white object-contain" /></a> : <object data={selectedSample.sourcePreviewUrl} type="application/pdf" className="mt-4 h-[520px] w-full border border-slate-200 bg-white"><a href={selectedSample.sourcePreviewUrl} target="_blank" rel="noreferrer" className="p-4 text-sm font-bold text-emerald-700">打开 {selectedSample.sourceFileName}</a></object> : <div className="relative mx-auto mt-4 min-h-64 max-w-xs border border-slate-300 bg-[#fffdf7] p-5 shadow-sm"><span className="absolute right-4 top-3 font-mono text-xs text-slate-500">{selectedSample.studentNo.slice(-4)}</span><p className="mt-8 font-serif text-sm leading-8 text-slate-700">{selectedSample.ocrText}</p></div>}</section>
                 <section className={`${panelClass} min-h-80 p-4`}><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-black"><ScanLine className="h-4 w-4 text-emerald-700" />{selectedSample.ocrSource === 'choice-vision' ? '视觉识别结果' : selectedSample.ocrSource === 'luna' ? 'Luna 主识别' : 'PaddleOCR 主识别'}</h3><span className={`rounded-xl px-2 py-1 text-xs font-bold ${selectedSample.needsTeacherReview || selectedSample.ocrConfidence < ocrHumanReviewThreshold ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600'}`}>{selectedSample.needsTeacherReview ? '待核验 · ' : ''}{Math.round(selectedSample.ocrConfidence * 100)}%</span></div><textarea value={editedOcr} onChange={event => setEditedOcr(event.target.value)} rows={9} className={`${inputClass} mt-4 resize-none leading-7`} />{selectedSample.ocrSource !== 'choice-vision' && selectedSample.lunaReviewText ? <div className={`mt-3 rounded-lg border p-3 text-xs leading-5 ${selectedSample.recognitionConflict ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}><strong>Luna 视觉复核{selectedSample.recognitionConflict ? ' · 与 PaddleOCR 有差异' : ''}</strong><p className="mt-1 whitespace-pre-line">{selectedSample.lunaReviewText}</p></div> : null}<button type="button" disabled={ocrCorrectionPhase === 'saving'} onClick={() => void saveOcrCorrection()} className="mt-3 rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-50 dark:border-zinc-700">{ocrCorrectionPhase === 'saving' ? '正在保存并重新评分...' : '保存修正并重新评分'}</button></section>
               </div>
               <section className={`${panelClass} p-5`}>
