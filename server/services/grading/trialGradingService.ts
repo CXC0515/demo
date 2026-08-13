@@ -6,7 +6,7 @@
 import { CalibrationSample } from '../../../src/domain/types';
 import { ModelConfig } from '../../config/modelConfig';
 import { StoredMaterial } from '../../repositories/materialRepository';
-import { getVisionValidationResult } from '../../repositories/visionValidationRepository';
+import { getVisionValidationResult, NON_CHOICE_RECOGNITION_VERSION } from '../../repositories/visionValidationRepository';
 import { TrialGradingRequest } from '../../schemas/trialGrading';
 import { OpenAICompatibleTrialGrader } from './OpenAICompatibleTrialGrader';
 import { getObservedAnswer, recognitionTextsConflict, resolveTrialConfidence, resolveTrialScore, trialNeedsTeacherReview } from './trialScore';
@@ -49,6 +49,13 @@ export const gradeTrialSubmissions = async (
     const needsTeacherReview = correctedText === undefined ? trialNeedsTeacherReview(modelSample.needsTeacherReview, visionItem) : modelSample.needsTeacherReview;
     const scoreRatio = question.fullScore > 0 && score !== null ? score / question.fullScore : 0;
     const sampleType: CalibrationSample['sampleType'] = needsTeacherReview || gradingConfidence < 0.65 ? 'ocr-risk' : scoreRatio >= 0.8 ? 'high' : scoreRatio <= 0.4 ? 'low' : 'middle';
+    const reviewTriggers: NonNullable<CalibrationSample['reviewTriggers']> = [
+      ...(visionItem.locationStatus !== 'located' || visionItem.locationReasons.length ? ['answer-region' as const] : []),
+      ...(recognitionConflict ? ['recognition-conflict' as const] : []),
+      ...(visionItem.needsReview && visionItem.crossedOutText.length ? ['crossed-out' as const] : []),
+      ...(gradingConfidence < 0.65 ? ['low-confidence' as const] : []),
+      ...(score === null ? ['rubric-insufficient' as const] : [])
+    ];
     return {
       id: `${modelSample.questionId}-${modelSample.assetId}`,
       questionId: modelSample.questionId,
@@ -68,12 +75,14 @@ export const gradeTrialSubmissions = async (
       fullScore: question.fullScore,
       gradingConfidence,
       needsTeacherReview,
+      reviewTriggers: [...new Set(reviewTriggers)],
+      reviewStatus: reviewTriggers.length ? 'pending' as const : undefined,
       matchedPoints,
       missedPoints,
       gradingReason: choiceIsCorrect === undefined ? modelSample.reason : choiceIsCorrect ? '识别选项与标准答案一致。' : '识别选项与标准答案不一致。',
       sourceAssetId: material.id,
       sourceFileName: `${material.fileName} · 第 ${question.displayNo} 题`,
-      sourcePreviewUrl: visionItem.cropUrl,
+      sourcePreviewUrl: `${visionItem.cropUrl}?v=${NON_CHOICE_RECOGNITION_VERSION}`,
       sourcePreviewType: 'image' as const,
       status: 'pending' as const,
       rubricVersion: question.rubricVersion

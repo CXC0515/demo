@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { CalibrationResultSource, CalibrationSample, DocumentAsset, FirstSectionAnalysis, GradingBatch, GradingDiagnosis, GradingMode, GradingQuestion, KnowledgeNode, NormalizedDocument, TaskQuestionRubric, TrialGradingQuestionInput, TrialGradingResult, TrialGradingSubmissionInput, VisionValidationResult } from '../domain/types';
+import { CalibrationResultSource, CalibrationSample, DocumentAsset, FirstSectionAnalysis, GradingBatch, GradingDiagnosis, GradingFeedbackReason, GradingMode, GradingQuestion, GradingReviewDecision, KnowledgeNode, NormalizedDocument, TaskQuestionRubric, TrialGradingQuestionInput, TrialGradingResult, TrialGradingSubmissionInput, VisionValidationResult } from '../domain/types';
 
 const readErrorCode = async (response: Response) => {
   const body = await response.json().catch(() => ({})) as { code?: string };
@@ -130,11 +130,11 @@ export const correctTrialOcr = async (taskId: string, sampleId: string, correcte
   return body.sample;
 };
 
-export const saveTeacherReview = async (taskId: string, sampleId: string, finalScore: number, reason: string, resultSource: CalibrationResultSource, correctedText?: string) => {
+export const saveTeacherReview = async (taskId: string, sampleId: string, finalScore: number, reason: string, resultSource: CalibrationResultSource, correctedText?: string, reviewDecision?: GradingReviewDecision, feedbackReasons?: GradingFeedbackReason[]) => {
   const response = await fetch(`/api/grading-tasks/${taskId}/trial-grading/${encodeURIComponent(sampleId)}/teacher-review`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ finalScore, reason, resultSource, correctedText })
+    body: JSON.stringify({ finalScore, reason, resultSource, correctedText, reviewDecision, feedbackReasons })
   });
   if (!response.ok) throw new Error(await readErrorCode(response));
   return (await response.json() as { sample: CalibrationSample }).sample;
@@ -154,6 +154,12 @@ export const startBatchGrading = async (taskId: string, mode: GradingMode, quest
 
 export const setBatchGradingAction = async (taskId: string, action: 'pause' | 'resume') => {
   const response = await fetch(`/api/grading-tasks/${taskId}/batch-grading/${action}`, { method: 'POST' });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { batch: GradingBatch }).batch;
+};
+
+export const confirmBatchStudents = async (taskId: string, studentIds: string[]) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/batch-grading/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentIds }) });
   if (!response.ok) throw new Error(await readErrorCode(response));
   return (await response.json() as { batch: GradingBatch }).batch;
 };

@@ -142,6 +142,9 @@ export interface WorkbenchTask {
 
 export type GradingMode = 'per-submission' | 'batch-checkpoint' | 'auto-continue';
 export type CalibrationResultSource = 'ai-confirmed' | 'teacher-adjusted' | 'teacher-manual';
+export type GradingReviewTrigger = 'answer-region' | 'recognition-conflict' | 'crossed-out' | 'low-confidence' | 'rubric-insufficient';
+export type GradingReviewDecision = 'confirmed-score' | 'corrected-recognition' | 'adjusted-score' | 'deferred';
+export type GradingFeedbackReason = 'answer-region-incomplete' | 'recognition-error' | 'crossed-out-error' | 'rubric-missing' | 'rubric-judgment-error' | 'score-too-high' | 'score-too-low' | 'other';
 
 export interface SubmissionPage {
   id: string;
@@ -193,6 +196,11 @@ export interface CalibrationSample {
   teacherScore?: number;
   teacherReason?: string;
   isFinal?: boolean;
+  reviewTriggers?: GradingReviewTrigger[];
+  reviewStatus?: 'pending' | 'resolved' | 'deferred';
+  reviewDecision?: GradingReviewDecision;
+  feedbackReasons?: GradingFeedbackReason[];
+  reviewedAt?: string;
   rubricVersion: number;
 }
 
@@ -562,6 +570,8 @@ export interface GradingBatch {
   totalStudents: number;
   processedStudents: number;
   failedStudentIds: string[];
+  studentIds: string[];
+  confirmedStudentIds: string[];
   startedAt?: string;
   completedAt?: string;
   updatedAt: string;

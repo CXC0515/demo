@@ -569,11 +569,25 @@ export const createVisionLocatedRegions = async (
     const visualEvidenceRegion = usableEvidencePlans.length
       ? unionRegions(usableEvidencePlans.map(plan => plan.visualRegion))
       : visualQuestion;
+    const numberedPaddleText = artifact
+      ? paddleTextForQuestion(artifact, page.pageNumber, questionRegion, displayNo)
+      : '';
+    const overlappingPaddleText = artifact
+      ? paddleTextInsideRegion(artifact, page.pageNumber, visualEvidenceRegion)
+      : '';
+    const overlappingStartsWithAnotherQuestion = overlappingPaddleText
+      .split(/\r?\n/)
+      .some(line => {
+        const number = line.trim().match(/^(\d+)(?:\s|[.、])/u)?.[1];
+        return number !== undefined && number !== displayNo;
+      });
     const paddleText = evidenceUnits.length && evidenceUnits.every(unit => unit.kind === 'choice')
       ? evidencePaddleText
       : artifact
-        ? paddleTextForQuestion(artifact, page.pageNumber, questionRegion, displayNo)
-          || paddleTextInsideRegion(artifact, page.pageNumber, visualEvidenceRegion)
+        ? numberedPaddleText
+          || (paddleChoice || paddleQuestion || usingPaddleFallback
+            ? overlappingPaddleText
+            : overlappingStartsWithAnotherQuestion ? '' : overlappingPaddleText)
           || evidencePaddleText
         : evidencePaddleText;
     return {

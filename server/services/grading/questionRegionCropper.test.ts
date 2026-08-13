@@ -164,6 +164,46 @@ test('splits a merged Paddle block using image rows instead of averaged coordina
   }
 });
 
+test('does not attach an adjacent numbered Paddle block to a vision-located answer region', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [{
+          block_label: 'text',
+          block_content: '8. 上一题的大段作答\n仍然属于上一题',
+          block_bbox: [130, 230, 650, 390],
+          block_id: 1
+        }]
+      }
+    }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['9'],
+      new Map([['9', ['9-answer']]]),
+      [located({
+        displayNo: '9',
+        boundingBox: { x: 0.15, y: 0.25, width: 0.7, height: 0.18 },
+        evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '9-answer', boundingBox: { x: 0.2, y: 0.28, width: 0.5, height: 0.08 } }]
+      })],
+      artifact
+    );
+    assert.equal(region.locatorSource, 'vision-layout');
+    assert.equal(region.paddleText, '');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
 test('rejects numbered instructions and uses the Paddle choice row on another page', async () => {
   const first = await makeChoicePage(1);
   const second = await makeChoicePage(2);

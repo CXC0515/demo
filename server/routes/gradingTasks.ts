@@ -70,8 +70,12 @@ const teacherReviewSchema = z.object({
   finalScore: z.number().nonnegative(),
   reason: z.string().trim().min(1).max(2_000),
   resultSource: z.enum(['ai-confirmed', 'teacher-adjusted', 'teacher-manual']),
-  correctedText: z.string().max(10_000).optional()
+  correctedText: z.string().max(10_000).optional(),
+  reviewDecision: z.enum(['confirmed-score', 'corrected-recognition', 'adjusted-score', 'deferred']).optional(),
+  feedbackReasons: z.array(z.enum(['answer-region-incomplete', 'recognition-error', 'crossed-out-error', 'rubric-missing', 'rubric-judgment-error', 'score-too-high', 'score-too-low', 'other'])).max(8).optional()
 });
+
+const batchConfirmationSchema = z.object({ studentIds: z.array(z.string().min(1)).min(1).max(50) });
 
 const batchRequestSchema = trialGradingRequestSchema.extend({
   mode: z.enum(['per-submission', 'batch-checkpoint', 'auto-continue'])
@@ -529,8 +533,10 @@ router.put('/:taskId/trial-grading/:sampleId/ocr-correction', async (request, re
       ? new Map<string, string>()
       : new Map([[`${parsed.data.submission.assetId}:${parsed.data.question.displayNo}`, parsed.data.correctedText]]);
     const [rescored] = await gradeTrialSubmissions(request.params.taskId, correctionRequest, getMaterials(request.params.taskId), config, overrides);
-    const updated = { ...rescored, status: current.status, resultSource: current.resultSource, teacherScore: current.teacherScore, teacherReason: current.teacherReason, isFinal: current.isFinal };
-    const result = saveTrialGradingResult({ ...existing, samples: existing.samples.map(sample => sample.id === current.id ? updated : sample), createdAt: new Date().toISOString() });
+    const updated = { ...rescored, status: current.status, resultSource: current.resultSource, teacherScore: current.teacherScore, teacherReason: current.teacherReason, isFinal: current.isFinal, reviewStatus: current.reviewStatus, reviewDecision: current.reviewDecision, feedbackReasons: current.feedbackReasons };
+    const latest = getTrialGradingResult(request.params.taskId);
+    if (!latest?.samples.some(sample => sample.id === current.id)) { response.status(409).json({ code: 'TRIAL_RESULT_CHANGED' }); return; }
+    const result = saveTrialGradingResult({ ...latest, samples: latest.samples.map(sample => sample.id === current.id ? updated : sample), createdAt: new Date().toISOString() });
     response.json({ sample: updated, result });
   } catch (error) {
     console.error(JSON.stringify({ event: 'ocr_correction_rescore_failed', taskId: request.params.taskId, sampleId: request.params.sampleId, error: error instanceof Error ? error.message : String(error) }));
@@ -556,7 +562,8 @@ router.put('/:taskId/trial-grading/:sampleId/teacher-review', (request, response
 });
 
 router.get('/:taskId/batch-grading', (request, response) => {
-  response.json({ batch: getGradingBatch(request.params.taskId) ?? { taskId: request.params.taskId, status: 'idle', mode: 'batch-checkpoint', totalStudents: 0, processedStudents: 0, failedStudentIds: [], updatedAt: new Date().toISOString() } });
+  const stored = getGradingBatch(request.params.taskId);
+  response.json({ batch: stored ? { ...stored, studentIds: stored.studentIds ?? [], confirmedStudentIds: stored.confirmedStudentIds ?? [] } : { taskId: request.params.taskId, status: 'idle', mode: 'batch-checkpoint', totalStudents: 0, processedStudents: 0, failedStudentIds: [], studentIds: [], confirmedStudentIds: [], updatedAt: new Date().toISOString() } });
 });
 
 router.post('/:taskId/batch-grading/start', async (request, response) => {
@@ -565,7 +572,9 @@ router.post('/:taskId/batch-grading/start', async (request, response) => {
   if (!parsed.success) { response.status(400).json({ code: 'INVALID_BATCH_GRADING_REQUEST' }); return; }
   if (!isModelConfigured(config)) { response.status(503).json({ code: 'MODEL_NOT_CONFIGURED' }); return; }
   const startedAt = new Date().toISOString();
-  saveGradingBatch({ taskId: request.params.taskId, status: 'running', mode: parsed.data.mode as GradingMode, totalStudents: parsed.data.submissions.length, processedStudents: 0, failedStudentIds: [], startedAt, updatedAt: startedAt });
+  const studentIds = parsed.data.submissions.map(item => item.studentId);
+  const previousConfirmed = getGradingBatch(request.params.taskId)?.confirmedStudentIds ?? [];
+  saveGradingBatch({ taskId: request.params.taskId, status: 'running', mode: parsed.data.mode as GradingMode, totalStudents: parsed.data.submissions.length, processedStudents: 0, failedStudentIds: [], studentIds, confirmedStudentIds: previousConfirmed.filter(id => studentIds.includes(id)), startedAt, updatedAt: startedAt });
   try {
     const existing = getTrialGradingResult(request.params.taskId);
     const missing = findSubmissionsNeedingTrialGrading(existing, parsed.data);
@@ -581,12 +590,24 @@ router.post('/:taskId/batch-grading/start', async (request, response) => {
     }
     const result = saveTrialGradingResult({ taskId: request.params.taskId, model: config.visionModel, samples: mergeCurrentTrialSamples(existing, parsed.data, refreshed), createdAt: new Date().toISOString() });
     const completedAt = new Date().toISOString();
-    const batch = saveGradingBatch({ taskId: request.params.taskId, status: failedStudentIds.length ? 'failed' : 'completed', mode: parsed.data.mode as GradingMode, totalStudents: parsed.data.submissions.length, processedStudents: parsed.data.submissions.length, failedStudentIds, startedAt, completedAt, updatedAt: completedAt });
+    const currentBatch = getGradingBatch(request.params.taskId)!;
+    const autoConfirmed = parsed.data.mode === 'auto-continue'
+      ? studentIds.filter(studentId => !result.samples.some(sample => sample.studentId === studentId && sample.reviewTriggers?.length))
+      : currentBatch.confirmedStudentIds;
+    const batch = saveGradingBatch({ ...currentBatch, status: failedStudentIds.length ? 'failed' : 'completed', mode: parsed.data.mode as GradingMode, totalStudents: parsed.data.submissions.length, processedStudents: parsed.data.submissions.length, failedStudentIds, studentIds, confirmedStudentIds: [...new Set(autoConfirmed)], startedAt, completedAt, updatedAt: completedAt });
     response.json({ batch, result });
   } catch (error) {
-    const batch = saveGradingBatch({ taskId: request.params.taskId, status: 'failed', mode: parsed.data.mode as GradingMode, totalStudents: parsed.data.submissions.length, processedStudents: 0, failedStudentIds: parsed.data.submissions.map(item => item.studentId), startedAt, updatedAt: new Date().toISOString() });
+    const batch = saveGradingBatch({ taskId: request.params.taskId, status: 'failed', mode: parsed.data.mode as GradingMode, totalStudents: parsed.data.submissions.length, processedStudents: 0, failedStudentIds: parsed.data.submissions.map(item => item.studentId), studentIds, confirmedStudentIds: previousConfirmed.filter(id => studentIds.includes(id)), startedAt, updatedAt: new Date().toISOString() });
     response.status(502).json({ code: 'BATCH_GRADING_FAILED', batch });
   }
+});
+
+router.post('/:taskId/batch-grading/confirm', (request, response) => {
+  const parsed = batchConfirmationSchema.safeParse(request.body);
+  const current = getGradingBatch(request.params.taskId);
+  if (!parsed.success || !current) { response.status(400).json({ code: 'INVALID_BATCH_CONFIRMATION' }); return; }
+  const confirmedStudentIds = [...new Set([...(current.confirmedStudentIds ?? []), ...parsed.data.studentIds.filter(id => (current.studentIds ?? []).includes(id))])];
+  response.json({ batch: saveGradingBatch({ ...current, confirmedStudentIds, updatedAt: new Date().toISOString() }) });
 });
 
 router.post('/:taskId/batch-grading/:action', (request, response) => {

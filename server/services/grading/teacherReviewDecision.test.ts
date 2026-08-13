@@ -27,3 +27,17 @@ test('rejects invalid teacher and AI-confirmed scores', () => {
   assert.throws(() => applyTeacherReviewDecision(sample, { finalScore: 4, reason: '超分', resultSource: 'teacher-manual' }), /TEACHER_SCORE_EXCEEDS_FULL_SCORE/);
   assert.throws(() => applyTeacherReviewDecision(sample, { finalScore: 1, reason: '不一致', resultSource: 'ai-confirmed' }), /AI_SCORE_CONFIRMATION_MISMATCH/);
 });
+
+test('records an anomaly review decision separately from an ordinary trial confirmation', () => {
+  const result = applyTeacherReviewDecision(sample, {
+    finalScore: 2,
+    reason: '原图与识别一致',
+    resultSource: 'ai-confirmed',
+    reviewDecision: 'confirmed-score',
+    feedbackReasons: ['recognition-error']
+  });
+  assert.equal(result.reviewStatus, 'resolved');
+  assert.equal(result.reviewDecision, 'confirmed-score');
+  assert.deepEqual(result.feedbackReasons, ['recognition-error']);
+  assert.ok(result.reviewedAt);
+});
