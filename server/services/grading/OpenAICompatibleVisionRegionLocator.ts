@@ -20,7 +20,8 @@ export class OpenAICompatibleVisionRegionLocator {
     layoutHints: Array<{
       text: string;
       boundingBox: { x: number; y: number; width: number; height: number };
-    }> = []
+    }> = [],
+    retryInvalidOutput = true
   ) {
     const questions = analysis.questions
       .filter(question => questionNos.includes(question.displayNo))
@@ -70,6 +71,11 @@ export class OpenAICompatibleVisionRegionLocator {
     const payload = await response.json() as { choices?: { message?: { content?: string } }[] };
     const content = payload.choices?.[0]?.message?.content;
     if (!content) throw new Error('MODEL_EMPTY_RESPONSE');
-    return visionRegionLocatorOutputSchema.parse(extractJson(content));
+    try {
+      return visionRegionLocatorOutputSchema.parse(extractJson(content));
+    } catch (error) {
+      if (retryInvalidOutput) return this.locate(sourceImagePath, questionNos, analysis, layoutHints, false);
+      throw error;
+    }
   }
 }

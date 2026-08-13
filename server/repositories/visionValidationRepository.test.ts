@@ -27,8 +27,8 @@ const item = (overrides: Partial<VisionValidationItem> = {}): VisionValidationIt
   ...overrides
 });
 
-test('invalidates old non-choice results without invalidating choice results', () => {
+test('invalidates every result from an older recognition pipeline', () => {
   assert.equal(isVisionValidationItemCurrent(item()), false);
   assert.equal(isVisionValidationItemCurrent(item({ pipelineVersion: NON_CHOICE_RECOGNITION_VERSION })), true);
-  assert.equal(isVisionValidationItemCurrent(item({ evidenceUnits: [{ kind: 'choice' } as never] })), true);
+  assert.equal(isVisionValidationItemCurrent(item({ evidenceUnits: [{ kind: 'choice' } as never] })), false);
 });

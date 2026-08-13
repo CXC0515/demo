@@ -22,9 +22,6 @@ interface AnalyzerDocument {
   blocks: { id: string; text: string; listLabel?: string }[];
 }
 
-const questionBatchSize = 6;
-
-
 export class OpenAICompatibleQuestionAnalyzer {
   constructor(private readonly config: ModelConfig) {}
 
@@ -40,32 +37,45 @@ export class OpenAICompatibleQuestionAnalyzer {
       }))
     }] : []);
     const catalog = knowledgeCatalog.map(item => `${item.id}\t${item.type}\t${item.name}\t${item.description}`).join('\n');
-    const questionNos = [...new Set(documents
-      .filter(document => document.kind === 'assignment')
-      .flatMap(document => document.blocks)
-      .map(block => block.listLabel?.match(/^(\d{1,3})/)?.[1] ?? block.text.trim().match(/^(\d{1,3})[.．、]\s*/)?.[1])
-      .filter((value): value is string => Boolean(value)))]
-      .sort((first, second) => Number(first) - Number(second));
-    const batches = questionNos.length
-      ? Array.from({ length: Math.ceil(questionNos.length / questionBatchSize) }, (_, index) => questionNos.slice(index * questionBatchSize, (index + 1) * questionBatchSize))
-      : [[]];
-    const results = await Promise.all(batches.map(batch => this.analyzeBatch(documents, catalog, batch)));
+    const result = await this.analyzeDocuments(documents, catalog);
+    const blocksByDocument = new Map(documents.map(document => [
+      `${document.kind}:${document.assetId}`,
+      new Map(document.blocks.map(block => [block.id, block.text]))
+    ]));
+    const authoritativeQuote = (source: typeof result.questions[number]['questionSource']) => {
+      if (!source) return '';
+      const blocks = blocksByDocument.get(`${source.assetKind}:${source.assetId}`);
+      const quote = source.blockIds.map(id => blocks?.get(id)).filter((text): text is string => Boolean(text?.trim())).join('\n').trim();
+      return quote || source.quote.trim();
+    };
+    const useSourceText = <T extends typeof result.questions[number] | typeof result.questions[number]['subquestions'][number]>(question: T): T => {
+      const questionQuote = authoritativeQuote(question.questionSource);
+      const answerQuote = question.answerSource ? authoritativeQuote(question.answerSource) : '';
+      return {
+        ...question,
+        stem: questionQuote || question.stem,
+        standardAnswer: answerQuote || question.standardAnswer,
+        questionSource: { ...question.questionSource, quote: questionQuote || question.questionSource.quote },
+        answerSource: question.answerSource ? { ...question.answerSource, quote: answerQuote || question.answerSource.quote } : null
+      };
+    };
     return {
       scope: '整份作业' as const,
-      questions: results.flatMap((result, index) => {
-        const requested = new Set(batches[index]);
-        return requested.size ? result.questions.filter(question => requested.has(question.displayNo)) : result.questions;
-      })
+      questions: result.questions.map(question => ({
+        ...useSourceText(question),
+        subquestions: question.subquestions.map(useSourceText)
+      }))
     };
   }
 
-  private async analyzeBatch(documents: AnalyzerDocument[], catalog: string, questionNos: string[]) {
+  private async analyzeDocuments(documents: AnalyzerDocument[], catalog: string) {
     const prompt = [
-      '你是作业结构化分析器。题目和参考答案材料均已完整提供。',
-      questionNos.length ? `本次只处理这些一级题：${questionNos.join('、')}。不得输出其他题号。` : '识别材料中的全部一级题。',
+      '你是作业结构化分析器。题目和参考答案材料均已完整提供，本次只调用一次完成整份材料的对应。',
+      '题目原文、参考答案原文及其 block id 是权威数据。你只负责识别题号层级、题型、题目与答案对应关系、评分依据和知识点，不得缩写、概括、润色或补写题干与答案。',
+      '识别材料中的全部一级题，不得按章节、题型或前若干题截断。',
       '一级题放在 questions；明确子题放在对应 subquestions。按原题号和原始顺序输出。',
       'subquestions 中每个小题必须返回与一级题相同的全部字段：displayNo、title、stem、score、questionType、answerRequirement、standardAnswer、explanation、rubricPoints、knowledgeCandidates、questionSource、answerSource、confidence、reviewReasons。不得使用简写对象；小题来源无法单独定位时沿用父题来源。',
-      '题干、答案和证据 quote 必须来自输入原文。无法确定时保留空字符串或 null，并写入 reviewReasons，禁止猜测。',
+      'stem 必须逐字复制 questionSource.blockIds 对应的完整原文；standardAnswer 必须逐字复制 answerSource.blockIds 对应的完整原文。无法确定时保留空字符串或 null，并写入 reviewReasons，禁止猜测。',
       'standardAnswer 与答案材料按题号对应；答案为“略”时原样保留。rubricPoints 只能依据明确答案、分值或可直接推出的得分要求生成。',
       '同一道题的答案若由连续多个段落或多个示例组成，standardAnswer、answerSource.blockIds 和 answerSource.quote 必须包含下一道题开始前的全部内容，不得只取第一段或第一个示例。',
       'questionSource/answerSource 中 assetId、fileName、blockIds 必须引用输入中真实值；无法定位答案时 answerSource 为 null。',
@@ -86,7 +96,7 @@ export class OpenAICompatibleQuestionAnalyzer {
         ],
         reasoning_effort: 'low'
       }),
-      signal: AbortSignal.timeout(180_000)
+      signal: AbortSignal.timeout(300_000)
     });
     if (!response.ok) throw new Error(`MODEL_REQUEST_FAILED:${response.status}`);
     const payload = await response.json() as { choices?: { message?: { content?: string } }[] };

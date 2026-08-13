@@ -137,6 +137,7 @@ export interface WorkbenchTask {
   status: 'pending' | 'running' | 'completed' | 'error';
   progress?: number;
   selectedQuestionIds?: string[];
+  questionScopeConfirmedAt?: string;
 }
 
 export type GradingMode = 'per-submission' | 'batch-checkpoint' | 'auto-continue';

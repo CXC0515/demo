@@ -53,6 +53,7 @@ export const visionRecognitionOutputSchema = z.object({
     needsReview: z.boolean()
   }))
 });
+export type VisionRecognitionOutput = z.infer<typeof visionRecognitionOutputSchema>;
 
 export const visionRegionLocatorOutputSchema = z.object({
   items: z.array(z.object({

@@ -13,7 +13,7 @@ const taskSchema = z.object({
   node: z.enum(['setup', 'collection', 'upload', 'ocr', 'grading', 'verify', 'report', 'sync']),
   nodeName: z.string(), deadline: z.string(), createdAt: z.string(), collectionDeadlineAt: z.string(),
   status: z.enum(['pending', 'running', 'completed', 'error']), progress: z.number().optional(),
-  selectedQuestionIds: z.array(z.string().min(1)).optional()
+  selectedQuestionIds: z.array(z.string().min(1)).optional(), questionScopeConfirmedAt: z.string().datetime().optional()
 });
 
 router.get('/grading-task-list', (_request, response) => response.json({ tasks: listGradingTasks() }));

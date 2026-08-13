@@ -5,7 +5,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { ModelConfig } from '../../config/modelConfig';
-import { visionRecognitionOutputSchema } from '../../schemas/paddleParserArtifact';
+import { VisionRecognitionOutput, visionRecognitionOutputSchema } from '../../schemas/paddleParserArtifact';
 import { LocatedRegion } from './questionRegionCropper';
 import { extractJson } from '../model/extractJson';
 
@@ -30,7 +30,7 @@ export const buildRecognitionRegionPrompt = (region: LocatedRegion) => {
 export class OpenAICompatibleVisionRecognizer {
   constructor(private readonly config: ModelConfig) {}
 
-  async recognize(regions: LocatedRegion[]) {
+  async recognize(regions: LocatedRegion[], retryMissing = true): Promise<VisionRecognitionOutput> {
     const content: Array<Record<string, unknown>> = [{
       type: 'text',
       text: [
@@ -69,8 +69,17 @@ export class OpenAICompatibleVisionRecognizer {
     if (!responseContent) throw new Error('MODEL_EMPTY_RESPONSE');
     const parsed = visionRecognitionOutputSchema.parse(extractJson(responseContent));
     const regionByNo = new Map(regions.map(region => [region.displayNo, region]));
+    const returnedNumbers = new Set(parsed.items.map(item => item.displayNo));
+    const missingNumbers = regions.map(region => region.displayNo).filter(displayNo => !returnedNumbers.has(displayNo));
+    const retriedItems = missingNumbers.length && retryMissing
+      ? (await this.recognize(regions.filter(region => missingNumbers.includes(region.displayNo)), false)).items
+      : [];
+    const allItems = [...parsed.items, ...retriedItems];
+    const completedNumbers = new Set(allItems.map(item => item.displayNo));
+    const stillMissing = regions.map(region => region.displayNo).filter(displayNo => !completedNumbers.has(displayNo));
+    if (stillMissing.length) throw new Error(`VISION_RECOGNITION_INCOMPLETE:${stillMissing.join(',')}`);
     return {
-      items: parsed.items.filter(item => regionByNo.has(item.displayNo)).map(item => {
+      items: allItems.filter(item => regionByNo.has(item.displayNo)).map(item => {
         const recognizedAnswer = getWholeQuestionAnswer(item.recognizedAnswer, item.answerFields);
         return {
           ...item,

@@ -16,6 +16,7 @@ import { appendMaterials, getMaterials, removeMaterialsForKind, replaceMaterials
 import { getTaskRubrics, saveTaskRubric } from '../repositories/gradingRubricRepository';
 import { deleteGradingBatch, getGradingBatch, saveGradingBatch } from '../repositories/gradingBatchRepository';
 import { getParserArtifact } from '../repositories/parserArtifactRepository';
+import { recordGradingError } from '../repositories/gradingErrorRepository';
 import { deleteTrialGradingResult, getTrialGradingResult, invalidateAiGradingForAsset, saveTrialGradingResult } from '../repositories/trialGradingRepository';
 import { deleteVisionValidationForTask, getVisionValidationResult, NON_CHOICE_RECOGNITION_VERSION, saveVisionValidationResult } from '../repositories/visionValidationRepository';
 import { paddleParserArtifactSchema, visionValidationRequestSchema } from '../schemas/paddleParserArtifact';
@@ -275,43 +276,74 @@ router.post('/:taskId/vision-validation', async (request, response) => {
       pageNumber: resource.pageNumber!,
       sourceImagePath: path.resolve('var/uploads/parsed', material!.id, 'resources', resource.fileName)
     }));
-    const locator = new OpenAICompatibleVisionRegionLocator(config);
-    const locatedPages = await Promise.all(pageSources.map(async page => {
-      const artifactPage = parsedArtifact.data.pages.find(candidate => candidate.pageNumber === page.pageNumber);
-      const layoutHints = artifactPage?.prunedResult.parsing_res_list.map(block => {
-        const [left, top, right, bottom] = block.block_bbox;
-        return {
-          text: block.block_content.trim().slice(0, 160),
-          boundingBox: {
-            x: left / artifactPage.prunedResult.width,
-            y: top / artifactPage.prunedResult.height,
-            width: (right - left) / artifactPage.prunedResult.width,
-            height: (bottom - top) / artifactPage.prunedResult.height
-          }
-        };
-      }) ?? [];
-      const located = await locator.locate(page.sourceImagePath, parsedRequest.data.questionNos, analysis, layoutHints);
-      return located.items.map(item => ({ ...item, pageNumber: page.pageNumber }));
-    }));
     const expectedEvidenceIds = new Map(analysis.questions
       .filter(question => parsedRequest.data.questionNos.includes(question.displayNo))
-      .map(question => {
-        const fields = buildExpectedAnswerFields(question);
-        return [question.displayNo, fields.length ? fields.map(field => field.fieldId) : [`${question.displayNo}-answer`]];
-      }));
+      .map(question => [question.displayNo, [`${question.displayNo}-answer`]]));
     const expectedQuestionKinds = new Map(analysis.questions
       .filter(question => parsedRequest.data.questionNos.includes(question.displayNo))
       .map(question => [question.displayNo, /选择题/.test(question.questionType) ? 'choice' as const : 'text' as const]));
-    const regions = await createVisionLocatedRegions(
+    let regions = await createVisionLocatedRegions(
       request.params.taskId,
       material.id,
       pageSources,
       parsedRequest.data.questionNos,
       expectedEvidenceIds,
-      locatedPages.flat(),
+      [],
       parsedArtifact.data,
       expectedQuestionKinds
     );
+    const missingPaddleNumbers = regions
+      .filter(region => region.locationStatus === 'needs-teacher' && region.locationReasons.some(reason => reason.includes('视觉与 Paddle 均未定位')))
+      .map(region => region.displayNo);
+    if (missingPaddleNumbers.length) {
+      const locator = new OpenAICompatibleVisionRegionLocator(config);
+      const locatedPages = await Promise.all(pageSources.map(async page => {
+        const artifactPage = parsedArtifact.data.pages.find(candidate => candidate.pageNumber === page.pageNumber);
+        const layoutHints = artifactPage?.prunedResult.parsing_res_list.map(block => {
+          const [left, top, right, bottom] = block.block_bbox;
+          return {
+            text: block.block_content.trim().slice(0, 160),
+            boundingBox: {
+              x: left / artifactPage.prunedResult.width,
+              y: top / artifactPage.prunedResult.height,
+              width: (right - left) / artifactPage.prunedResult.width,
+              height: (bottom - top) / artifactPage.prunedResult.height
+            }
+          };
+        }) ?? [];
+        const located = await locator.locate(page.sourceImagePath, missingPaddleNumbers, analysis, layoutHints);
+        return located.items.map(item => ({ ...item, pageNumber: page.pageNumber }));
+      }));
+      const locatedCandidates = locatedPages.flat();
+      const sequenceFiltered = missingPaddleNumbers.flatMap(displayNo => {
+        const nextQuestionNo = analysis.questions.find(question => Number(question.displayNo) > Number(displayNo))?.displayNo;
+        if (!nextQuestionNo) return locatedCandidates.filter(item => item.displayNo === displayNo);
+        const candidates = locatedCandidates.filter(item => item.displayNo === displayNo);
+        const preceding = candidates.filter(candidate => {
+          const artifactPage = parsedArtifact.data.pages.find(page => page.pageNumber === candidate.pageNumber);
+          if (!artifactPage) return false;
+          const nextAnchor = artifactPage.prunedResult.parsing_res_list
+            .filter(block => block.block_content.trim().match(/^(\d+)(?:\s|[.、（(])/u)?.[1] === nextQuestionNo)
+            .sort((first, second) => first.block_bbox[1] - second.block_bbox[1])[0];
+          if (!nextAnchor) return true;
+          const anchorTop = nextAnchor.block_bbox[1] / artifactPage.prunedResult.height;
+          return candidate.boundingBox.y < anchorTop + 0.02;
+        });
+        return preceding.length ? preceding : candidates;
+      });
+      const recovered = await createVisionLocatedRegions(
+        request.params.taskId,
+        material.id,
+        pageSources,
+        missingPaddleNumbers,
+        expectedEvidenceIds,
+        sequenceFiltered,
+        parsedArtifact.data,
+        expectedQuestionKinds
+      );
+      const recoveredByNo = new Map(recovered.map(region => [region.displayNo, region]));
+      regions = regions.map(region => recoveredByNo.get(region.displayNo) ?? region);
+    }
     const recognizer = new OpenAICompatibleVisionRecognizer(config);
     const recognizableRegions = regions.filter(region => region.locationStatus === 'located');
     const recognition = await recognizer.recognize(recognizableRegions);
@@ -367,7 +399,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
           locationReasons: region.locationReasons,
           cropUrl: region.cropUrl,
           evidenceUnits,
-          paddleText: region.paddleText,
+          paddleText: region.locationStatus === 'located' ? region.paddleText : '',
           lunaText: structuredText,
           answerFields,
           crossedOutText: item?.crossedOutText ?? [],
@@ -384,6 +416,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
     invalidateAiGradingForAsset(request.params.taskId, material.id);
     response.json({ result });
   } catch (error) {
+    recordGradingError('vision_validation_failed', request.params.taskId, error, { assetId: parsedRequest.data.assetId, questionNos: parsedRequest.data.questionNos });
     console.error(JSON.stringify({ event: 'vision_validation_failed', taskId: request.params.taskId, assetId: parsedRequest.data.assetId, error: error instanceof Error ? error.message : String(error) }));
     const message = error instanceof Error ? error.message : 'VISION_VALIDATION_FAILED';
     response.status(502).json({ code: message.startsWith('MODEL_REQUEST_FAILED:') ? message : 'VISION_VALIDATION_OUTPUT_INVALID' });
@@ -615,11 +648,16 @@ router.post('/:taskId/trial-grading', async (request, response) => {
       response.json({ result });
       return;
     }
-    const refreshedSamples = [];
-    for (const submission of submissionsToGrade) {
+    const settled = await Promise.allSettled(submissionsToGrade.map(async submission => {
       const incrementalRequest = { ...parsed.data, submissions: [submission] };
-      refreshedSamples.push(...await gradeTrialSubmissions(request.params.taskId, incrementalRequest, materials, config));
+      return gradeTrialSubmissions(request.params.taskId, incrementalRequest, materials, config);
+    }));
+    const failed = settled.find((item): item is PromiseRejectedResult => item.status === 'rejected');
+    if (failed) {
+      const reason = failed.reason instanceof Error ? failed.reason.message : String(failed.reason);
+      throw new Error(reason);
     }
+    const refreshedSamples = settled.flatMap(item => item.status === 'fulfilled' ? item.value : []);
     const result: TrialGradingResult = {
       taskId: request.params.taskId,
       model: config.visionModel,
@@ -629,6 +667,7 @@ router.post('/:taskId/trial-grading', async (request, response) => {
     saveTrialGradingResult(result);
     response.json({ result });
   } catch (error) {
+    recordGradingError('trial_grading_failed', request.params.taskId, error, { submissionCount: parsed.data.submissions.length, questionCount: parsed.data.questions.length });
     console.error(JSON.stringify({ event: 'trial_grading_failed', taskId: request.params.taskId, error: error instanceof Error ? error.message : String(error) }));
     const message = error instanceof Error ? error.message : 'TRIAL_GRADING_FAILED';
     response.status(502).json({ code: message.startsWith('MODEL_REQUEST_FAILED:') ? message : 'TRIAL_GRADING_OUTPUT_INVALID' });

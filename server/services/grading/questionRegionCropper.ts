@@ -132,6 +132,20 @@ const choiceRowAcrossPages = (artifact: PaddleParserArtifact, displayNo: string)
   return undefined;
 };
 
+const questionPageFromPaddle = (
+  artifact: PaddleParserArtifact,
+  displayNo: string,
+  evidenceId: string,
+  kind: VisionEvidenceKind
+) => {
+  for (const page of [...artifact.pages].sort((a, b) => a.pageNumber - b.pageNumber)) {
+    const fullPage = { x: 0, y: 0, width: page.prunedResult.width, height: page.prunedResult.height };
+    const row = answerRowFromPaddle(artifact, page.pageNumber, displayNo, evidenceId, kind, fullPage);
+    if (row) return { pageNumber: page.pageNumber, row };
+  }
+  return undefined;
+};
+
 const extractPaddleFieldText = (line: string, marker: string) => {
   const start = line.indexOf(marker);
   if (start < 0) return line.trim();
@@ -199,7 +213,11 @@ const answerRowFromPaddle = (
   }
   const start = orderedBlocks
     .map((block, index) => ({ block, index }))
-    .filter(({ block }) => block.block_content.split(/\r?\n/).some(line => line.trim().match(/^(\d+)(?:\s|[.、])/i)?.[1] === displayNo))
+    .filter(({ block }) => block.block_content.split(/\r?\n/).some(line => {
+      const normalized = line.trim();
+      return normalized.match(/^(\d+)(?:\s|[.、])/i)?.[1] === displayNo
+        && (kind === 'choice' || !hasChoiceStructure(normalized));
+    }))
     .sort((first, second) => {
       const distance = ({ block }: typeof first) => {
         const [left, top, right, bottom] = block.block_bbox;
@@ -414,8 +432,15 @@ export const createVisionLocatedRegions = async (
       evidenceUnits: rawVision.evidenceUnits.map(unit => expectedKind === 'choice' ? { ...unit, kind: 'choice' as const } : unit)
     } : undefined;
     const visionIsChoice = Boolean(vision?.evidenceUnits.length && vision.evidenceUnits.every(unit => unit.kind === 'choice'));
-    const paddleChoice = visionIsChoice && artifact ? choiceRowAcrossPages(artifact, displayNo) : undefined;
-    const page = paddleChoice ? pageByNumber.get(paddleChoice.pageNumber) : vision ? pageByNumber.get(vision.pageNumber) : pageSources[0];
+    const firstExpectedId = (expectedEvidenceIds.get(displayNo) ?? [`${displayNo}-answer`])[0];
+    const paddleQuestion = !vision && artifact && expectedKind !== 'choice'
+      ? questionPageFromPaddle(artifact, displayNo, firstExpectedId, expectedKind ?? 'text')
+      : undefined;
+    const paddleChoice = (expectedKind === 'choice' || visionIsChoice) && artifact ? choiceRowAcrossPages(artifact, displayNo) : undefined;
+    const page = paddleChoice ? pageByNumber.get(paddleChoice.pageNumber)
+      : paddleQuestion ? pageByNumber.get(paddleQuestion.pageNumber)
+      : vision ? pageByNumber.get(vision.pageNumber)
+      : pageSources[0];
     if (!page) throw new Error('SOURCE_PAGE_NOT_FOUND');
     const metadata = await sharp(page.sourceImagePath).metadata();
     if (!metadata.width || !metadata.height) throw new Error('SOURCE_PAGE_INVALID');
@@ -428,9 +453,9 @@ export const createVisionLocatedRegions = async (
     const answerPanel = vision && artifact && vision.evidenceUnits.length === 1 && vision.evidenceUnits[0].evidenceId.endsWith('-answer')
       ? emptyPanelFromPaddle(artifact, page.pageNumber, visualQuestion)
       : undefined;
-    const paddleQuestionRow = artifact && !visionIsChoice
+    const paddleQuestionRow = expectedKind === 'choice' ? fallbackChoiceRow : paddleQuestion?.row ?? (!vision && artifact && !visionIsChoice
       ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, `${displayNo}-answer`, expectedKind ?? 'text', visualQuestion)
-      : undefined;
+      : undefined);
     const usingPaddleFallback = !vision && Boolean(artifact);
     const sourceEvidence = vision?.evidenceUnits ?? (artifact ? expectedIds.map(evidenceId => ({
       evidenceId,
@@ -443,7 +468,7 @@ export const createVisionLocatedRegions = async (
     })) : []);
     const evidencePlans = await Promise.all(sourceEvidence.map(async evidence => {
       const locatedRow = fallbackChoiceRow ?? (artifact ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, evidence.evidenceId, evidence.kind, visualQuestion) : undefined);
-      const usePaddleGeometry = locatedRow && (evidence.kind === 'choice' || locatedRow.lineCount === 1);
+      const usePaddleGeometry = Boolean(locatedRow);
       const paddleRow = usePaddleGeometry ? await alignBlockLineToInk(page.sourceImagePath, locatedRow) : undefined;
       return {
         evidence,
@@ -455,7 +480,10 @@ export const createVisionLocatedRegions = async (
     }));
     const usableEvidencePlans = usingPaddleFallback ? evidencePlans.filter(plan => plan.paddleRow) : evidencePlans;
     const paddleRows = usableEvidencePlans.flatMap(plan => plan.paddleRow ? [plan.paddleRow.region] : []);
-    const questionPixels = paddleQuestionRow?.region
+    const alignedChoiceRow = expectedKind === 'choice' && fallbackChoiceRow
+      ? await alignBlockLineToInk(page.sourceImagePath, fallbackChoiceRow)
+      : undefined;
+    const questionPixels = alignedChoiceRow?.region ?? paddleQuestionRow?.region
       ?? (paddleRows.length && (usingPaddleFallback || paddleRows.length === usableEvidencePlans.length)
         ? unionRegions(paddleRows)
         : answerPanel ?? visualQuestion);
@@ -533,7 +561,7 @@ export const createVisionLocatedRegions = async (
     return {
       displayNo,
       region: { ...questionRegion, pageNumber: page.pageNumber },
-      locatorSource: paddleChoice || (usingPaddleFallback && paddleRows.length) ? 'paddle-layout' : 'vision-layout',
+      locatorSource: paddleChoice || paddleQuestion || (usingPaddleFallback && paddleRows.length) ? 'paddle-layout' : 'vision-layout',
       locationStatus: locationReasons.length ? 'needs-teacher' : 'located',
       locationReasons,
       paddleText,

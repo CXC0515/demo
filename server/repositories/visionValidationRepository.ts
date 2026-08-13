@@ -21,12 +21,10 @@ const loadResults = () => {
 
 const results = loadResults();
 const keyFor = (taskId: string, assetId: string) => `${taskId}:${assetId}`;
-export const NON_CHOICE_RECOGNITION_VERSION = 3;
+export const NON_CHOICE_RECOGNITION_VERSION = 4;
 
-export const isVisionValidationItemCurrent = (item: VisionValidationResult['items'][number]) => {
-  const isChoice = Boolean(item.evidenceUnits?.length && item.evidenceUnits.every(unit => unit.kind === 'choice'));
-  return isChoice || item.pipelineVersion === NON_CHOICE_RECOGNITION_VERSION;
-};
+export const isVisionValidationItemCurrent = (item: VisionValidationResult['items'][number]) =>
+  item.pipelineVersion === NON_CHOICE_RECOGNITION_VERSION;
 
 const persist = () => {
   const temporary = `${dataPath}.tmp`;
