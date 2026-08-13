@@ -72,6 +72,16 @@ export const getTaskAnalysis = async (taskId: string) => {
   return body.analysis;
 };
 
+export const saveTaskQuestionCorrection = async (taskId: string, displayNo: string, correction: { title: string; stem: string; answerRequirement: string }) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/analysis/questions/${encodeURIComponent(displayNo)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(correction)
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { analysis: FirstSectionAnalysis }).analysis;
+};
+
 export const getTaskRubrics = async (taskId: string) => {
   const response = await fetch(`/api/grading-tasks/${taskId}/rubrics`);
   if (!response.ok) throw new Error(await readErrorCode(response));

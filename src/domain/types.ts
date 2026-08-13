@@ -488,6 +488,7 @@ export interface WorkflowState {
     questionFileNames: string[];
     answerFileNames: string[];
     note: string;
+    selectedQuestionIds?: string[];
     assets: DocumentAsset[];
     documents?: NormalizedDocument[];
     firstSectionAnalysis?: FirstSectionAnalysis;

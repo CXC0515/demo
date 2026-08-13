@@ -76,6 +76,12 @@ const batchRequestSchema = trialGradingRequestSchema.extend({
   mode: z.enum(['per-submission', 'batch-checkpoint', 'auto-continue'])
 });
 
+const analysisQuestionCorrectionSchema = z.object({
+  title: z.string().trim().min(1).max(500),
+  stem: z.string().trim().min(1).max(10_000),
+  answerRequirement: z.string().trim().max(2_000)
+});
+
 const evidenceCropQuerySchema = z.object({
   page: z.coerce.number().int().positive(),
   x: z.coerce.number().min(0).max(1),
@@ -434,6 +440,32 @@ router.get('/:taskId/analysis', (request, response) => {
   });
 });
 
+router.put('/:taskId/analysis/questions/:displayNo', (request, response) => {
+  const parsed = analysisQuestionCorrectionSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ code: 'INVALID_QUESTION_CORRECTION' });
+    return;
+  }
+  const analysis = getFirstSectionAnalysis(request.params.taskId);
+  if (!analysis) {
+    response.status(404).json({ code: 'ANALYSIS_NOT_FOUND' });
+    return;
+  }
+  const displayNo = decodeURIComponent(request.params.displayNo);
+  if (!analysis.questions.some(question => question.displayNo === displayNo)) {
+    response.status(404).json({ code: 'QUESTION_NOT_FOUND' });
+    return;
+  }
+  const updated = saveFirstSectionAnalysis({
+    ...analysis,
+    questions: analysis.questions.map(question => question.displayNo === displayNo ? { ...question, ...parsed.data } : question)
+  });
+  deleteTrialGradingResult(request.params.taskId);
+  deleteGradingBatch(request.params.taskId);
+  deleteVisionValidationForTask(request.params.taskId);
+  response.json({ analysis: updated });
+});
+
 router.get('/:taskId/trial-grading', (request, response) => {
   const result = getTrialGradingResult(request.params.taskId);
   if (!result) {
@@ -625,7 +657,7 @@ router.post('/:taskId/analysis', async (request, response) => {
   }
   try {
     const analyzer = new OpenAICompatibleQuestionAnalyzer(config);
-    const rawAnalysis = await analyzer.analyzeFirstSection(analysisMaterials, parsedCatalog.data);
+    const rawAnalysis = await analyzer.analyzeAssignment(analysisMaterials, parsedCatalog.data);
     const catalogById = new Map(parsedCatalog.data.map(node => [node.id, node]));
     const normalizeKnowledgeCandidates = (candidates: { nodeId: string; nodeName: string; confidence: number }[]) =>
       candidates.flatMap(candidate => {

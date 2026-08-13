@@ -62,7 +62,7 @@ import {
 } from '../../domain/types';
 import { orderCalibrationSamplesForTrial } from '../../domain/calibrationSamples';
 import SourceEvidenceViewer from './SourceEvidenceViewer';
-import { analyzeTaskMaterials, correctTrialOcr, getBatchGrading, getGradingDiagnosis, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, runVisionValidation, saveTaskRubric, saveTeacherReview, setBatchGradingAction, startBatchGrading, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
+import { analyzeTaskMaterials, correctTrialOcr, getBatchGrading, getGradingDiagnosis, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, runVisionValidation, saveTaskQuestionCorrection, saveTaskRubric, saveTeacherReview, setBatchGradingAction, startBatchGrading, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
 import { listRosterClasses, listRosterStudents, matchRosterSubmissions } from '../../services/rosterApi';
 import { buildSubmissionPages, getReadableStudentNos, reconcileSubmissionRoster } from '../../domain/submissionRoster';
 
@@ -252,7 +252,7 @@ const applyTrialSamples = (states: QuestionGradingState[], result: TrialGradingR
   }));
 };
 
-function AnalysisEvidenceDetails({ unit }: { unit: AnalyzedQuestionUnit }) {
+function AnalysisEvidenceDetails({ unit, scopeLabel }: { unit: AnalyzedQuestionUnit; scopeLabel: '整题' | '本小题' }) {
   const toEvidence = (reference: AnalyzedQuestionUnit['questionSource'], id: string): SourceEvidence => ({
     id,
     assetId: reference.assetId,
@@ -270,7 +270,7 @@ function AnalysisEvidenceDetails({ unit }: { unit: AnalyzedQuestionUnit }) {
   });
   return (
     <details className="mt-3">
-      <summary className="cursor-pointer text-xs font-bold text-slate-500">查看题目与参考答案原文</summary>
+      <summary className="cursor-pointer text-xs font-bold text-slate-500">查看{scopeLabel}题目与参考答案原文</summary>
       <div className="mt-2 grid gap-3 lg:grid-cols-2">
         <SourceEvidenceViewer evidence={toEvidence(unit.questionSource, `${unit.displayNo}-question-source`)} label="题目原文" />
         {unit.answerSource ? <SourceEvidenceViewer evidence={toEvidence(unit.answerSource, `${unit.displayNo}-answer-source`)} label="参考答案原文" /> : <section className="border-l-2 border-sky-600 bg-slate-50 p-3 text-xs text-slate-500 dark:bg-zinc-950">参考答案中没有匹配到可引用内容。</section>}
@@ -301,6 +301,7 @@ const materialStatusLabel: Record<WorkflowState['assignment']['assets'][number][
 };
 
 const materialAccept = '.docx,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,application/pdf,image/*';
+const formatElapsed = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
 const getInitialStage = (node: WorkbenchTask['node']): StageId => {
   if (node === 'setup' || node === 'collection') return 'assignment';
@@ -332,20 +333,35 @@ function QuestionSelector({ questions, states, selectedId, onSelect }: { questio
   );
 }
 
-function QuestionContext({ question, number, evidence, onConfirmKnowledge }: { question: GradingQuestion; number: number; evidence?: WorkflowState['sourceEvidence'][number]; onConfirmKnowledge?: (nodeId: string) => void }) {
+function QuestionContext({ question, number, evidence, onConfirmKnowledge, onSaveCorrection }: { question: GradingQuestion; number: number; evidence?: WorkflowState['sourceEvidence'][number]; onConfirmKnowledge?: (nodeId: string) => void; onSaveCorrection?: (correction: { title: string; stem: string; answerRequirement: string }) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState({ title: question.title, stem: question.stem ?? question.desc, answerRequirement: question.answerRequirement ?? '' });
+  useEffect(() => {
+    setEditing(false);
+    setDraft({ title: question.title, stem: question.stem ?? question.desc, answerRequirement: question.answerRequirement ?? '' });
+  }, [question.id, question.title, question.stem, question.desc, question.answerRequirement]);
+  const saveCorrection = async () => {
+    if (!onSaveCorrection || !draft.title.trim() || !draft.stem.trim()) return;
+    setSaving(true);
+    try {
+      await onSaveCorrection({ title: draft.title.trim(), stem: draft.stem.trim(), answerRequirement: draft.answerRequirement.trim() });
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <section className="grid gap-4 rounded-[24px] border border-slate-200 bg-white/70 p-5 lg:grid-cols-[minmax(0,1fr)_230px] dark:border-zinc-800 dark:bg-zinc-900/70">
-      <div><div className="flex flex-wrap items-center gap-2 text-xs font-bold"><span className="text-emerald-700">第 {question.displayNo || number} 题 · {question.score} 分</span><span className="rounded-xl bg-slate-100 px-2.5 py-1 text-slate-600 dark:bg-zinc-800 dark:text-slate-300">{question.aiQuestionType ?? 'AI 待识别题型'}</span><span className="text-slate-400">解析 {Math.round(question.parseConfidence * 100)}%</span></div>
-      <h2 className="mt-3 text-base font-black text-slate-900 dark:text-white">{question.title}</h2>
-      <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-200">{question.stem ?? question.desc}</p>
-      {question.answerRequirement ? <p className="mt-2 text-xs text-slate-500">作答要求：{question.answerRequirement}</p> : null}
+      <div><div className="flex flex-wrap items-center gap-2 text-xs font-bold"><span className="text-emerald-700">第 {question.displayNo || number} 题 · {question.score} 分</span><span className="rounded-xl bg-slate-100 px-2.5 py-1 text-slate-600 dark:bg-zinc-800 dark:text-slate-300">{question.aiQuestionType ?? 'AI 待识别题型'}</span><span className="text-slate-400">解析 {Math.round(question.parseConfidence * 100)}%</span>{onSaveCorrection && !editing ? <button type="button" onClick={() => setEditing(true)} className="ml-auto rounded-xl border border-slate-200 px-2.5 py-1.5 text-slate-600 dark:border-zinc-700">修正题干</button> : null}</div>
+      {editing ? <div className="mt-3 space-y-3"><label className="block space-y-1"><span className="text-xs font-bold text-slate-500">题目标题</span><input value={draft.title} onChange={event => setDraft(current => ({ ...current, title: event.target.value }))} className={inputClass} /></label><label className="block space-y-1"><span className="text-xs font-bold text-slate-500">题干</span><textarea value={draft.stem} onChange={event => setDraft(current => ({ ...current, stem: event.target.value }))} rows={5} className={`${inputClass} resize-y leading-6`} /></label><label className="block space-y-1"><span className="text-xs font-bold text-slate-500">作答要求</span><input value={draft.answerRequirement} onChange={event => setDraft(current => ({ ...current, answerRequirement: event.target.value }))} className={inputClass} /></label><div className="flex justify-end gap-2"><button type="button" disabled={saving} onClick={() => { setDraft({ title: question.title, stem: question.stem ?? question.desc, answerRequirement: question.answerRequirement ?? '' }); setEditing(false); }} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-500 dark:border-zinc-700">取消</button><button type="button" disabled={saving || !draft.title.trim() || !draft.stem.trim()} onClick={() => void saveCorrection()} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"><Save className="h-3.5 w-3.5" />{saving ? '保存中...' : '保存题干修正'}</button></div></div> : <><h2 className="mt-3 text-base font-black text-slate-900 dark:text-white">{question.title}</h2><p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-200">{question.stem ?? question.desc}</p>{question.answerRequirement ? <p className="mt-2 text-xs text-slate-500">作答要求：{question.answerRequirement}</p> : null}</>}
       <div className="mt-4 flex flex-wrap gap-2">{question.knowledgeLinks.length ? question.knowledgeLinks.map(link => <button key={link.nodeId} type="button" disabled={link.status === 'confirmed' || !onConfirmKnowledge} onClick={() => onConfirmKnowledge?.(link.nodeId)} className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-bold ${link.status === 'confirmed' ? 'bg-emerald-100 text-emerald-800' : 'bg-violet-100 text-violet-800 hover:bg-violet-200'}`}><Link2 className="h-3.5 w-3.5" />{link.nodeName}{link.status === 'suggested' ? ` · ${Math.round(link.confidence * 100)}%` : ' · 已关联'}</button>) : <span className="text-xs text-slate-400">资源库中暂无匹配知识点</span>}</div></div>
       {evidence ? <SourceEvidenceViewer evidence={evidence} label={`第 ${question.displayNo || number} 题题干`} /> : null}
     </section>
   );
 }
 
-function RubricEditor({ questionState, answerEvidence, onChange, onSaveDraft, onApply, onEnterTrial }: { questionState: QuestionGradingState; answerEvidence?: WorkflowState['sourceEvidence'][number]; onChange: (next: QuestionGradingState) => void; onSaveDraft: () => void; onApply: () => void; onEnterTrial: () => void }) {
+function RubricEditor({ questionState, answerEvidence, dirty, savePhase, canEnterTrial, onChange, onCancel, onSaveDraft, onApply, onEnterTrial, onCompleteIntake }: { questionState: QuestionGradingState; answerEvidence?: WorkflowState['sourceEvidence'][number]; dirty: boolean; savePhase: 'idle' | 'saving' | 'saved' | 'error'; canEnterTrial: boolean; onChange: (next: QuestionGradingState) => void; onCancel: () => void; onSaveDraft: () => void; onApply: () => void; onEnterTrial: () => void; onCompleteIntake: () => void }) {
   const [newRule, setNewRule] = useState('');
   const addRule = () => {
     const value = newRule.trim();
@@ -358,7 +374,7 @@ function RubricEditor({ questionState, answerEvidence, onChange, onSaveDraft, on
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
         <div><h3 className="text-base font-black text-slate-900 dark:text-white">评分依据 V{questionState.rubricVersion}</h3><p className="mt-1 text-xs text-slate-500">当前题目的标准答案、采分点和教师补充规则。</p></div>
-        <span className="rounded-xl bg-amber-100 px-2.5 py-1.5 text-xs font-bold text-amber-800">试批中</span>
+        <span className={`rounded-xl px-2.5 py-1.5 text-xs font-bold ${dirty ? 'bg-amber-100 text-amber-800' : savePhase === 'error' ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'}`}>{dirty ? '有未保存修改' : savePhase === 'saving' ? '正在保存' : savePhase === 'error' ? '保存失败' : '已保存'}</span>
       </div>
       <div className="space-y-2"><span className="flex items-center gap-2 text-sm font-black text-slate-800 dark:text-slate-100"><FileText className="h-4 w-4 text-emerald-700" />标准答案</span><div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_230px]"><label><span className="sr-only">标准答案文本</span><textarea value={questionState.standardAnswer} onChange={event => onChange({ ...questionState, standardAnswer: event.target.value })} rows={7} className={`${inputClass} resize-none leading-6`} /></label>{answerEvidence ? <SourceEvidenceViewer evidence={answerEvidence} label="标准答案来源" /> : null}</div>{questionState.standardAnswerOcrText ? <p className="text-[11px] text-slate-400">OCR 原文：{questionState.standardAnswerOcrText}</p> : null}</div>
       <div className="space-y-3">
@@ -377,7 +393,7 @@ function RubricEditor({ questionState, answerEvidence, onChange, onSaveDraft, on
         {questionState.teacherRules.map((rule, index) => <div key={`${rule}-${index}`} className="flex items-start gap-2 rounded-2xl bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:bg-amber-950/20 dark:text-amber-100"><BookOpenCheck className="mt-0.5 h-4 w-4 flex-none" /><span className="flex-1 leading-5">{rule}</span><button type="button" title="删除评分细则" aria-label="删除评分细则" onClick={() => onChange({ ...questionState, teacherRules: questionState.teacherRules.filter((_, itemIndex) => itemIndex !== index) })} className="rounded-xl p-1 text-amber-600 hover:bg-amber-100"><X className="h-3.5 w-3.5" /></button></div>)}
         <div className="flex gap-2"><input value={newRule} onChange={event => setNewRule(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') addRule(); }} placeholder="例如：“好人好事代代相传”也算分" className={inputClass} /><button type="button" onClick={addRule} className="rounded-2xl border border-slate-200 px-4 text-sm font-bold hover:bg-slate-50 dark:border-zinc-700">添加</button></div>
       </div>
-      <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4 dark:border-zinc-800"><button type="button" onClick={onSaveDraft} className="flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 dark:border-zinc-700 dark:text-slate-300"><Save className="h-4 w-4" />保存草稿</button><button type="button" onClick={onApply} className="flex items-center gap-2 rounded-2xl border border-emerald-700 px-4 py-2.5 text-sm font-bold text-emerald-700"><RefreshCw className="h-4 w-4" />应用到试批</button><button type="button" onClick={onEnterTrial} className="flex items-center gap-1 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800">进入试批<ChevronRight className="h-4 w-4" /></button></div>
+      <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4 dark:border-zinc-800"><button type="button" disabled={!dirty || savePhase === 'saving'} onClick={onCancel} className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-500 disabled:opacity-40 dark:border-zinc-700">取消修改</button><button type="button" disabled={savePhase === 'saving'} onClick={onSaveDraft} className="flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 disabled:opacity-50 dark:border-zinc-700 dark:text-slate-300"><Save className="h-4 w-4" />{savePhase === 'saving' ? '保存中...' : '保存草稿'}</button><button type="button" disabled={savePhase === 'saving'} onClick={onApply} className="flex items-center gap-2 rounded-2xl border border-emerald-700 px-4 py-2.5 text-sm font-bold text-emerald-700 disabled:opacity-50"><RefreshCw className="h-4 w-4" />保存并应用到试批</button><button type="button" onClick={canEnterTrial ? onEnterTrial : onCompleteIntake} className="flex items-center gap-1 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800">{canEnterTrial ? '进入试批' : '先完成上传质检'}<ChevronRight className="h-4 w-4" /></button></div>
     </div>
   );
 }
@@ -452,10 +468,14 @@ export default function GradingWorkflow({
   const [showOnlyOcrIssues, setShowOnlyOcrIssues] = useState(false);
   const [expandedOcrPageId, setExpandedOcrPageId] = useState<string | null>(null);
   const [ruleAddedNotice, setRuleAddedNotice] = useState(false);
+  const [rubricSavePhase, setRubricSavePhase] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [gradedCount, setGradedCount] = useState(() => workflowState.aiResults.length ? 36 : 0);
   const [isPaused, setIsPaused] = useState(false);
   const [diagnosisConfirmed, setDiagnosisConfirmed] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisQuestionNo, setAnalysisQuestionNo] = useState(workflowState.assignment.firstSectionAnalysis?.questions[0]?.displayNo ?? '');
+  const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
+  const [analysisElapsedSeconds, setAnalysisElapsedSeconds] = useState(0);
   const [rosterClass, setRosterClass] = useState<SchoolClass | null>(null);
   const [classRoster, setClassRoster] = useState<RosterStudent[]>([]);
   const [rosterMatchPhase, setRosterMatchPhase] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -466,6 +486,7 @@ export default function GradingWorkflow({
   const [submissionUploadError, setSubmissionUploadError] = useState<string | null>(null);
   const [trialGradingPhase, setTrialGradingPhase] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [trialGradingError, setTrialGradingError] = useState<string | null>(null);
+  const [trialProgress, setTrialProgress] = useState<{ phase: 'idle' | 'recognition' | 'grading' | 'complete' | 'error'; completed: number; total: number; currentLabel: string; startedAt: number | null; elapsedSeconds: number }>({ phase: 'idle', completed: 0, total: 0, currentLabel: '', startedAt: null, elapsedSeconds: 0 });
   const [visionValidationByAsset, setVisionValidationByAsset] = useState<Record<string, VisionValidationResult>>({});
   const [visionValidationPhase, setVisionValidationPhase] = useState<Record<string, 'idle' | 'loading' | 'ready' | 'error'>>({});
   const [visionValidationError, setVisionValidationError] = useState<Record<string, string>>({});
@@ -481,8 +502,12 @@ export default function GradingWorkflow({
   const [reviewSaving, setReviewSaving] = useState<'idle' | 'ocr' | 'decision'>('idle');
 
   const currentClass = rosterClass ?? classes.find(item => item.id === selectedTask.classId) ?? null;
-  const currentQuestion = workflowState.questions.find(item => item.id === selectedQuestionId) ?? workflowState.questions[0];
-  const currentQuestionState = questionStates.find(item => item.questionId === selectedQuestionId) ?? questionStates[0];
+  const selectedQuestionIds = workflowState.assignment.selectedQuestionIds ?? workflowState.questions.map(question => question.id);
+  const selectedQuestions = workflowState.questions.filter(question => selectedQuestionIds.includes(question.id));
+  const selectedQuestionStates = questionStates.filter(state => selectedQuestionIds.includes(state.questionId));
+  const currentQuestion = selectedQuestions.find(item => item.id === selectedQuestionId) ?? selectedQuestions[0] ?? workflowState.questions[0];
+  const currentQuestionState = selectedQuestionStates.find(item => item.questionId === selectedQuestionId) ?? selectedQuestionStates[0] ?? questionStates[0];
+  const persistedCurrentQuestionState = workflowState.questionGradingStates?.find(item => item.questionId === currentQuestionState?.questionId);
   const questionEvidence = currentQuestion?.sourceEvidenceIds.map(id => workflowState.sourceEvidence.find(item => item.id === id)).find(Boolean);
   const answerEvidence = currentQuestionState?.standardAnswerSourceIds?.map(id => workflowState.sourceEvidence.find(item => item.id === id)).find(Boolean);
   const selectedSample = currentQuestionState?.calibrationSamples.find(sample => sample.id === selectedSampleId) ?? currentQuestionState?.calibrationSamples[0];
@@ -490,16 +515,16 @@ export default function GradingWorkflow({
   const issueRows = matchRows.filter(row => row.status !== 'matched' || row.rosterMatchStatus !== 'matched');
   const displayedRows = showOnlyOcrIssues ? issueRows : matchRows;
   const missingRows = workflowState.missingSubmissions ?? [];
-  const trialSamples = questionStates.flatMap(state => state.calibrationSamples);
+  const trialSamples = selectedQuestionStates.flatMap(state => state.calibrationSamples);
   const reviewSamples = trialSamples.filter(sample => sample.needsTeacherReview || sample.recognitionConflict || sample.gradingConfidence < lowConfidenceThreshold);
   const pendingReviewSamples = reviewSamples.filter(sample => sample.status !== 'confirmed');
   const resolvedReviewSamples = reviewSamples.filter(sample => sample.status === 'confirmed');
   const visibleReviewSamples = reviewStage === 'resolved' ? resolvedReviewSamples : reviewStage === 'all' || reviewStage === 'calibration' ? pendingReviewSamples : [];
   const selectedReviewSample = reviewSamples.find(sample => sample.id === reviewSampleId) ?? null;
   const pendingReviews = pendingReviewSamples.length;
-  const allCalibrationComplete = questionStates.length > 0 && questionStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget);
+  const allCalibrationComplete = selectedQuestionStates.length > 0 && selectedQuestionStates.every(state => state.calibrationSamples.filter(sample => sample.status === 'confirmed').length >= state.sampleTarget);
   const assignmentReady = workflowState.assignment.status === 'assigned';
-  const gradingDataReady = workflowState.questions.length > 0 && matchRows.length > 0 && rosterMatchPhase === 'ready' && !issueRows.some(row => row.rosterMatchStatus !== 'matched');
+  const gradingDataReady = selectedQuestions.length > 0 && matchRows.length > 0 && rosterMatchPhase === 'ready' && !issueRows.some(row => row.rosterMatchStatus !== 'matched');
   const normalizedDocuments = workflowState.assignment.documents ?? [];
   const assignmentAssets = workflowState.assignment.assets.filter(asset => asset.kind === 'assignment' || asset.kind === 'reference-answer');
   const assignmentAssetIds = new Set(assignmentAssets.map(asset => asset.id));
@@ -511,17 +536,30 @@ export default function GradingWorkflow({
   const submissionRosterInputKey = matchRows.map(page => `${page.id}:${page.detectedStudentNo}`).join('|');
   const submissionAssets = workflowState.assignment.assets.filter(asset => asset.kind === 'student-submission');
   const submissionMaterialKey = submissionAssets.map(asset => `${asset.id}:${asset.status}`).join('|');
+  const rubricDirty = Boolean(currentQuestionState && persistedCurrentQuestionState && JSON.stringify({ standardAnswer: currentQuestionState.standardAnswer, gradingRubric: currentQuestionState.gradingRubric, teacherRules: currentQuestionState.teacherRules }) !== JSON.stringify({ standardAnswer: persistedCurrentQuestionState.standardAnswer, gradingRubric: persistedCurrentQuestionState.gradingRubric, teacherRules: persistedCurrentQuestionState.teacherRules }));
 
   const updateAssignment = (updated: Partial<WorkflowState['assignment']>) => {
     onUpdateState({ assignment: { ...workflowState.assignment, ...updated } });
   };
 
-  const gradingQuestions = () => workflowState.questions.map(question => {
+  const gradingQuestions = () => selectedQuestions.map(question => {
     const state = questionStates.find(item => item.questionId === question.id);
-    return { questionId: question.id, displayNo: question.displayNo, stem: question.stem ?? question.desc, fullScore: question.score, standardAnswer: state?.standardAnswer ?? '', rubricPoints: state?.gradingRubric ?? [], teacherRules: state?.teacherRules ?? [], rubricVersion: state?.rubricVersion ?? 1 };
+    return { questionId: question.id, displayNo: question.displayNo, stem: question.stem ?? question.desc, fullScore: question.score, standardAnswer: state?.standardAnswer ?? '', rubricPoints: state?.gradingRubric ?? [], teacherRules: [...(state?.teacherRules ?? []), ...(workflowState.assignment.note.trim() ? [`本次批改补充要求：${workflowState.assignment.note.trim()}`] : [])], rubricVersion: state?.rubricVersion ?? 1 };
   });
 
   const gradingSubmissions = () => matchRows.filter(page => page.rosterMatchStatus === 'matched' && page.studentId).map(page => ({ assetId: page.id, studentId: page.studentId!, studentName: page.expectedStudentName, studentNo: page.detectedStudentNo }));
+
+  useEffect(() => {
+    if (!isAnalyzing || !analysisStartedAt) return;
+    const timer = window.setInterval(() => setAnalysisElapsedSeconds(Math.floor((Date.now() - analysisStartedAt) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [isAnalyzing, analysisStartedAt]);
+
+  useEffect(() => {
+    if (trialProgress.phase !== 'recognition' && trialProgress.phase !== 'grading') return;
+    const timer = window.setInterval(() => setTrialProgress(current => current.startedAt ? { ...current, elapsedSeconds: Math.floor((Date.now() - current.startedAt) / 1000) } : current), 1000);
+    return () => window.clearInterval(timer);
+  }, [trialProgress.phase]);
 
   useEffect(() => {
     let active = true;
@@ -568,8 +606,8 @@ export default function GradingWorkflow({
 
   useEffect(() => {
     if (activeStage !== 'diagnosis') return;
-    void getGradingDiagnosis(selectedTask.id, workflowState.questions).then(setDiagnosis).catch(() => setDiagnosis(null));
-  }, [activeStage, selectedTask.id, workflowState.questions]);
+    void getGradingDiagnosis(selectedTask.id, selectedQuestions).then(setDiagnosis).catch(() => setDiagnosis(null));
+  }, [activeStage, selectedTask.id, workflowState.questions, workflowState.assignment.selectedQuestionIds]);
 
   useEffect(() => {
     if (!selectedReviewSample) return;
@@ -646,7 +684,7 @@ export default function GradingWorkflow({
     onShowToast('学号已更新，正在按当前班级名册重新匹配');
   };
 
-  const currentQuestionNos = [...new Set(workflowState.questions
+  const currentQuestionNos = [...new Set(selectedQuestions
     .map(question => question.displayNo.match(/^\d+/)?.[0])
     .filter((value): value is string => Boolean(value)))];
 
@@ -768,12 +806,20 @@ export default function GradingWorkflow({
       onShowToast('请先上传作业题目，或填写作业内容');
       return;
     }
+    if (workflowState.assignment.assets.some(asset => asset.kind === 'assignment') && !workflowState.assignment.firstSectionAnalysis) {
+      onShowToast('请先完成整份作业拆题，再确认本次批改范围');
+      return;
+    }
+    if (workflowState.assignment.firstSectionAnalysis && !selectedQuestionIds.length) {
+      onShowToast('请至少选择一道本次需要批改的题目');
+      return;
+    }
     updateAssignment({ status: 'assigned' });
     onUpdateTask({ ...selectedTask, node: 'collection', nodeName: '等待收取作业' });
     onShowToast('作业已布置，系统将按收作业时间提醒');
   };
 
-  const analyzeFirstSection = async () => {
+  const analyzeAssignment = async () => {
     const hasQuestion = workflowState.assignment.assets.some(asset => asset.kind === 'assignment' && (asset.status === 'ready' || asset.status === 'needs-review'));
     const hasAnswer = workflowState.assignment.assets.some(asset => asset.kind === 'reference-answer' && (asset.status === 'ready' || asset.status === 'needs-review'));
     if (!hasQuestion || !hasAnswer) {
@@ -781,14 +827,18 @@ export default function GradingWorkflow({
       return;
     }
     setIsAnalyzing(true);
+    const startedAt = Date.now();
+    setAnalysisStartedAt(startedAt);
+    setAnalysisElapsedSeconds(0);
     try {
       const analysis = await analyzeTaskMaterials(selectedTask.id, knowledgeNodes);
       const savedRubrics = await getTaskRubrics(selectedTask.id);
       const derivedWorkflow = buildWorkflowFromAnalysis(selectedTask.id, analysis, savedRubrics);
       setQuestionStates(derivedWorkflow.questionGradingStates);
       setSelectedQuestionId(derivedWorkflow.questions[0]?.id ?? '');
-      onUpdateState({ assignment: { ...workflowState.assignment, firstSectionAnalysis: analysis }, ...derivedWorkflow });
-      onShowToast(`第一部分拆题完成，共识别 ${analysis.questions.length} 道一级题`);
+      setAnalysisQuestionNo(analysis.questions[0]?.displayNo ?? '');
+      onUpdateState({ assignment: { ...workflowState.assignment, firstSectionAnalysis: analysis, selectedQuestionIds: derivedWorkflow.questions.map(question => question.id) }, ...derivedWorkflow });
+      onShowToast(`整份作业拆题完成，共识别 ${analysis.questions.length} 道一级题`);
     } catch (error) {
       const code = error instanceof Error ? error.message : 'ANALYSIS_FAILED';
       const messageByCode: Record<string, string> = {
@@ -801,6 +851,7 @@ export default function GradingWorkflow({
       onShowToast(messageByCode[code] ?? 'AI 拆题失败，请检查模型配置');
     } finally {
       setIsAnalyzing(false);
+      setAnalysisStartedAt(null);
     }
   };
 
@@ -819,9 +870,55 @@ export default function GradingWorkflow({
     setTeacherReason(nextSample?.teacherReason ?? '');
     setGradingAction('none');
     setRuleAddedNotice(false);
+    setRubricSavePhase('idle');
   };
 
-  const updateQuestionState = (next: QuestionGradingState) => setQuestionStates(current => current.map(item => item.questionId === next.questionId ? next : item));
+  const updateQuestionState = (next: QuestionGradingState) => {
+    setQuestionStates(current => current.map(item => item.questionId === next.questionId ? next : item));
+    setRubricSavePhase('idle');
+  };
+
+  const toggleQuestionSelection = (displayNo: string) => {
+    const question = workflowState.questions.find(item => item.displayNo === displayNo);
+    if (!question) return;
+    const nextIds = selectedQuestionIds.includes(question.id)
+      ? selectedQuestionIds.filter(id => id !== question.id)
+      : [...selectedQuestionIds, question.id];
+    updateAssignment({ selectedQuestionIds: nextIds });
+  };
+
+  const editQuestionRubric = (displayNo: string) => {
+    const question = workflowState.questions.find(item => item.displayNo === displayNo);
+    if (!question) return;
+    if (!selectedQuestionIds.includes(question.id)) updateAssignment({ selectedQuestionIds: [...selectedQuestionIds, question.id] });
+    selectQuestion(question.id);
+    setActiveStage('rubric');
+  };
+
+  const saveQuestionCorrection = async (correction: { title: string; stem: string; answerRequirement: string }) => {
+    if (!currentQuestion) return;
+    try {
+      const analysis = await saveTaskQuestionCorrection(selectedTask.id, currentQuestion.displayNo, correction);
+      const questions = workflowState.questions.map(question => question.id === currentQuestion.id ? { ...question, title: correction.title, desc: correction.stem, stem: correction.stem, answerRequirement: correction.answerRequirement } : question);
+      onUpdateState({
+        questions,
+        assignment: { ...workflowState.assignment, firstSectionAnalysis: analysis }
+      });
+      setTrialGradingPhase('idle');
+      setBatch(null);
+      onShowToast('题干修正已保存；后续试批会按修正后的题目重新运行');
+    } catch (error) {
+      onShowToast(`题干修正保存失败（${error instanceof Error ? error.message : '未知错误'}）`);
+      throw error;
+    }
+  };
+
+  const cancelRubricChanges = () => {
+    if (!persistedCurrentQuestionState) return;
+    setQuestionStates(current => current.map(item => item.questionId === persistedCurrentQuestionState.questionId ? persistedCurrentQuestionState : item));
+    setRubricSavePhase('idle');
+    onShowToast('已撤销本题尚未保存的修改');
+  };
 
   const confirmKnowledgeLink = (nodeId: string) => {
     if (!currentQuestion || !knowledgeNodes.some(node => node.id === nodeId)) return;
@@ -846,29 +943,35 @@ export default function GradingWorkflow({
 
   const prepareTrialCalibration = async (force = false) => {
     const matchedSubmissions = matchRows.filter(page => page.rosterMatchStatus === 'matched' && page.studentId);
-    if (!matchedSubmissions.length || !workflowState.questions.length) {
+    if (!matchedSubmissions.length || !selectedQuestions.length) {
       onShowToast('缺少已匹配答卷或评分依据，暂时不能开始试批');
       return;
     }
     setActiveStage('calibration');
     setTrialGradingPhase('loading');
     setTrialGradingError(null);
+    const startedAt = Date.now();
+    setTrialProgress({ phase: 'recognition', completed: 0, total: matchedSubmissions.length, currentLabel: '准备逐份核对答卷', startedAt, elapsedSeconds: 0 });
     try {
-      for (const submission of matchedSubmissions) {
+      for (const [index, submission] of matchedSubmissions.entries()) {
+        setTrialProgress(current => ({ ...current, phase: 'recognition', completed: index, currentLabel: `${submission.expectedStudentName} · 定位并核对所选题目` }));
         const stored = visionValidationByAsset[submission.id] ?? await getVisionValidation(selectedTask.id, submission.id);
         const missingQuestionNos = currentQuestionNos.filter(displayNo => !stored?.items.some(item => item.displayNo === displayNo));
         if (!missingQuestionNos.length && stored) {
           setVisionValidationByAsset(current => ({ ...current, [submission.id]: stored }));
+          setTrialProgress(current => ({ ...current, completed: index + 1 }));
           continue;
         }
         setVisionValidationPhase(current => ({ ...current, [submission.id]: 'loading' }));
         const result = await runVisionValidation(selectedTask.id, submission.id, missingQuestionNos);
         setVisionValidationByAsset(current => ({ ...current, [submission.id]: result }));
         setVisionValidationPhase(current => ({ ...current, [submission.id]: 'ready' }));
+        setTrialProgress(current => ({ ...current, completed: index + 1 }));
       }
+      setTrialProgress(current => ({ ...current, phase: 'grading', completed: matchedSubmissions.length, currentLabel: `AI 正在依据评分细则逐份评分` }));
       const result = await gradeTaskTrial(
         selectedTask.id,
-        workflowState.questions.map(question => {
+        selectedQuestions.map(question => {
           const state = questionStates.find(item => item.questionId === question.id);
           return {
             questionId: question.id,
@@ -877,7 +980,7 @@ export default function GradingWorkflow({
             fullScore: question.score,
             standardAnswer: state?.standardAnswer ?? '',
             rubricPoints: state?.gradingRubric ?? [],
-            teacherRules: state?.teacherRules ?? [],
+            teacherRules: [...(state?.teacherRules ?? []), ...(workflowState.assignment.note.trim() ? [`本次批改补充要求：${workflowState.assignment.note.trim()}`] : [])],
             rubricVersion: state?.rubricVersion ?? 1
           };
         }),
@@ -889,7 +992,7 @@ export default function GradingWorkflow({
         }))
       );
       const nextStates = applyTrialSamples(questionStates, result);
-      const firstState = nextStates[0];
+      const firstState = nextStates.find(state => selectedQuestionIds.includes(state.questionId));
       const firstSample = firstState?.calibrationSamples[0];
       setQuestionStates(nextStates);
       setSelectedQuestionId(firstState?.questionId ?? '');
@@ -897,13 +1000,20 @@ export default function GradingWorkflow({
       setEditedOcr(firstSample ? getEffectiveOcrText(firstSample) : '');
       setTeacherScore(firstSample?.aiScore ?? 0);
       setTrialGradingPhase('ready');
+      setTrialProgress(current => ({ ...current, phase: 'complete', currentLabel: `已生成 ${result.samples.length} 条试批结果`, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000) }));
       onUpdateState({ questionGradingStates: nextStates, calibrationSamples: firstState?.calibrationSamples ?? [] });
-      onShowToast(`Luna 已完成 ${result.samples.length} 条第一部分试批结果`);
+      onShowToast(`Luna 已完成 ${result.samples.length} 条试批结果`);
     } catch (error) {
       const code = error instanceof Error ? error.message : 'TRIAL_GRADING_FAILED';
       setTrialGradingPhase('error');
       setTrialGradingError(code);
-      onShowToast('试批评分失败，请检查模型返回后重试');
+      setTrialProgress(current => ({ ...current, phase: 'error', currentLabel: code, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000) }));
+      const messageByCode: Record<string, string> = {
+        'MODEL_REQUEST_FAILED:502': 'Luna 服务暂时不可用，已保留完成的识别结果，可直接重试',
+        TRIAL_GRADING_OUTPUT_INVALID: 'AI 返回格式异常，已保留答卷识别结果，可直接重试',
+        VISION_VALIDATION_OUTPUT_INVALID: '当前答卷视觉结果格式异常，可重试该步骤'
+      };
+      onShowToast(messageByCode[code] ?? '试批没有完成，已保留前序结果，可直接重试');
     }
   };
 
@@ -1013,14 +1123,16 @@ export default function GradingWorkflow({
 
   const saveRubricDraft = () => {
     if (!currentQuestionState) return;
+    setRubricSavePhase('saving');
     onUpdateState({ questionGradingStates: questionStates });
     void persistRubric(currentQuestionState)
-      .then(() => onShowToast(`第 ${workflowState.questions.findIndex(item => item.id === selectedQuestionId) + 1} 题评分依据草稿已保存`))
-      .catch(() => onShowToast('评分依据保存失败'));
+      .then(() => { setRubricSavePhase('saved'); onShowToast(`第 ${currentQuestion?.displayNo ?? '-'} 题评分依据草稿已保存`); })
+      .catch(() => { setRubricSavePhase('error'); onShowToast('评分依据保存失败'); });
   };
 
   const applyRubric = () => {
     if (!currentQuestionState) return;
+    setRubricSavePhase('saving');
     const nextVersion = currentQuestionState.rubricVersion + 1;
     const next = {
       ...currentQuestionState,
@@ -1031,8 +1143,8 @@ export default function GradingWorkflow({
     setQuestionStates(nextStates);
     onUpdateState({ questionGradingStates: nextStates });
     void persistRubric(next)
-      .then(() => onShowToast(`本题评分依据已更新为 V${nextVersion}，教师终评样本保持不变`))
-      .catch(() => onShowToast('评分依据保存失败'));
+      .then(() => { setRubricSavePhase('saved'); onShowToast(`本题评分依据已更新为 V${nextVersion}，教师终评样本保持不变`); })
+      .catch(() => { setRubricSavePhase('error'); onShowToast('评分依据保存失败'); });
   };
 
   const lockAndStart = () => {
@@ -1044,6 +1156,8 @@ export default function GradingWorkflow({
   };
 
   const questionNumber = currentQuestion ? workflowState.questions.findIndex(item => item.id === currentQuestion.id) + 1 : 1;
+  const assignmentAnalysis = workflowState.assignment.firstSectionAnalysis;
+  const selectedAnalysisQuestion = assignmentAnalysis?.questions.find(question => question.displayNo === analysisQuestionNo) ?? assignmentAnalysis?.questions[0];
   const submissionFilePicker = (
     <label className="cursor-pointer rounded-2xl border border-emerald-700 px-4 py-2.5 text-sm font-bold text-emerald-700 hover:bg-emerald-50">
       {matchRows.length ? '继续上传答卷' : '选择答卷文件'}
@@ -1082,23 +1196,17 @@ export default function GradingWorkflow({
             {assignmentAssets.length ? <section className="mt-5 border-y border-slate-200 dark:border-zinc-800"><div className="flex flex-wrap items-center gap-2 py-3">{assignmentAssets.map(asset => <span key={asset.id} className={`inline-flex max-w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs font-bold ${asset.status === 'failed' ? 'bg-rose-100 text-rose-800' : asset.status === 'needs-review' ? 'bg-amber-100 text-amber-800' : asset.status === 'ready' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-slate-300'}`}><span className="max-w-56 truncate">{asset.fileName}</span><span>{materialStatusLabel[asset.status]}</span></span>)}</div>{assignmentDocuments.map(document => <Fragment key={document.assetId}><MaterialDocumentDetails document={document} asset={assignmentAssets.find(item => item.id === document.assetId)} /></Fragment>)}</section> : null}
             {workflowState.assignment.assets.length ? <section className="mt-5 border-y border-slate-200 py-4 dark:border-zinc-800">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><h3 className="text-sm font-black">AI 拆题 · 第一部分</h3><p className="mt-1 text-xs text-slate-500">题号、答案、采分点和原文依据需经教师确认。</p></div>
-                <button type="button" disabled={isAnalyzing} onClick={() => void analyzeFirstSection()} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60"><Sparkles className="h-4 w-4" />{isAnalyzing ? '正在拆题' : workflowState.assignment.firstSectionAnalysis ? '重新拆题' : '开始拆题'}</button>
+                <div><h3 className="text-sm font-black">AI 拆题 · 整份作业</h3><p className="mt-1 text-xs text-slate-500">先识别全部题目，再选择本次需要批改的范围。</p></div>
+                <button type="button" disabled={isAnalyzing} onClick={() => void analyzeAssignment()} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60"><Sparkles className="h-4 w-4" />{isAnalyzing ? '正在拆题' : assignmentAnalysis ? '重新拆题' : '开始拆题'}</button>
               </div>
-              {workflowState.assignment.firstSectionAnalysis ? <div className="mt-4 divide-y divide-slate-200 border-t border-slate-200 dark:divide-zinc-800 dark:border-zinc-800">
-                {workflowState.assignment.firstSectionAnalysis.questions.map(question => <article key={question.displayNo} className="py-5">
-                  <div className="flex flex-wrap items-center gap-2"><strong className="text-base">第 {question.displayNo} 题</strong><span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-slate-300">{question.questionType}</span><span className="text-xs font-bold text-emerald-700">{question.score ?? '待确认'} 分</span><span className={`text-xs ${question.confidence < 0.8 ? 'font-bold text-rose-700' : 'text-slate-400'}`}>置信度 {Math.round(question.confidence * 100)}%</span></div>
-                  <h4 className="mt-3 text-sm font-black text-slate-900 dark:text-white">{question.title}</h4>
-                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">{question.stem}</p>
-                  {!question.subquestions.length ? <div className="mt-3 grid gap-3 lg:grid-cols-2"><div><span className="text-xs font-bold text-slate-400">标准答案</span><p className="mt-1 whitespace-pre-wrap text-sm leading-6">{question.standardAnswer || '待教师补充'}</p></div><div><span className="text-xs font-bold text-slate-400">解析</span><p className="mt-1 whitespace-pre-wrap text-sm leading-6">{question.explanation || '暂无'}</p></div></div> : null}
-                  {question.subquestions.length ? <div className="mt-4 divide-y divide-slate-200 border-y border-slate-200 dark:divide-zinc-800 dark:border-zinc-800">{question.subquestions.map(subquestion => <div key={subquestion.displayNo} className="py-4"><div className="flex flex-wrap items-center gap-2"><strong className="text-sm">{subquestion.displayNo}</strong><span className="text-xs text-slate-500">{subquestion.questionType} · {subquestion.score === null ? '分值待确认' : `${subquestion.score} 分`}</span></div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">{subquestion.stem}</p><p className="mt-2 text-sm leading-6"><span className="mr-2 text-xs font-bold text-slate-400">答案</span>{subquestion.standardAnswer || '待教师补充'}</p>{subquestion.rubricPoints.length ? <p className="mt-2 text-xs leading-5 text-emerald-800">采分点：{subquestion.rubricPoints.map(point => `${point.point}（${point.score ?? '待确认'}分）`).join('；')}</p> : null}{subquestion.reviewReasons.length ? <p className="mt-2 text-xs leading-5 text-amber-800"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />{subquestion.reviewReasons.join('；')}</p> : null}<AnalysisEvidenceDetails unit={subquestion} /></div>)}</div> : null}
-                  {!question.subquestions.length && question.rubricPoints.length ? <p className="mt-3 text-xs leading-5 text-emerald-800">采分点：{question.rubricPoints.map(point => `${point.point}（${point.score ?? '待确认'}分）`).join('；')}</p> : null}
-                  {question.reviewReasons.length ? <p className="mt-3 text-xs leading-5 text-amber-800"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />{question.reviewReasons.join('；')}</p> : null}
-                  <AnalysisEvidenceDetails unit={question} />
-                </article>)}
-              </div> : <p className="mt-4 text-sm text-slate-500">材料解析完成后，点击“开始拆题”生成第一部分结构。</p>}
+              {isAnalyzing ? <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900 dark:bg-emerald-950/20"><div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm text-emerald-900 dark:text-emerald-100">AI 正在识别整份作业结构</strong><span className="text-xs font-bold text-emerald-700">已用时 {formatElapsed(analysisElapsedSeconds)}</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-emerald-100 dark:bg-emerald-950"><div className="h-full w-1/2 animate-pulse rounded-full bg-emerald-600" /></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-3"><span className="font-bold text-emerald-800">1. 题目与答案材料已就绪</span><span className="font-bold text-emerald-800">2. 正在核对题号、题干和答案</span><span className="text-slate-400">3. 校验结构并生成评分依据</span></div><p className="mt-3 text-[11px] text-slate-500">模型响应时间无法准确倒计时；这里展示真实处理阶段和已耗时。</p></div> : null}
+              {assignmentAnalysis && selectedAnalysisQuestion ? <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 lg:grid-cols-[220px_minmax(0,1fr)] dark:border-zinc-800">
+                <aside className="space-y-2"><div className="flex items-center justify-between text-xs"><strong>本次批改题目</strong><span className="text-slate-400">已选 {selectedQuestionIds.length} / {assignmentAnalysis.questions.length}</span></div>{assignmentAnalysis.questions.map(question => { const questionId = `${selectedTask.id}-q-${question.displayNo}`; const included = selectedQuestionIds.includes(questionId); const active = selectedAnalysisQuestion.displayNo === question.displayNo; return <div key={question.displayNo} className={`flex items-center gap-2 rounded-lg border p-2 ${active ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/20' : 'border-slate-200 dark:border-zinc-800'}`}><input type="checkbox" checked={included} onChange={() => toggleQuestionSelection(question.displayNo)} aria-label={`选择第 ${question.displayNo} 题`} className="h-4 w-4 accent-emerald-700" /><button type="button" onClick={() => setAnalysisQuestionNo(question.displayNo)} className="min-w-0 flex-1 text-left"><strong className="block text-xs">第 {question.displayNo} 题</strong><span className="mt-0.5 block truncate text-[11px] text-slate-500">{question.title || question.stem}</span></button></div>; })}</aside>
+                <article className="min-w-0 rounded-lg border border-slate-200 p-4 dark:border-zinc-800"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><strong className="text-base">第 {selectedAnalysisQuestion.displayNo} 题</strong><span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-slate-300">{selectedAnalysisQuestion.questionType}</span><span className="text-xs font-bold text-emerald-700">{selectedAnalysisQuestion.score ?? '待确认'} 分</span><span className={`text-xs ${selectedAnalysisQuestion.confidence < 0.8 ? 'font-bold text-rose-700' : 'text-slate-400'}`}>置信度 {Math.round(selectedAnalysisQuestion.confidence * 100)}%</span></div><h4 className="mt-3 text-sm font-black text-slate-900 dark:text-white">{selectedAnalysisQuestion.title}</h4></div><button type="button" onClick={() => editQuestionRubric(selectedAnalysisQuestion.displayNo)} className="rounded-2xl border border-emerald-700 px-3 py-2 text-xs font-bold text-emerald-700">去评分依据编辑</button></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">{selectedAnalysisQuestion.stem}</p>{!selectedAnalysisQuestion.subquestions.length ? <div className="mt-4 grid gap-3 lg:grid-cols-2"><div><span className="text-xs font-bold text-slate-400">标准答案</span><p className="mt-1 whitespace-pre-wrap text-sm leading-6">{selectedAnalysisQuestion.standardAnswer || '待教师补充'}</p></div><div><span className="text-xs font-bold text-slate-400">解析</span><p className="mt-1 whitespace-pre-wrap text-sm leading-6">{selectedAnalysisQuestion.explanation || '暂无'}</p></div></div> : null}{selectedAnalysisQuestion.subquestions.length ? <div className="mt-4 divide-y divide-slate-200 border-y border-slate-200 dark:divide-zinc-800 dark:border-zinc-800">{selectedAnalysisQuestion.subquestions.map(subquestion => <div key={subquestion.displayNo} className="py-4"><div className="flex flex-wrap items-center gap-2"><strong className="text-sm">小题 {subquestion.displayNo}</strong><span className="text-xs text-slate-500">{subquestion.questionType} · {subquestion.score === null ? '分值待确认' : `${subquestion.score} 分`}</span></div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">{subquestion.stem}</p><p className="mt-2 text-sm leading-6"><span className="mr-2 text-xs font-bold text-slate-400">答案</span>{subquestion.standardAnswer || '待教师补充'}</p>{subquestion.rubricPoints.length ? <p className="mt-2 text-xs leading-5 text-emerald-800">采分点：{subquestion.rubricPoints.map(point => `${point.point}（${point.score ?? '待确认'}分）`).join('；')}</p> : null}{subquestion.reviewReasons.length ? <p className="mt-2 text-xs leading-5 text-amber-800"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />{subquestion.reviewReasons.join('；')}</p> : null}<AnalysisEvidenceDetails unit={subquestion} scopeLabel="本小题" /></div>)}</div> : null}{!selectedAnalysisQuestion.subquestions.length && selectedAnalysisQuestion.rubricPoints.length ? <p className="mt-3 text-xs leading-5 text-emerald-800">采分点：{selectedAnalysisQuestion.rubricPoints.map(point => `${point.point}（${point.score ?? '待确认'}分）`).join('；')}</p> : null}{selectedAnalysisQuestion.reviewReasons.length ? <p className="mt-3 text-xs leading-5 text-amber-800"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />{selectedAnalysisQuestion.reviewReasons.join('；')}</p> : null}<AnalysisEvidenceDetails unit={selectedAnalysisQuestion} scopeLabel="整题" /></article>
+                <label className="space-y-2 lg:col-start-2"><span className="text-xs font-bold text-slate-500">本次批改补充要求 <span className="font-normal text-slate-400">（应用于所有已选题目）</span></span><textarea value={workflowState.assignment.note} onChange={event => updateAssignment({ note: event.target.value })} rows={3} placeholder="例如：开放题允许意思相近；明显划掉的内容不计入答案" className={`${inputClass} resize-none leading-6`} /></label>
+              </div> : !isAnalyzing ? <p className="mt-4 text-sm text-slate-500">材料解析完成后，点击“开始拆题”识别整份作业结构。</p> : null}
             </section> : null}
-            <label className="mt-5 block space-y-2"><span className="text-xs font-bold text-slate-500">补充要求</span><textarea value={workflowState.assignment.note} onChange={event => updateAssignment({ note: event.target.value })} rows={4} placeholder="可填写作业范围、答题要求或暂时没有电子文件的题目内容" className={`${inputClass} resize-none leading-6`} /></label>
+            {!assignmentAnalysis ? <label className="mt-5 block space-y-2"><span className="text-xs font-bold text-slate-500">作业内容补充</span><textarea value={workflowState.assignment.note} onChange={event => updateAssignment({ note: event.target.value })} rows={3} placeholder="没有电子题目时，可在这里补充作业内容" className={`${inputClass} resize-none leading-6`} /></label> : null}
             <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-5 dark:border-zinc-800">{assignmentReady ? <><button type="button" onClick={() => setActiveStage('rubric')} className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-emerald-700 dark:border-zinc-700">查看评分依据</button><button type="button" onClick={startSubmissionUpload} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white"><Upload className="h-4 w-4" />上传学生作业</button></> : <button type="button" onClick={completeAssignment} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white">确认已布置</button>}</div>
           </div>
         </section>
@@ -1136,7 +1244,7 @@ export default function GradingWorkflow({
       ) : null}
 
       {activeStage === 'rubric' && currentQuestionState ? (
-        <section className="space-y-4"><QuestionSelector questions={workflowState.questions} states={questionStates} selectedId={selectedQuestionId} onSelect={selectQuestion} /><QuestionContext question={currentQuestion} number={questionNumber} evidence={questionEvidence} onConfirmKnowledge={confirmKnowledgeLink} /><div className={`${panelClass} p-6`}><RubricEditor questionState={currentQuestionState} answerEvidence={answerEvidence} onChange={updateQuestionState} onSaveDraft={saveRubricDraft} onApply={applyRubric} onEnterTrial={() => void prepareTrialCalibration(true)} /></div></section>
+        <section className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><QuestionSelector questions={selectedQuestions} states={questionStates} selectedId={selectedQuestionId} onSelect={selectQuestion} /><button type="button" onClick={() => { setAnalysisQuestionNo(currentQuestion?.displayNo ?? ''); setActiveStage('assignment'); }} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 dark:border-zinc-700">返回题目确认</button></div><QuestionContext question={currentQuestion} number={questionNumber} evidence={questionEvidence} onConfirmKnowledge={confirmKnowledgeLink} onSaveCorrection={saveQuestionCorrection} /><div className={`${panelClass} p-6`}><RubricEditor questionState={currentQuestionState} answerEvidence={answerEvidence} dirty={rubricDirty} savePhase={rubricSavePhase} canEnterTrial={gradingDataReady} onChange={updateQuestionState} onCancel={cancelRubricChanges} onSaveDraft={saveRubricDraft} onApply={applyRubric} onEnterTrial={() => void prepareTrialCalibration(true)} onCompleteIntake={() => setActiveStage('intake')} /></div></section>
       ) : null}
 
       {activeStage === 'rubric' && !currentQuestionState ? (
@@ -1146,15 +1254,15 @@ export default function GradingWorkflow({
       {activeStage === 'calibration' && (!currentQuestionState || !selectedSample) ? (
         <section className={`${panelClass} flex min-h-96 flex-col items-center justify-center p-8 text-center`}>
           <Sparkles className={`h-8 w-8 text-emerald-700 ${trialGradingPhase === 'loading' ? 'animate-pulse' : ''}`} />
-          <h2 className="mt-4 font-black text-slate-900 dark:text-white">{trialGradingPhase === 'loading' ? 'Luna 正在更新试批结果' : trialGradingPhase === 'error' ? '试批没有完成' : '尚未生成试批样本'}</h2>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">{trialGradingPhase === 'loading' ? `正在核对 ${matchedStudentCount} 份真实答卷；已有学生结果保留，只补充新增或评分依据变化的结果。` : trialGradingPhase === 'error' ? `处理失败（${trialGradingError}），可以保留当前材料直接重试。` : '请先完成答卷匹配，再运行真实试批。'}</p>
+          <h2 className="mt-4 font-black text-slate-900 dark:text-white">{trialGradingPhase === 'loading' ? trialProgress.phase === 'grading' ? 'AI 正在逐份评分' : '正在核对逐题答卷证据' : trialGradingPhase === 'error' ? '试批没有完成' : '尚未生成试批样本'}</h2>
+          {trialGradingPhase === 'loading' ? <div className="mt-4 w-full max-w-xl text-left"><div className="flex items-center justify-between text-xs"><strong className="text-emerald-800">{trialProgress.currentLabel}</strong><span className="text-slate-500">已用时 {formatElapsed(trialProgress.elapsedSeconds)}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800"><div className={`h-full rounded-full bg-emerald-600 transition-all ${trialProgress.phase === 'grading' ? 'w-1/2 animate-pulse' : ''}`} style={trialProgress.phase === 'grading' ? undefined : { width: `${trialProgress.total ? Math.max(8, Math.round(trialProgress.completed / trialProgress.total * 100)) : 8}%` }} /></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-3"><span className={trialProgress.completed >= trialProgress.total && trialProgress.total ? 'font-bold text-emerald-800' : 'font-bold text-sky-700'}>1. 逐题区域与 OCR 核对 {trialProgress.completed}/{trialProgress.total}</span><span className={trialProgress.phase === 'grading' ? 'font-bold text-sky-700' : 'text-slate-400'}>2. 依据评分细则逐份评分</span><span className="text-slate-400">3. 校验并保存试批结果</span></div><p className="mt-3 text-[11px] text-slate-500">评分阶段耗时取决于题目和样本数量，因此只显示真实阶段与用时，不伪造百分比或模型内部思维。</p></div> : <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">{trialGradingPhase === 'error' ? `处理失败（${trialGradingError}）。已完成的答卷识别会保留，重试时继续使用。` : '请先完成答卷匹配，再运行真实试批。'}</p>}
           {trialGradingPhase !== 'loading' ? <button type="button" onClick={() => void prepareTrialCalibration(true)} className="mt-5 rounded-2xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white">重新运行试批</button> : null}
         </section>
       ) : null}
 
       {activeStage === 'calibration' && currentQuestionState && selectedSample ? (
         <section className="space-y-4">
-          <div className="flex flex-wrap items-end justify-between gap-3"><QuestionSelector questions={workflowState.questions} states={questionStates} selectedId={selectedQuestionId} onSelect={selectQuestion} /><label className="flex items-center gap-2 text-xs font-bold text-slate-500"><span>本题试批数量</span><select value={currentQuestionState.sampleTarget} onChange={event => setSampleTarget(Number(event.target.value) as 3 | 5)} className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold dark:border-zinc-800 dark:bg-zinc-900"><option value={3}>3 份</option><option value={5}>5 份</option></select></label></div>
+          <div className="flex flex-wrap items-end justify-between gap-3"><QuestionSelector questions={selectedQuestions} states={questionStates} selectedId={selectedQuestionId} onSelect={selectQuestion} /><label className="flex items-center gap-2 text-xs font-bold text-slate-500"><span>本题试批数量</span><select value={currentQuestionState.sampleTarget} onChange={event => setSampleTarget(Number(event.target.value) as 3 | 5)} className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold dark:border-zinc-800 dark:bg-zinc-900"><option value={3}>3 份</option><option value={5}>5 份</option></select></label></div>
           <QuestionContext question={currentQuestion} number={questionNumber} evidence={questionEvidence} />
           <div className="grid gap-4 xl:grid-cols-[250px_minmax(0,1fr)]">
             <aside className={`${panelClass} overflow-hidden`}><div className="border-b border-slate-200/70 p-4 dark:border-zinc-800"><h2 className="font-black">第 {questionNumber} 题代表样本</h2><p className="mt-1 text-xs text-slate-500">已确认 {currentQuestionState.calibrationSamples.filter(sample => sample.status === 'confirmed').length} / {currentQuestionState.sampleTarget}</p></div>{currentQuestionState.calibrationSamples.slice(0, currentQuestionState.sampleTarget).map(sample => <button key={sample.id} type="button" onClick={() => selectSample(sample)} className={`w-full border-b border-slate-200/60 p-4 text-left last:border-0 dark:border-zinc-800/70 ${sample.id === selectedSample.id ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'hover:bg-slate-50 dark:hover:bg-zinc-900'}`}><div className="flex items-center justify-between gap-2"><strong className="text-sm">{sample.studentName}</strong>{sample.status === 'confirmed' ? <CheckCircle2 className="h-4 w-4 text-emerald-700" /> : null}</div><div className="mt-2 flex items-center justify-between text-xs"><span className="text-slate-500">{sampleTypeLabel[sample.sampleType]}</span><span className={sample.gradingConfidence < lowConfidenceThreshold ? 'font-bold text-rose-700' : 'text-slate-400'}>{Math.round(sample.gradingConfidence * 100)}%</span></div></button>)}</aside>

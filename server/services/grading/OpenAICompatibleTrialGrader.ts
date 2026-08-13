@@ -28,7 +28,7 @@ export const buildTrialAnswerEvidence = (item: VisionValidationItem) => {
 };
 
 export const buildTrialGradingPrompt = (request: TrialGradingRequest, submissions: unknown[]) => [
-  '你是语文教师的试批助手。依据已确认的题目、标准答案、采分点和教师规则，逐题评阅每份学生答卷的第一部分。',
+  '你是教师的试批助手。依据已确认的题目、标准答案、采分点和教师规则，逐题评阅每份学生答卷中本次选定的题目。',
   '只评价学生作答内容。答题卡上已有的分数、打勾、批注、阅卷痕迹和题旁数字都不是评分依据，必须忽略。',
   '只使用 recognizedAnswers 中已按题裁图识别的答案。不得引用整页 OCR，不得把相邻题答案混入，也不得补写学生未作答的内容。',
   'answer 与 paddleAnswer 是 PaddleOCR 主证据，评分默认以它们为准；lunaReview 只能作为视觉复核，不能静默覆盖 PaddleOCR。',

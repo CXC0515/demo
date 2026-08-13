@@ -43,7 +43,7 @@ const questionUnitSchema = z.object({
 });
 
 export const firstSectionModelOutputSchema = z.object({
-  scope: z.literal('第一部分'),
+  scope: z.literal('整份作业'),
   questions: z.array(questionUnitSchema.extend({
     subquestions: z.array(questionUnitSchema)
   }))

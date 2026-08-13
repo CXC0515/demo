@@ -415,8 +415,10 @@ export default function App() {
   }
 
   const selectedClass = classes.find(c => c.id === selectedClassId) ?? classes[0];
-  const pendingReviewCount = reviewQueue.filter(r => r.status === 'pending').length;
-  const navGroups = createNavGroups(pendingReviewCount);
+  const pendingReviewCount = reviewQueue.filter(r => r.status === 'pending').length
+    + Object.keys(workflowStates).flatMap(taskId => workflowStates[taskId].questionGradingStates ?? []).flatMap(state => state.calibrationSamples).filter(sample => sample.status !== 'confirmed' && (sample.needsTeacherReview || sample.recognitionConflict || sample.gradingConfidence < lowConfidenceThreshold)).length;
+  const activeGradingTaskCount = tasks.filter(task => task.status !== 'completed').length;
+  const navGroups = createNavGroups(activeGradingTaskCount);
 
   return (
     <AppLayout

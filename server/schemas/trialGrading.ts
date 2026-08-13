@@ -28,14 +28,22 @@ export const trialGradingRequestSchema = z.object({
   })).min(1).max(20)
 });
 
+const gradingPointReferenceSchema = z.union([
+  z.string(),
+  z.object({
+    point: z.string().optional(),
+    description: z.string().optional()
+  }).passthrough().refine(value => Boolean(value.point?.trim() || value.description?.trim()), 'EMPTY_GRADING_POINT_REFERENCE')
+]).transform(value => typeof value === 'string' ? value : value.point?.trim() || value.description?.trim() || '');
+
 export const trialGradingModelOutputSchema = z.object({
   samples: z.array(z.object({
     questionId: z.string().min(1),
     assetId: z.string().min(1),
     score: z.number().nonnegative().nullable(),
     confidence: z.number().min(0).max(1),
-    matchedPoints: z.array(z.string()),
-    missedPoints: z.array(z.string()),
+    matchedPoints: z.array(gradingPointReferenceSchema),
+    missedPoints: z.array(gradingPointReferenceSchema),
     reason: z.string(),
     needsTeacherReview: z.boolean()
   }))

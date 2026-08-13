@@ -42,6 +42,18 @@ test('allows the model to defer a score when the rubric is insufficient', () => 
   assert.equal(result.samples[0].needsTeacherReview, true);
 });
 
+test('normalizes grading point objects returned by compatible models', () => {
+  const result = trialGradingModelOutputSchema.parse({
+    samples: [{
+      questionId: 'q1', assetId: 'asset-1', score: 1, confidence: 0.9,
+      matchedPoints: [{ point: '内容准确', score: 1 }],
+      missedPoints: [{ description: '表达完整' }], reason: '基本符合', needsTeacherReview: false
+    }]
+  });
+  assert.deepEqual(result.samples[0].matchedPoints, ['内容准确']);
+  assert.deepEqual(result.samples[0].missedPoints, ['表达完整']);
+});
+
 test('rejects invalid confidence and empty submissions', () => {
   assert.equal(trialGradingRequestSchema.safeParse({ ...request, submissions: [] }).success, false);
   assert.equal(trialGradingModelOutputSchema.safeParse({
