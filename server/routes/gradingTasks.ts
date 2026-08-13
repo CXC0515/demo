@@ -79,7 +79,8 @@ const batchRequestSchema = trialGradingRequestSchema.extend({
 const analysisQuestionCorrectionSchema = z.object({
   title: z.string().trim().min(1).max(500),
   stem: z.string().trim().min(1).max(10_000),
-  answerRequirement: z.string().trim().max(2_000)
+  answerRequirement: z.string().trim().max(2_000),
+  standardAnswer: z.string().trim().max(20_000).optional()
 });
 
 const evidenceCropQuerySchema = z.object({
@@ -298,6 +299,9 @@ router.post('/:taskId/vision-validation', async (request, response) => {
         const fields = buildExpectedAnswerFields(question);
         return [question.displayNo, fields.length ? fields.map(field => field.fieldId) : [`${question.displayNo}-answer`]];
       }));
+    const expectedQuestionKinds = new Map(analysis.questions
+      .filter(question => parsedRequest.data.questionNos.includes(question.displayNo))
+      .map(question => [question.displayNo, /选择题/.test(question.questionType) ? 'choice' as const : 'text' as const]));
     const regions = await createVisionLocatedRegions(
       request.params.taskId,
       material.id,
@@ -305,7 +309,8 @@ router.post('/:taskId/vision-validation', async (request, response) => {
       parsedRequest.data.questionNos,
       expectedEvidenceIds,
       locatedPages.flat(),
-      parsedArtifact.data
+      parsedArtifact.data,
+      expectedQuestionKinds
     );
     const recognizer = new OpenAICompatibleVisionRecognizer(config);
     const recognizableRegions = regions.filter(region => region.locationStatus === 'located');
@@ -695,6 +700,8 @@ router.post('/:taskId/analysis', async (request, response) => {
       createdAt: new Date().toISOString()
     });
     deleteTrialGradingResult(request.params.taskId);
+    deleteGradingBatch(request.params.taskId);
+    deleteVisionValidationForTask(request.params.taskId);
     response.json({ analysis });
   } catch (error) {
     console.error(JSON.stringify({ event: 'first_section_analysis_failed', taskId: request.params.taskId, error: error instanceof Error ? error.message : String(error) }));

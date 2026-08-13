@@ -228,7 +228,18 @@ const answerRowFromPaddle = (
   const questionBlocks = orderedBlocks
     .map((block, index) => ({ block, index }))
     .filter(({ block }) => block.block_bbox[3] >= startTop && block.block_bbox[1] < nextAnchorTop && sameLane(block));
-  if (evidenceId.endsWith('-answer')) return blockRegion(start.block, start.index);
+  if (evidenceId.endsWith('-answer')) {
+    const regions = questionBlocks.map(({ block }) => {
+      const [left, top, right, bottom] = block.block_bbox;
+      return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
+    });
+    return {
+      key: questionBlocks.map(({ index }) => index).join(':'),
+      textKey: questionBlocks.map(({ index }) => index).join(':'),
+      region: unionRegions(regions),
+      text: questionBlocks.map(({ block }) => block.block_content.trim()).filter(Boolean).join('\n')
+    };
+  }
   const embeddedMarker = evidenceId.match(/[①②③④⑤⑥⑦⑧⑨⑩]/)?.[0];
   const fieldIndex = Number(evidenceId.match(/-(\d+)$/)?.[1] ?? 0);
   const marker = embeddedMarker ?? circledNumbers[fieldIndex - 1];
@@ -383,7 +394,8 @@ export const createVisionLocatedRegions = async (
   requestedQuestionNos: string[],
   expectedEvidenceIds: Map<string, string[]>,
   visionRegions: VisionLocatedRegion[],
-  artifact?: PaddleParserArtifact
+  artifact?: PaddleParserArtifact,
+  expectedQuestionKinds: Map<string, VisionEvidenceKind> = new Map()
 ): Promise<LocatedRegion[]> => {
   const cropDirectory = path.resolve('var/uploads/validation', taskId, assetId);
   await mkdir(cropDirectory, { recursive: true });
@@ -395,7 +407,12 @@ export const createVisionLocatedRegions = async (
   }
 
   return Promise.all(requestedQuestionNos.map(async displayNo => {
-    const vision = bestRegionByNo.get(displayNo);
+    const rawVision = bestRegionByNo.get(displayNo);
+    const expectedKind = expectedQuestionKinds.get(displayNo);
+    const vision = rawVision ? {
+      ...rawVision,
+      evidenceUnits: rawVision.evidenceUnits.map(unit => expectedKind === 'choice' ? { ...unit, kind: 'choice' as const } : unit)
+    } : undefined;
     const visionIsChoice = Boolean(vision?.evidenceUnits.length && vision.evidenceUnits.every(unit => unit.kind === 'choice'));
     const paddleChoice = visionIsChoice && artifact ? choiceRowAcrossPages(artifact, displayNo) : undefined;
     const page = paddleChoice ? pageByNumber.get(paddleChoice.pageNumber) : vision ? pageByNumber.get(vision.pageNumber) : pageSources[0];
@@ -405,21 +422,25 @@ export const createVisionLocatedRegions = async (
     const fullPage = { x: 0, y: 0, width: metadata.width, height: metadata.height };
     const visualQuestion = vision ? toPixels(vision.boundingBox, metadata.width, metadata.height) : fullPage;
     const expectedIds = expectedEvidenceIds.get(displayNo) ?? [];
-    const fallbackChoiceRow = paddleChoice?.row ?? (!vision && artifact && expectedIds.length === 1
+    const fallbackChoiceRow = paddleChoice?.row ?? (!vision && artifact && expectedKind === 'choice' && expectedIds.length === 1
       ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, expectedIds[0], 'choice', visualQuestion)
       : undefined);
     const answerPanel = vision && artifact && vision.evidenceUnits.length === 1 && vision.evidenceUnits[0].evidenceId.endsWith('-answer')
       ? emptyPanelFromPaddle(artifact, page.pageNumber, visualQuestion)
       : undefined;
-    const sourceEvidence = vision?.evidenceUnits ?? (fallbackChoiceRow ? [{
-      evidenceId: expectedIds[0],
-      kind: 'choice' as const,
+    const paddleQuestionRow = artifact && !visionIsChoice
+      ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, `${displayNo}-answer`, expectedKind ?? 'text', visualQuestion)
+      : undefined;
+    const usingPaddleFallback = !vision && Boolean(artifact);
+    const sourceEvidence = vision?.evidenceUnits ?? (artifact ? expectedIds.map(evidenceId => ({
+      evidenceId,
+      kind: expectedKind ?? 'text' as const,
       boundingBox: { x: 0, y: 0, width: 1, height: 1 },
       provisionalText: '',
       confidence: 0,
       needsReview: true,
-      reason: '整页视觉定位漏项，已用 Paddle 选项行恢复证据'
-    }] : []);
+      reason: '视觉定位漏项，已用 Paddle 题号与答案块恢复证据'
+    })) : []);
     const evidencePlans = await Promise.all(sourceEvidence.map(async evidence => {
       const locatedRow = fallbackChoiceRow ?? (artifact ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, evidence.evidenceId, evidence.kind, visualQuestion) : undefined);
       const usePaddleGeometry = locatedRow && (evidence.kind === 'choice' || locatedRow.lineCount === 1);
@@ -432,10 +453,12 @@ export const createVisionLocatedRegions = async (
         paddleTextKey: locatedRow?.textKey
       };
     }));
-    const paddleRows = evidencePlans.flatMap(plan => plan.paddleRow ? [plan.paddleRow.region] : []);
-    const questionPixels = paddleRows.length === evidencePlans.length && paddleRows.length
-      ? unionRegions(paddleRows)
-      : answerPanel ?? visualQuestion;
+    const usableEvidencePlans = usingPaddleFallback ? evidencePlans.filter(plan => plan.paddleRow) : evidencePlans;
+    const paddleRows = usableEvidencePlans.flatMap(plan => plan.paddleRow ? [plan.paddleRow.region] : []);
+    const questionPixels = paddleQuestionRow?.region
+      ?? (paddleRows.length && (usingPaddleFallback || paddleRows.length === usableEvidencePlans.length)
+        ? unionRegions(paddleRows)
+        : answerPanel ?? visualQuestion);
     const questionRegion = padRegion(
       questionPixels,
       fullPage,
@@ -449,10 +472,10 @@ export const createVisionLocatedRegions = async (
     await writeRecognitionCrop(page.sourceImagePath, recognitionPath, questionRegion);
 
     const rowUseCount = new Map<string, number>();
-    for (const plan of evidencePlans) if (plan.paddleRow) rowUseCount.set(plan.paddleRow.key, (rowUseCount.get(plan.paddleRow.key) ?? 0) + 1);
+    for (const plan of usableEvidencePlans) if (plan.paddleRow) rowUseCount.set(plan.paddleRow.key, (rowUseCount.get(plan.paddleRow.key) ?? 0) + 1);
     const textUseCount = new Map<string, number>();
-    for (const plan of evidencePlans) if (plan.paddleTextKey) textUseCount.set(plan.paddleTextKey, (textUseCount.get(plan.paddleTextKey) ?? 0) + 1);
-    const evidenceUnits = await Promise.all(evidencePlans.map(async ({ evidence, visualRegion, paddleRow, paddleText, paddleTextKey }, evidenceIndex) => {
+    for (const plan of usableEvidencePlans) if (plan.paddleTextKey) textUseCount.set(plan.paddleTextKey, (textUseCount.get(plan.paddleTextKey) ?? 0) + 1);
+    const evidenceUnits = await Promise.all(usableEvidencePlans.map(async ({ evidence, visualRegion, paddleRow, paddleText, paddleTextKey }, evidenceIndex) => {
       const rawRegion = answerPanel && evidence.evidenceId.endsWith('-answer')
         ? answerPanel
         : paddleRow
@@ -492,13 +515,13 @@ export const createVisionLocatedRegions = async (
     const returnedIds = new Set(evidenceUnits.map(unit => unit.evidenceId));
     const missingIds = (expectedEvidenceIds.get(displayNo) ?? []).filter(id => !returnedIds.has(id));
     const locationReasons = [
-      ...(!vision && !fallbackChoiceRow ? ['整页视觉定位未返回该题'] : []),
+      ...(!vision && !paddleRows.length ? ['视觉与 Paddle 均未定位到该题'] : []),
       ...(vision?.needsReview ? [vision.reason || '整页视觉定位需要核验'] : []),
       ...(missingIds.length ? [`缺少答案证据：${missingIds.join('、')}`] : [])
     ];
     const evidencePaddleText = [...new Set(evidenceUnits.map(unit => unit.paddleText.trim()).filter(Boolean))].join('\n');
-    const visualEvidenceRegion = evidencePlans.length
-      ? unionRegions(evidencePlans.map(plan => plan.visualRegion))
+    const visualEvidenceRegion = usableEvidencePlans.length
+      ? unionRegions(usableEvidencePlans.map(plan => plan.visualRegion))
       : visualQuestion;
     const paddleText = evidenceUnits.length && evidenceUnits.every(unit => unit.kind === 'choice')
       ? evidencePaddleText
@@ -510,7 +533,7 @@ export const createVisionLocatedRegions = async (
     return {
       displayNo,
       region: { ...questionRegion, pageNumber: page.pageNumber },
-      locatorSource: fallbackChoiceRow ? 'paddle-layout' : 'vision-layout',
+      locatorSource: paddleChoice || (usingPaddleFallback && paddleRows.length) ? 'paddle-layout' : 'vision-layout',
       locationStatus: locationReasons.length ? 'needs-teacher' : 'located',
       locationReasons,
       paddleText,

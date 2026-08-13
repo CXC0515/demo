@@ -72,7 +72,7 @@ export const getTaskAnalysis = async (taskId: string) => {
   return body.analysis;
 };
 
-export const saveTaskQuestionCorrection = async (taskId: string, displayNo: string, correction: { title: string; stem: string; answerRequirement: string }) => {
+export const saveTaskQuestionCorrection = async (taskId: string, displayNo: string, correction: { title: string; stem: string; answerRequirement: string; standardAnswer?: string }) => {
   const response = await fetch(`/api/grading-tasks/${taskId}/analysis/questions/${encodeURIComponent(displayNo)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

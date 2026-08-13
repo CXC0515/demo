@@ -193,6 +193,58 @@ test('recovers a misread choice number from the following choice row', async () 
   }
 });
 
+test('uses the known question type when vision mislabels a choice as text', async () => {
+  const page = await makeChoicePage();
+  const artifact: PaddleParserArtifact = { model: 'PaddleOCR-VL-1.6', pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [{ block_label: 'text', block_content: '1 [A] [B] [C] [D]\n4 [A] [B] [C] [D]', block_bbox: [60, 300, 350, 360], block_id: 1 }] } }] };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['3'],
+      new Map([['3', ['3-answer']]]),
+      [located({ displayNo: '3', boundingBox: { x: 0.07, y: 0.29, width: 0.35, height: 0.08 }, evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '3-answer', kind: 'text' }] })],
+      artifact,
+      new Map([['3', 'choice']])
+    );
+    assert.equal(region.locatorSource, 'paddle-layout');
+    assert.equal(region.evidenceUnits[0].kind, 'choice');
+    assert.ok(region.region.height < 45, JSON.stringify(region.region));
+    assert.equal(region.paddleText, '1 [A] [B] [C] [D]');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('uses Paddle answer blocks when vision omits a text question', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = { model: 'PaddleOCR-VL-1.6', pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [
+    { block_label: 'text', block_content: '1. ① first answer', block_bbox: [70, 280, 330, 315], block_id: 1 },
+    { block_label: 'text', block_content: '② second answer', block_bbox: [70, 320, 350, 355], block_id: 2 },
+    { block_label: 'text', block_content: '2. next question', block_bbox: [70, 390, 350, 425], block_id: 3 }
+  ] } }] };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['1'],
+      new Map([['1', ['1①-1', '1②-1']]]),
+      [],
+      artifact,
+      new Map([['1', 'text']])
+    );
+    assert.equal(region.locatorSource, 'paddle-layout');
+    assert.equal(region.locationStatus, 'located');
+    assert.equal(region.evidenceUnits.length, 2);
+    assert.ok(region.region.height < 120, JSON.stringify(region.region));
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
 test('uses geometric Paddle blocks even when block_order is reversed', async () => {
   const page = await makePage(1);
   const artifact: PaddleParserArtifact = {
