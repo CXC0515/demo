@@ -5,6 +5,7 @@
 
 import { Model, PaddleOCRClient } from '@paddleocr/api-sdk';
 import { DocumentParserConfig } from '../../config/documentParserConfig';
+import { withPaddleRequestSlot } from '../materials/paddleRequestLimiter';
 
 interface FocusedPaddlePage {
   markdownText?: string;
@@ -35,7 +36,7 @@ export class FocusedPaddleRecognizer {
       requestTimeout: 300_000,
       pollTimeout: 900_000
     });
-    const result = await client.parseDocument({
+    const result = await withPaddleRequestSlot(() => client.parseDocument({
       filePath: cropPath,
       model: this.config.paddleModel || Model.PaddleOCRVL16,
       options: {
@@ -45,7 +46,7 @@ export class FocusedPaddleRecognizer {
         promptLabel: 'ocr',
         mergeLayoutBlocks: false
       }
-    });
+    }));
     return extractFocusedPaddleText(result.pages);
   }
 }

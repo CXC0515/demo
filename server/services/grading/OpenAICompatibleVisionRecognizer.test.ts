@@ -34,7 +34,8 @@ const region = (kind: 'text' | 'choice'): LocatedRegion => ({
 
 test('text recognition receives whole-question Paddle text without per-field anchoring', () => {
   const prompt = buildRecognitionRegionPrompt(region('text'));
-  assert.match(prompt, /Paddle 整题原文/);
+  assert.match(prompt, /PP-OCRv6 逐行候选/);
+  assert.match(prompt, /PaddleOCR-VL 完整候选/);
   assert.doesNotMatch(prompt, /逐空候选/);
   assert.match(prompt, /answerFields 保持空数组/);
   assert.match(prompt, /不要拆分到逐空字段/);
@@ -59,4 +60,9 @@ test('focused OCR is reserved for cross-question structural contamination', () =
   assert.match(visionRecognitionInstructions, /少量错字、漏字、标点差异/);
   assert.match(visionRecognitionInstructions, /requiresFocusedOcr 必须为 false/);
   assert.match(visionRecognitionInstructions, /作文段落等跨题结构性内容/);
+});
+
+test('keeps existing teacher scores out of the recognized student answer', () => {
+  assert.match(visionRecognitionInstructions, /题号\(小题\):分数/);
+  assert.match(visionRecognitionInstructions, /不得写入 recognizedAnswer/);
 });
