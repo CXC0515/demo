@@ -6,7 +6,6 @@
 import { z } from 'zod';
 
 const bboxSchema = z.tuple([z.number(), z.number(), z.number(), z.number()]);
-const polygonSchema = z.array(z.tuple([z.number(), z.number()])).min(4);
 
 const parsingBlockSchema = z.object({
   block_label: z.string(),
@@ -18,7 +17,6 @@ const parsingBlockSchema = z.object({
 
 export const paddleParserArtifactSchema = z.object({
   model: z.string(),
-  ocrModel: z.string().optional(),
   pages: z.array(z.object({
     pageNumber: z.number().int().positive(),
     prunedResult: z.object({
@@ -26,18 +24,7 @@ export const paddleParserArtifactSchema = z.object({
       height: z.number().positive(),
       parsing_res_list: z.array(parsingBlockSchema)
     }).passthrough()
-  }).passthrough()).min(1),
-  ocrPages: z.array(z.object({
-    pageNumber: z.number().int().positive(),
-    width: z.number().positive(),
-    height: z.number().positive(),
-    lines: z.array(z.object({
-      text: z.string(),
-      confidence: z.number().min(0).max(1),
-      boundingBox: bboxSchema,
-      polygon: polygonSchema.optional()
-    }))
-  })).optional()
+  }).passthrough()).min(1)
 }).passthrough();
 
 export type PaddleParserArtifact = z.infer<typeof paddleParserArtifactSchema>;

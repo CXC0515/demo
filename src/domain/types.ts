@@ -174,8 +174,6 @@ export interface CalibrationSample {
   sampleType: 'high' | 'middle' | 'low' | 'boundary' | 'ocr-risk';
   rawImageDescription: string;
   rawOcrText?: string;
-  ocrV6Text?: string;
-  vlText?: string;
   teacherCorrectedText?: string;
   lunaReviewText?: string;
   recognitionConflict?: boolean;
@@ -240,8 +238,6 @@ export interface VisionValidationItem {
   locationReasons: string[];
   cropUrl: string;
   evidenceUnits?: VisionEvidenceUnit[];
-  ocrV6Text?: string;
-  vlText?: string;
   paddleText: string;
   lunaText: string;
   answerFields?: VisionAnswerField[];

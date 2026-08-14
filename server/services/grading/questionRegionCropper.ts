@@ -9,7 +9,6 @@ import sharp from 'sharp';
 import { VisionEvidenceKind } from '../../../src/domain/types';
 import { PaddleParserArtifact } from '../../schemas/paddleParserArtifact';
 import { containsRegion, expandRegion, inspectCropEdges, PixelRegion } from './answerEvidenceValidator';
-import { resolveQuestionAnchors } from './questionAnchorResolver';
 
 export interface PageSource {
   pageNumber: number;
@@ -57,8 +56,6 @@ export interface LocatedRegion {
   locationStatus: 'located' | 'needs-teacher';
   locationReasons: string[];
   needsFocusedOcr?: boolean;
-  ocrV6Text?: string;
-  vlText?: string;
   paddleText: string;
   cropPath: string;
   cropUrl: string;
@@ -508,8 +505,7 @@ export const createVisionLocatedRegions = async (
   expectedEvidenceIds: Map<string, string[]>,
   visionRegions: VisionLocatedRegion[],
   artifact?: PaddleParserArtifact,
-  expectedQuestionKinds: Map<string, VisionEvidenceKind> = new Map(),
-  knownQuestionNos: string[] = requestedQuestionNos
+  expectedQuestionKinds: Map<string, VisionEvidenceKind> = new Map()
 ): Promise<LocatedRegion[]> => {
   const cropDirectory = path.resolve('var/uploads/validation', taskId, assetId);
   await mkdir(cropDirectory, { recursive: true });
@@ -519,7 +515,6 @@ export const createVisionLocatedRegions = async (
     const current = bestRegionByNo.get(region.displayNo);
     if (!current || region.confidence > current.confidence) bestRegionByNo.set(region.displayNo, region);
   }
-  const anchoredQuestions = artifact ? resolveQuestionAnchors(artifact, knownQuestionNos) : new Map();
 
   return Promise.all(requestedQuestionNos.map(async displayNo => {
     const rawVision = bestRegionByNo.get(displayNo);
@@ -534,9 +529,7 @@ export const createVisionLocatedRegions = async (
       ? questionPageFromPaddle(artifact, displayNo, firstExpectedId, expectedKind ?? 'text')
       : undefined;
     const paddleChoice = (expectedKind === 'choice' || visionIsChoice) && artifact ? choiceRowAcrossPages(artifact, displayNo) : undefined;
-    const anchoredQuestion = anchoredQuestions.get(displayNo);
-    const page = anchoredQuestion ? pageByNumber.get(anchoredQuestion.anchor.pageNumber)
-      : paddleChoice ? pageByNumber.get(paddleChoice.pageNumber)
+    const page = paddleChoice ? pageByNumber.get(paddleChoice.pageNumber)
       : paddleQuestion ? pageByNumber.get(paddleQuestion.pageNumber)
       : vision ? pageByNumber.get(vision.pageNumber)
       : pageSources[0];
@@ -544,26 +537,7 @@ export const createVisionLocatedRegions = async (
     const metadata = await sharp(page.sourceImagePath).metadata();
     if (!metadata.width || !metadata.height) throw new Error('SOURCE_PAGE_INVALID');
     const fullPage = { x: 0, y: 0, width: metadata.width, height: metadata.height };
-    const ocrPage = artifact?.ocrPages?.find(candidate => candidate.pageNumber === page.pageNumber);
-    const anchoredQuestionPixels = anchoredQuestion && ocrPage
-      ? toPixels({
-          x: anchoredQuestion.boundingBox.x / ocrPage.width,
-          y: anchoredQuestion.boundingBox.y / ocrPage.height,
-          width: anchoredQuestion.boundingBox.width / ocrPage.width,
-          height: anchoredQuestion.boundingBox.height / ocrPage.height
-        }, metadata.width, metadata.height)
-      : undefined;
-    const anchoredRecognitionPixels = anchoredQuestion && ocrPage
-      ? toPixels({
-          x: anchoredQuestion.recognitionBoundingBox.x / ocrPage.width,
-          y: anchoredQuestion.recognitionBoundingBox.y / ocrPage.height,
-          width: anchoredQuestion.recognitionBoundingBox.width / ocrPage.width,
-          height: anchoredQuestion.recognitionBoundingBox.height / ocrPage.height
-        }, metadata.width, metadata.height)
-      : undefined;
-    const visualQuestion = vision
-      ? toPixels(vision.boundingBox, metadata.width, metadata.height)
-      : anchoredQuestionPixels ?? fullPage;
+    const visualQuestion = vision ? toPixels(vision.boundingBox, metadata.width, metadata.height) : fullPage;
     const expectedIds = expectedEvidenceIds.get(displayNo) ?? [];
     const fallbackChoiceRow = paddleChoice?.row ?? (!vision && artifact && expectedKind === 'choice' && expectedIds.length === 1
       ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, expectedIds[0], 'choice', visualQuestion)
@@ -575,20 +549,14 @@ export const createVisionLocatedRegions = async (
       ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, `${displayNo}-answer`, expectedKind ?? 'text', visualQuestion)
       : undefined);
     const usingPaddleFallback = !vision && Boolean(artifact);
-    const anchoredEvidenceBox = anchoredQuestion && ocrPage ? {
-      x: anchoredQuestion.boundingBox.x / ocrPage.width,
-      y: anchoredQuestion.boundingBox.y / ocrPage.height,
-      width: anchoredQuestion.boundingBox.width / ocrPage.width,
-      height: anchoredQuestion.boundingBox.height / ocrPage.height
-    } : undefined;
     const sourceEvidence = vision?.evidenceUnits ?? (artifact ? expectedIds.map(evidenceId => ({
       evidenceId,
       kind: expectedKind ?? 'text' as const,
-      boundingBox: anchoredEvidenceBox ?? { x: 0, y: 0, width: 1, height: 1 },
+      boundingBox: { x: 0, y: 0, width: 1, height: 1 },
       provisionalText: '',
-      confidence: anchoredQuestion?.anchor.confidence ?? 0,
-      needsReview: !anchoredQuestion,
-      reason: anchoredQuestion ? '' : '视觉定位漏项，已用 Paddle 题号与答案块恢复证据'
+      confidence: 0,
+      needsReview: true,
+      reason: '视觉定位漏项，已用 Paddle 题号与答案块恢复证据'
     })) : []);
     const evidencePlans = await Promise.all(sourceEvidence.map(async evidence => {
       const locatedRow = fallbackChoiceRow ?? (artifact ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, evidence.evidenceId, evidence.kind, visualQuestion) : undefined);
@@ -602,9 +570,7 @@ export const createVisionLocatedRegions = async (
         paddleTextKey: locatedRow?.textKey
       };
     }));
-    const usableEvidencePlans = usingPaddleFallback && !anchoredQuestion
-      ? evidencePlans.filter(plan => plan.paddleRow)
-      : evidencePlans;
+    const usableEvidencePlans = usingPaddleFallback ? evidencePlans.filter(plan => plan.paddleRow) : evidencePlans;
     const paddleRows = usableEvidencePlans.flatMap(plan => plan.paddleRow ? [plan.paddleRow.region] : []);
     const alignedChoiceRow = expectedKind === 'choice' && fallbackChoiceRow
       ? await alignBlockLineToInk(page.sourceImagePath, fallbackChoiceRow)
@@ -613,7 +579,6 @@ export const createVisionLocatedRegions = async (
       ? await panelBeforeNextQuestion(page.sourceImagePath, artifact, page.pageNumber, displayNo, visualQuestion)
       : undefined;
     const questionPixels = alignedChoiceRow?.region
-      ?? anchoredQuestionPixels
       ?? (paddleRows.length && (usingPaddleFallback || paddleRows.length === usableEvidencePlans.length)
         ? unionRegions(paddleRows)
         : paddleQuestionRow?.region ?? boundedVisualPanel ?? answerPanel ?? visualQuestion);
@@ -627,7 +592,7 @@ export const createVisionLocatedRegions = async (
     const questionPath = path.join(cropDirectory, questionFileName);
     await writeCrop(page.sourceImagePath, questionPath, questionRegion);
     const recognitionPath = path.join(cropDirectory, `question-${displayNo}-recognition.jpg`);
-    await writeRecognitionCrop(page.sourceImagePath, recognitionPath, anchoredRecognitionPixels ?? questionRegion);
+    await writeRecognitionCrop(page.sourceImagePath, recognitionPath, questionRegion);
 
     const rowUseCount = new Map<string, number>();
     for (const plan of usableEvidencePlans) if (plan.paddleRow) rowUseCount.set(plan.paddleRow.key, (rowUseCount.get(plan.paddleRow.key) ?? 0) + 1);
@@ -673,7 +638,7 @@ export const createVisionLocatedRegions = async (
     const returnedIds = new Set(evidenceUnits.map(unit => unit.evidenceId));
     const missingIds = (expectedEvidenceIds.get(displayNo) ?? []).filter(id => !returnedIds.has(id));
     const locationReasons = [
-      ...(!vision && !anchoredQuestion && !paddleRows.length ? ['视觉与 Paddle 均未定位到该题'] : []),
+      ...(!vision && !paddleRows.length ? ['视觉与 Paddle 均未定位到该题'] : []),
       ...(vision?.needsReview ? [vision.reason || '整页视觉定位需要核验'] : []),
       ...(missingIds.length ? [`缺少答案证据：${missingIds.join('、')}`] : [])
     ];
@@ -693,7 +658,7 @@ export const createVisionLocatedRegions = async (
         const number = line.trim().match(/^(\d+)(?:\s|[.、])/u)?.[1];
         return number !== undefined && number !== displayNo;
       });
-    const vlText = evidenceUnits.length && evidenceUnits.every(unit => unit.kind === 'choice')
+    const paddleText = evidenceUnits.length && evidenceUnits.every(unit => unit.kind === 'choice')
       ? evidencePaddleText
       : artifact
         ? numberedPaddleText
@@ -702,9 +667,7 @@ export const createVisionLocatedRegions = async (
             : overlappingStartsWithAnotherQuestion ? '' : overlappingPaddleText)
           || evidencePaddleText
         : evidencePaddleText;
-    const ocrV6Text = anchoredQuestion?.ocrText ?? '';
-    const paddleText = vlText || ocrV6Text;
-    const paddleContainsAnotherQuestion = vlText
+    const paddleContainsAnotherQuestion = paddleText
       .split(/\r?\n/)
       .some(line => {
         const number = line.trim().match(/^(\d+)(?:\s|[.、])/u)?.[1];
@@ -719,12 +682,10 @@ export const createVisionLocatedRegions = async (
     return {
       displayNo,
       region: { ...questionRegion, pageNumber: page.pageNumber },
-      locatorSource: anchoredQuestion || paddleChoice || paddleQuestion || (usingPaddleFallback && paddleRows.length) ? 'paddle-layout' : 'vision-layout',
+      locatorSource: paddleChoice || paddleQuestion || (usingPaddleFallback && paddleRows.length) ? 'paddle-layout' : 'vision-layout',
       locationStatus: locationReasons.length ? 'needs-teacher' : 'located',
       locationReasons,
       needsFocusedOcr: overlappingStartsWithAnotherQuestion || paddleContainsAnotherQuestion || overlappingFallbackCrossesBoundary,
-      ocrV6Text,
-      vlText,
       paddleText,
       cropPath: recognitionPath,
       cropUrl: `/uploads/validation/${encodeURIComponent(taskId)}/${encodeURIComponent(assetId)}/${encodeURIComponent(questionFileName)}`,

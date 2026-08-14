@@ -65,8 +65,6 @@ export const gradeTrialSubmissions = async (
       sampleType,
       rawImageDescription: `${material.fileName} · 第 ${question.displayNo} 题截图`,
       rawOcrText: getObservedAnswer(visionItem),
-      ocrV6Text: visionItem.ocrV6Text,
-      vlText: visionItem.vlText,
       teacherCorrectedText: correctedText,
       ocrText: observedText,
       lunaReviewText: visionItem.lunaText,

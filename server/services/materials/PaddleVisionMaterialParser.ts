@@ -19,7 +19,6 @@ import { DocumentParserConfig } from '../../config/documentParserConfig';
 import { saveParserArtifact } from '../../repositories/parserArtifactRepository';
 import { MaterialParser, MaterialParserError, MaterialParserInput } from './MaterialParser';
 import { enhanceRecognitionPage } from './recognitionImagePreprocessor';
-import { withPaddleRequestSlot } from './paddleRequestLimiter';
 
 export class PaddleVisionMaterialParser implements MaterialParser {
   constructor(private readonly config: DocumentParserConfig) {}
@@ -37,41 +36,27 @@ export class PaddleVisionMaterialParser implements MaterialParser {
       pollTimeout: 900_000
     });
     try {
-      const [result, ocrResult] = await Promise.all([
-        withPaddleRequestSlot(() => client.parseDocument({
-          filePath: input.filePath,
-          model: this.config.paddleModel || Model.PaddleOCRVL16,
-          options: {
-            // Keep both recognition results in the same source coordinate space.
-            useDocOrientationClassify: false,
-            useDocUnwarping: false,
-            useLayoutDetection: true,
-            useChartRecognition: true,
-            useOcrForImageBlock: true,
-            mergeLayoutBlocks: false,
-            layoutShapeMode: 'rect',
-            prettifyMarkdown: true,
-            showFormulaNumber: true,
-            returnMarkdownImages: true
-          }
-        })),
-        withPaddleRequestSlot(() => client.ocr({
-          filePath: input.filePath,
-          model: Model.PPOCRv6,
-          options: {
-            useDocOrientationClassify: false,
-            useDocUnwarping: false,
-            useTextlineOrientation: false,
-            visualize: false
-          }
-        }))
-      ]);
-      const ocrPageInfo = (ocrResult.dataInfo?.pages ?? []) as Array<{ width?: number; height?: number }>;
+      const result = await client.parseDocument({
+        filePath: input.filePath,
+        model: this.config.paddleModel || Model.PaddleOCRVL16,
+        options: {
+          // Keep the upload geometry stable. Geometric correction is only safe once its transform
+          // can be retained and applied consistently to source evidence.
+          useDocOrientationClassify: false,
+          useDocUnwarping: false,
+          useLayoutDetection: true,
+          useChartRecognition: true,
+          useOcrForImageBlock: true,
+          mergeLayoutBlocks: false,
+          layoutShapeMode: 'rect',
+          prettifyMarkdown: true,
+          showFormulaNumber: true,
+          returnMarkdownImages: true
+        }
+      });
       saveParserArtifact(input.assetId, {
         model: this.config.paddleModel || Model.PaddleOCRVL16,
-        ocrModel: Model.PPOCRv6,
         jobId: result.jobId,
-        ocrJobId: ocrResult.jobId,
         dataInfo: result.dataInfo,
         pages: result.pages.map((page, index) => ({
           pageNumber: index + 1,
@@ -80,33 +65,7 @@ export class PaddleVisionMaterialParser implements MaterialParser {
           exports: page.exports,
           markdown: page.markdown,
           inputImageUrl: page.inputImageUrl
-        })),
-        ocrPages: ocrResult.pages.map((page, index) => {
-          const parsed = page.prunedResult as {
-            rec_texts?: string[];
-            rec_scores?: number[];
-            rec_boxes?: Array<[number, number, number, number]>;
-            rec_polys?: Array<Array<[number, number]>>;
-          };
-          const pageInfo = ocrPageInfo[index];
-          const fallbackPage = result.pages[index]?.prunedResult as { width?: number; height?: number } | undefined;
-          const texts = parsed.rec_texts ?? [];
-          return {
-            pageNumber: index + 1,
-            width: pageInfo?.width ?? fallbackPage?.width ?? 1,
-            height: pageInfo?.height ?? fallbackPage?.height ?? 1,
-            lines: texts.flatMap((text, lineIndex) => {
-              const boundingBox = parsed.rec_boxes?.[lineIndex];
-              if (!boundingBox) return [];
-              return [{
-                text,
-                confidence: parsed.rec_scores?.[lineIndex] ?? 0,
-                boundingBox,
-                polygon: parsed.rec_polys?.[lineIndex]
-              }];
-            })
-          };
-        })
+        }))
       });
       const resourceDirectory = path.resolve('var/uploads/parsed', input.assetId, 'resources');
       await mkdir(resourceDirectory, { recursive: true });

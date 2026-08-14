@@ -198,7 +198,6 @@ function VisionItemCard({ item }: { item: VisionValidationItem; key?: string }) 
       {item.answerFields?.length ? (
         <div className="space-y-1">{item.answerFields.map(field => <p key={field.fieldId} className="text-xs leading-5"><strong>{field.label}：</strong>{field.text || '未填写'}{field.needsReview ? <span className="ml-1 text-amber-700">待核验</span> : null}</p>)}</div>
       ) : <p className="text-xs leading-5"><strong>{item.needsReview ? '识别草稿（待核验）' : '有效答案'}：</strong>{item.lunaText || item.selectedOption || '未识别'}{item.selectedOption && item.lunaText && item.lunaText !== item.selectedOption ? `（选项 ${item.selectedOption}）` : ''}</p>}
-      {item.ocrV6Text || item.vlText ? <div className="grid gap-2 text-[11px] leading-5 sm:grid-cols-2">{item.ocrV6Text ? <div className="max-h-24 overflow-auto rounded-lg bg-sky-50 p-2 text-sky-950"><strong>PP-OCRv6 · 题号与逐行</strong><p className="mt-1 whitespace-pre-wrap">{item.ocrV6Text}</p></div> : null}{item.vlText ? <div className="max-h-24 overflow-auto rounded-lg bg-slate-50 p-2 text-slate-700"><strong>PaddleOCR-VL · 完整解析</strong><p className="mt-1 whitespace-pre-wrap">{item.vlText}</p></div> : null}</div> : null}
       {item.crossedOutText.length ? <p className="text-[11px] leading-5 text-slate-500">已划去：{item.crossedOutText.join('；')}</p> : null}
       {item.existingMarkings.length ? <p className="text-[11px] leading-5 text-amber-700">已有批改痕迹：{item.existingMarkings.join('；')}</p> : null}
     </article>

@@ -296,8 +296,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
       expectedEvidenceIds,
       [],
       parsedArtifact.data,
-      expectedQuestionKinds,
-      analysis.questions.map(question => question.displayNo)
+      expectedQuestionKinds
     );
     const missingPaddleNumbers = regions
       .filter(region => region.locationStatus === 'needs-teacher' && region.locationReasons.some(reason => reason.includes('视觉与 Paddle 均未定位')))
@@ -346,8 +345,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
         expectedEvidenceIds,
         sequenceFiltered,
         parsedArtifact.data,
-        expectedQuestionKinds,
-        analysis.questions.map(question => question.displayNo)
+        expectedQuestionKinds
       );
       const recoveredByNo = new Map(recovered.map(region => [region.displayNo, region]));
       regions = regions.map(region => recoveredByNo.get(region.displayNo) ?? region);
@@ -371,7 +369,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
           result.status === 'fulfilled' && result.value.text ? [[result.value.displayNo, result.value.text] as const] : []
         ));
         regions = regions.map(region => focusedTextByNo.has(region.displayNo)
-          ? { ...region, vlText: focusedTextByNo.get(region.displayNo)!, paddleText: focusedTextByNo.get(region.displayNo)!, needsFocusedOcr: false }
+          ? { ...region, paddleText: focusedTextByNo.get(region.displayNo)!, needsFocusedOcr: false }
           : region
         );
         const refreshedRegions = regions.filter(region => focusedTextByNo.has(region.displayNo));
@@ -439,8 +437,6 @@ router.post('/:taskId/vision-validation', async (request, response) => {
           locationReasons: region.locationReasons,
           cropUrl: region.cropUrl,
           evidenceUnits,
-          ocrV6Text: region.ocrV6Text,
-          vlText: region.vlText,
           paddleText: region.locationStatus === 'located' ? region.paddleText : '',
           lunaText: structuredText,
           answerFields,
