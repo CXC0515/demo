@@ -487,3 +487,81 @@ test('keeps the complete visual question when Paddle merges the previous answer 
     await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
   }
 });
+
+test('stops a numbered answer at a separated unnumbered composition block', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [
+          { block_label: 'text', block_content: '22. 本题第一行\n本题第二行', block_bbox: [70, 560, 330, 635], block_id: 1, block_order: 1 },
+          { block_label: 'text', block_content: '题目：我的创意', block_bbox: [120, 670, 300, 695], block_id: 2, block_order: 2 },
+          { block_label: 'paragraph_title', block_content: '作文第一段', block_bbox: [70, 700, 335, 850], block_id: 3, block_order: 3 }
+        ]
+      }
+    }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['22'],
+      new Map([['22', ['22-answer']]]),
+      [located({
+        displayNo: '22',
+        boundingBox: { x: 0.05, y: 0.52, width: 0.9, height: 0.4 },
+        evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '22-answer', boundingBox: { x: 0.08, y: 0.55, width: 0.85, height: 0.35 } }]
+      })],
+      artifact
+    );
+    assert.equal(region.paddleText, '22. 本题第一行\n本题第二行');
+    assert.ok(region.region.y + region.region.height < 670, JSON.stringify(region.region));
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('keeps a partially obscured answer-card rule as the panel boundary', async () => {
+  await mkdir(sourceDirectory, { recursive: true });
+  const sourcePath = path.join(sourceDirectory, `${assetId}-obscured-rule.jpg`);
+  const ink = Buffer.from('<svg width="800" height="1000"><path d="M50 300H750 M50 340H750 M50 380H670 M50 420H750" stroke="black" stroke-width="2"/><text x="80" y="370" font-size="20">previous answer</text><text x="80" y="410" font-size="20">target answer</text></svg>');
+  await sharp({ create: { width: 800, height: 1000, channels: 3, background: 'white' } })
+    .composite([{ input: ink }])
+    .jpeg({ quality: 100 })
+    .toFile(sourcePath);
+  const page = { pageNumber: 1, sourceImagePath: sourcePath };
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [
+      { block_label: 'text', block_content: '上一题的大段识别内容', block_bbox: [50, 300, 750, 405], block_id: 1 },
+      { block_label: 'text', block_content: '10. 下一题', block_bbox: [50, 430, 300, 460], block_id: 2 }
+    ] } }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['9'],
+      new Map([['9', ['9-answer']]]),
+      [located({
+        displayNo: '9',
+        boundingBox: { x: 0.06, y: 0.28, width: 0.88, height: 0.16 },
+        evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '9-answer', boundingBox: { x: 0.08, y: 0.36, width: 0.8, height: 0.06 } }]
+      })],
+      artifact
+    );
+    assert.ok(region.region.y >= 375, JSON.stringify(region.region));
+    assert.ok(region.region.y + region.region.height <= 425, JSON.stringify(region.region));
+    assert.equal(region.needsFocusedOcr, true);
+  } finally {
+    await rm(sourcePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});

@@ -18,6 +18,7 @@ import {
 import { DocumentParserConfig } from '../../config/documentParserConfig';
 import { saveParserArtifact } from '../../repositories/parserArtifactRepository';
 import { MaterialParser, MaterialParserError, MaterialParserInput } from './MaterialParser';
+import { enhanceRecognitionPage } from './recognitionImagePreprocessor';
 
 export class PaddleVisionMaterialParser implements MaterialParser {
   constructor(private readonly config: DocumentParserConfig) {}
@@ -39,8 +40,8 @@ export class PaddleVisionMaterialParser implements MaterialParser {
         filePath: input.filePath,
         model: this.config.paddleModel || Model.PaddleOCRVL16,
         options: {
-          // Crops must use the same coordinate space as Paddle's returned input image.
-          // Orientation and unwarping are handled before parsing when we can retain the transform.
+          // Keep the upload geometry stable. Geometric correction is only safe once its transform
+          // can be retained and applied consistently to source evidence.
           useDocOrientationClassify: false,
           useDocUnwarping: false,
           useLayoutDetection: true,
@@ -95,6 +96,9 @@ export class PaddleVisionMaterialParser implements MaterialParser {
           filename: plan.fileName
         })
       })));
+      await Promise.all(savedResources
+        .filter(resource => resource.role === 'source-page')
+        .map(resource => enhanceRecognitionPage(resource.resourcePath)));
       const warnings = result.pages.flatMap((page, index) => page.markdownText.trim() ? [] : [{
         code: 'PADDLEOCR_EMPTY_PAGE',
         message: `第 ${index + 1} 页没有生成可用的 Markdown。`

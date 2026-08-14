@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { LocatedRegion } from './questionRegionCropper';
-import { bindSingleRegionIdentity, buildRecognitionRegionPrompt, getWholeQuestionAnswer } from './OpenAICompatibleVisionRecognizer';
+import { bindSingleRegionIdentity, buildRecognitionRegionPrompt, getWholeQuestionAnswer, visionRecognitionInstructions } from './OpenAICompatibleVisionRecognizer';
 
 const region = (kind: 'text' | 'choice'): LocatedRegion => ({
   displayNo: '2',
@@ -53,4 +53,10 @@ test('legacy per-field output is collapsed without duplicating a whole line', ()
 
 test('binds a single crop response to the question identity owned by the request', () => {
   assert.deepEqual(bindSingleRegionIdentity([{ displayNo: '8', text: '答案' }], [{ ...region('text'), displayNo: '9' }]), [{ displayNo: '9', text: '答案' }]);
+});
+
+test('focused OCR is reserved for cross-question structural contamination', () => {
+  assert.match(visionRecognitionInstructions, /少量错字、漏字、标点差异/);
+  assert.match(visionRecognitionInstructions, /requiresFocusedOcr 必须为 false/);
+  assert.match(visionRecognitionInstructions, /作文段落等跨题结构性内容/);
 });

@@ -249,9 +249,17 @@ const answerRowFromPaddle = (
     })
     .map(block => block.block_bbox[1])
     .sort((first, second) => first - second)[0] ?? Number.POSITIVE_INFINITY;
-  const questionBlocks = orderedBlocks
+  const candidateQuestionBlocks = orderedBlocks
     .map((block, index) => ({ block, index }))
-    .filter(({ block }) => block.block_bbox[3] >= startTop && block.block_bbox[1] < nextAnchorTop && sameLane(block));
+    .filter(({ block }) => block.block_bbox[1] >= startTop && block.block_bbox[1] < nextAnchorTop && sameLane(block));
+  const continuationGap = page.prunedResult.height * 0.012;
+  const questionBlocks = candidateQuestionBlocks.reduce<typeof candidateQuestionBlocks>((result, candidate) => {
+    if (!result.length) return candidate.index === start.index ? [candidate] : result;
+    const previousBottom = result[result.length - 1].block.block_bbox[3];
+    if (candidate.block.block_bbox[1] - previousBottom > continuationGap) return result;
+    result.push(candidate);
+    return result;
+  }, []);
   if (evidenceId.endsWith('-answer')) {
     const startLines = start.block.block_content.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     const targetLineIndex = startLines.findIndex(line => line.match(/^(\d+)(?:\s|[.、（(\[])/u)?.[1] === displayNo);
@@ -356,6 +364,26 @@ const overlapRatio = (first: PixelRegion, second: PixelRegion) => {
   return (width * height) / Math.max(1, Math.min(first.width * first.height, second.width * second.height));
 };
 
+const paddleBlockCrossesRegionBoundary = (
+  artifact: PaddleParserArtifact,
+  pageNumber: number,
+  region: PixelRegion
+) => {
+  const page = artifact.pages.find(candidate => candidate.pageNumber === pageNumber);
+  if (!page) return false;
+  return page.prunedResult.parsing_res_list.some(block => {
+    if (!block.block_content.trim()) return false;
+    const [left, top, right, bottom] = block.block_bbox;
+    const blockRegion = { x: left, y: top, width: right - left, height: bottom - top };
+    const intersectionWidth = Math.max(0, Math.min(right, region.x + region.width) - Math.max(left, region.x));
+    const intersectionHeight = Math.max(0, Math.min(bottom, region.y + region.height) - Math.max(top, region.y));
+    const intersectionArea = intersectionWidth * intersectionHeight;
+    const blockArea = Math.max(1, blockRegion.width * blockRegion.height);
+    const regionArea = Math.max(1, region.width * region.height);
+    return intersectionArea / regionArea >= 0.2 && intersectionArea / blockArea < 0.6;
+  });
+};
+
 const paddleTextInsideRegion = (
   artifact: PaddleParserArtifact,
   pageNumber: number,
@@ -444,7 +472,7 @@ const panelBeforeNextQuestion = async (
     for (let x = 0; x < info.width; x += 1) if (data[y * info.width + x] < 180) darkPixels += 1;
     return darkPixels / info.width;
   });
-  const threshold = Math.max(0.55, Math.max(...rowRatios) * 0.85);
+  const threshold = Math.max(0.55, Math.max(...rowRatios) * 0.75);
   const ruleRows = rowRatios.flatMap((ratio, y) => ratio >= threshold ? [y] : []);
   const rules = ruleRows.reduce<Array<{ top: number; bottom: number }>>((result, y) => {
     const current = result[result.length - 1];
@@ -645,13 +673,19 @@ export const createVisionLocatedRegions = async (
         const number = line.trim().match(/^(\d+)(?:\s|[.、])/u)?.[1];
         return number !== undefined && number !== displayNo;
       });
+    const overlappingFallbackCrossesBoundary = Boolean(
+      artifact
+      && !numberedPaddleText
+      && overlappingPaddleText
+      && paddleBlockCrossesRegionBoundary(artifact, page.pageNumber, questionRegion)
+    );
     return {
       displayNo,
       region: { ...questionRegion, pageNumber: page.pageNumber },
       locatorSource: paddleChoice || paddleQuestion || (usingPaddleFallback && paddleRows.length) ? 'paddle-layout' : 'vision-layout',
       locationStatus: locationReasons.length ? 'needs-teacher' : 'located',
       locationReasons,
-      needsFocusedOcr: overlappingStartsWithAnotherQuestion || paddleContainsAnotherQuestion,
+      needsFocusedOcr: overlappingStartsWithAnotherQuestion || paddleContainsAnotherQuestion || overlappingFallbackCrossesBoundary,
       paddleText,
       cropPath: recognitionPath,
       cropUrl: `/uploads/validation/${encodeURIComponent(taskId)}/${encodeURIComponent(assetId)}/${encodeURIComponent(questionFileName)}`,
