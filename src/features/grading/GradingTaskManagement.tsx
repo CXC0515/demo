@@ -4,7 +4,8 @@
  */
 
 import { AlertTriangle, ArrowRight, CalendarClock, CheckCircle2, FilePlus2, Plus, Users, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { formatCollectionDeadline, getDefaultCollectionDeadline, getNextDailyTaskName, toDateTimeInputValue } from '../../domain/gradingTask';
 import { ReviewItem, SchoolClass, WorkbenchTask } from '../../domain/types';
 
@@ -47,6 +48,13 @@ export default function GradingTaskManagement({ tasks, classes, defaultClassId, 
     setDeadline(toDateTimeInputValue(getDefaultCollectionDeadline()));
     setShowCreate(true);
   };
+
+  useEffect(() => {
+    if (!showCreate) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [showCreate]);
 
   const createTask = () => {
     const schoolClass = classes.find(item => item.id === classId) ?? classes[0];
@@ -103,8 +111,8 @@ export default function GradingTaskManagement({ tasks, classes, defaultClassId, 
         })}
       </section>
 
-      {showCreate ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="新建批改任务">
+      {showCreate ? createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="新建批改任务">
           <div className="glass-panel w-full max-w-lg rounded-[24px] p-6 shadow-2xl">
             <div className="flex items-center justify-between"><h2 className="text-lg font-black text-slate-900 dark:text-white">新建作业任务</h2><button type="button" title="关闭" aria-label="关闭" onClick={() => setShowCreate(false)} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-zinc-800"><X className="h-4 w-4" /></button></div>
             <div className="mt-5 space-y-4">
@@ -114,7 +122,7 @@ export default function GradingTaskManagement({ tasks, classes, defaultClassId, 
             </div>
             <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setShowCreate(false)} className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 dark:border-zinc-700 dark:text-slate-300">取消</button><button type="button" onClick={createTask} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800">创建任务</button></div>
           </div>
-        </div>
+        </div>, document.body
       ) : null}
     </div>
   );

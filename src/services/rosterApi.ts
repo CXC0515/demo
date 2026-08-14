@@ -36,6 +36,18 @@ const jsonRequest = (method: string, body?: unknown): RequestInit => ({
 
 export const getRoster = () => requestJson<RosterSnapshot>('/api/roster');
 
+export const listRosterClasses = async () => {
+  const body = await requestJson<{ classes: SchoolClass[] }>('/api/classes');
+  return body.classes;
+};
+
+export const listRosterStudents = async (classId: string) => {
+  const body = await requestJson<{ students: RosterStudent[] }>(
+    `/api/classes/${encodeURIComponent(classId)}/students`
+  );
+  return body.students;
+};
+
 export const createRosterClass = async (schoolClass: SchoolClass) => {
   const { id: _id, studentCount: _studentCount, representatives: _representatives, ...input } = schoolClass;
   const body = await requestJson<{ schoolClass: SchoolClass }>('/api/classes', jsonRequest('POST', input));

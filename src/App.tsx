@@ -12,12 +12,8 @@ import {
   Student, SchoolClass, WorkbenchTask, ScheduleItem,
   TimerReminder, ReviewItem, WorkflowState, TeacherObservation, RosterStudent
 } from './domain/types';
-import {
-  initialTasks,
-  initialSchedule, initialReminders, initialReviewQueue, initialWorkflowState,
-  initialKnowledgeNodes
-} from './domain/mockData';
 import { createEmptyWorkflowState } from './domain/gradingTask';
+import { listGradingTasks, saveGradingTask } from './services/gradingTaskApi';
 import {
   createRosterClass,
   createRosterStudent,
@@ -43,8 +39,6 @@ import GradingWorkspace from './features/grading/GradingWorkspace';
 import DiagnosisWorkspace, { DiagnosisTab } from './features/diagnosis/DiagnosisWorkspace';
 import CareerPlaceholder from './features/career/CareerPlaceholder';
 
-const AI_GRADING_TEST_TASK_ID = 'task-20260810-1';
-
 const describeRosterError = (error: unknown) => {
   const code = error instanceof Error ? error.message : '未知错误';
   if (code === 'DUPLICATE_STUDENT_NO') return '该班级中已存在相同学号';
@@ -62,16 +56,7 @@ const getLocalDate = () => {
 };
 
 const createInitialWorkflowState = (task: WorkbenchTask) => {
-  if (task.id === AI_GRADING_TEST_TASK_ID) {
-    const state = createEmptyWorkflowState(task);
-    return { ...state, assignment: { ...state.assignment, status: 'assigned' as const } };
-  }
-  return {
-    ...initialWorkflowState,
-    taskName: task.name,
-    classId: task.classId,
-    deadline: task.deadline
-  };
+  return createEmptyWorkflowState(task);
 };
 
 export default function App() {
@@ -97,13 +82,11 @@ export default function App() {
   const [students, setStudents] = useState<RosterStudent[]>([]);
   const [rosterLoading, setRosterLoading] = useState(true);
   const [rosterError, setRosterError] = useState<string | null>(null);
-  const [tasks, setTasks] = useState<WorkbenchTask[]>(initialTasks);
-  const [schedule, setSchedule] = useState<ScheduleItem[]>(initialSchedule);
-  const [reminders, setReminders] = useState<TimerReminder[]>(initialReminders);
-  const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>(initialReviewQueue);
-  const [workflowStates, setWorkflowStates] = useState<Record<string, WorkflowState>>(() => Object.fromEntries(
-    initialTasks.map(task => [task.id, createInitialWorkflowState(task)])
-  ));
+  const [tasks, setTasks] = useState<WorkbenchTask[]>([]);
+  const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
+  const [reminders, setReminders] = useState<TimerReminder[]>([]);
+  const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([]);
+  const [workflowStates, setWorkflowStates] = useState<Record<string, WorkflowState>>({});
 
   // Toast notifications state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -129,6 +112,10 @@ export default function App() {
 
   useEffect(() => {
     void loadRoster();
+    void listGradingTasks().then(loadedTasks => {
+      setTasks(loadedTasks);
+      setWorkflowStates(Object.fromEntries(loadedTasks.map(task => [task.id, createInitialWorkflowState(task)])));
+    }).catch(() => undefined);
   }, []);
 
   // Trigger Toast helper
@@ -428,8 +415,10 @@ export default function App() {
   }
 
   const selectedClass = classes.find(c => c.id === selectedClassId) ?? classes[0];
-  const pendingReviewCount = reviewQueue.filter(r => r.status === 'pending').length;
-  const navGroups = createNavGroups(pendingReviewCount);
+  const pendingReviewCount = reviewQueue.filter(r => r.status === 'pending').length
+    + Object.keys(workflowStates).flatMap(taskId => workflowStates[taskId].questionGradingStates ?? []).flatMap(state => state.calibrationSamples).filter(sample => sample.status !== 'confirmed' && (sample.needsTeacherReview || sample.recognitionConflict || sample.gradingConfidence < lowConfidenceThreshold)).length;
+  const activeGradingTaskCount = tasks.filter(task => task.status !== 'completed').length;
+  const navGroups = createNavGroups(activeGradingTaskCount);
 
   return (
     <AppLayout
@@ -550,7 +539,7 @@ export default function App() {
               classes={classes}
               defaultClassId={selectedClassId}
               workflowStates={workflowStates}
-              knowledgeNodes={initialKnowledgeNodes}
+              knowledgeNodes={[]}
               reviewQueue={reviewQueue}
               lowConfidenceThreshold={lowConfidenceThreshold}
               ocrHumanReviewThreshold={ocrHumanReviewThreshold}
@@ -558,6 +547,7 @@ export default function App() {
               onCreateTask={(task) => {
                 setTasks(current => [task, ...current]);
                 setWorkflowStates(current => ({ ...current, [task.id]: createEmptyWorkflowState(task) }));
+                void saveGradingTask(task).catch(() => triggerToast('任务保存失败，请稍后重试'));
                 triggerToast('批改任务已创建，可进入作业工作流继续配置');
               }}
               onEnterWorkflow={(task) => {
@@ -566,7 +556,10 @@ export default function App() {
               onSelectTask={(task) => {
                 setSelectedClassId(task.classId);
               }}
-              onUpdateTask={(updatedTask) => setTasks(current => current.map(task => task.id === updatedTask.id ? updatedTask : task))}
+              onUpdateTask={async (updatedTask) => {
+                const saved = await saveGradingTask(updatedTask);
+                setTasks(current => current.map(task => task.id === saved.id ? saved : task));
+              }}
               onUpdateState={(taskId, updated) => setWorkflowStates(current => ({
                 ...current,
                 [taskId]: { ...current[taskId], ...updated }
@@ -603,7 +596,7 @@ export default function App() {
 
           {(activePage === 'knowledge-graph' || activePage === 'library-editor') && (
             <KnowledgeLibrary
-              nodes={initialKnowledgeNodes}
+              nodes={[]}
               mode={activePage === 'library-editor' ? 'editor' : libraryMode}
               onSwitchMode={(mode) => {
                 setLibraryMode(mode);

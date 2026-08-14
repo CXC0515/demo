@@ -55,7 +55,7 @@ export interface NavGroup {
   items: NavItem[];
 }
 
-export function createNavGroups(pendingReviewCount: number): NavGroup[] {
+export function createNavGroups(activeGradingTaskCount: number): NavGroup[] {
   return [
     {
       id: 'entry',
@@ -71,7 +71,7 @@ export function createNavGroups(pendingReviewCount: number): NavGroup[] {
       icon: BookOpen,
       items: [
         { id: 'lesson-plan', label: 'AI 教案', icon: FileText },
-        { id: 'grading-workspace', label: 'AI 批改', icon: Workflow, badge: pendingReviewCount },
+        { id: 'grading-workspace', label: 'AI 批改', icon: Workflow, badge: activeGradingTaskCount },
         { id: 'diagnosis-workspace', label: '学情诊断', icon: BarChart3 }
       ]
     },

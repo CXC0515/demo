@@ -1,0 +1,567 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import assert from 'node:assert/strict';
+import { mkdir, rm } from 'node:fs/promises';
+import path from 'node:path';
+import test from 'node:test';
+import sharp from 'sharp';
+import { PaddleParserArtifact } from '../../schemas/paddleParserArtifact';
+import { createVisionLocatedRegions, VisionLocatedRegion } from './questionRegionCropper';
+
+const taskId = 'vision-cropper-test-task';
+const assetId = 'vision-cropper-test-asset';
+const sourceDirectory = path.resolve('var/data/test-artifacts');
+
+const makePage = async (pageNumber: number) => {
+  await mkdir(sourceDirectory, { recursive: true });
+  const sourcePath = path.join(sourceDirectory, `${assetId}-${pageNumber}.jpg`);
+  const ink = Buffer.from('<svg width="800" height="1000"><text x="180" y="320" font-size="36">student answer</text></svg>');
+  await sharp({ create: { width: 800, height: 1000, channels: 3, background: 'white' } })
+    .composite([{ input: ink }])
+    .jpeg()
+    .toFile(sourcePath);
+  return { pageNumber, sourceImagePath: sourcePath };
+};
+
+const makeChoicePage = async (pageNumber = 1) => {
+  await mkdir(sourceDirectory, { recursive: true });
+  const sourcePath = path.join(sourceDirectory, `${assetId}-choices-${pageNumber}.jpg`);
+  const ink = Buffer.from('<svg width="800" height="1000"><text x="70" y="320" font-size="24">3 [A] [B] [C] [D]</text><text x="70" y="350" font-size="24">4 [A] [B] [C] [D]</text></svg>');
+  await sharp({ create: { width: 800, height: 1000, channels: 3, background: 'white' } })
+    .composite([{ input: ink }])
+    .jpeg()
+    .toFile(sourcePath);
+  return { pageNumber, sourceImagePath: sourcePath };
+};
+
+const located = (overrides: Partial<VisionLocatedRegion> = {}): VisionLocatedRegion => ({
+  displayNo: '1',
+  pageNumber: 1,
+  boundingBox: { x: 0.1, y: 0.2, width: 0.8, height: 0.25 },
+  evidenceUnits: [{
+    evidenceId: '1-answer',
+    kind: 'text',
+    boundingBox: { x: 0.2, y: 0.26, width: 0.45, height: 0.1 },
+    provisionalText: 'student answer',
+    confidence: 0.95,
+    needsReview: false,
+    reason: ''
+  }],
+  confidence: 0.95,
+  needsReview: false,
+  reason: '',
+  ...overrides
+});
+
+test('creates question and answer evidence crops from page-level visual coordinates', async () => {
+  const page = await makePage(1);
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['1'],
+      new Map([['1', ['1-answer']]]),
+      [located()]
+    );
+    assert.equal(region.locationStatus, 'located');
+    assert.equal(region.region.pageNumber, 1);
+    assert.equal(region.evidenceUnits.length, 1);
+    assert.ok(region.evidenceUnits[0].region.x >= region.region.x);
+    assert.ok(region.evidenceUnits[0].region.x + region.evidenceUnits[0].region.width <= region.region.x + region.region.width);
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('does not release a question when an expected answer unit is missing', async () => {
+  const page = await makePage(1);
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['1'],
+      new Map([['1', ['1-1', '1-2']]]),
+      [located({ evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '1-1' }] })]
+    );
+    assert.equal(region.locationStatus, 'needs-teacher');
+    assert.match(region.locationReasons.join(' '), /1-2/);
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('uses the page returned by visual location for multi-page submissions', async () => {
+  const firstPage = await makePage(1);
+  const secondPage = await makePage(2);
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [firstPage, secondPage],
+      ['1'],
+      new Map([['1', ['1-answer']]]),
+      [located({ pageNumber: 2 })]
+    );
+    assert.equal(region.region.pageNumber, 2);
+    assert.equal(region.evidenceUnits[0].region.pageNumber, 2);
+  } finally {
+    await rm(firstPage.sourceImagePath, { force: true });
+    await rm(secondPage.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('splits a merged Paddle block using image rows instead of averaged coordinates', async () => {
+  const page = await makeChoicePage();
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [
+          { block_label: 'text', block_content: '3 [A] [B] [C] [D]\n4 [A] [B] [C] [D]', block_bbox: [60, 290, 350, 360], block_id: 1, block_order: 2 }
+        ]
+      }
+    }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['4'],
+      new Map([['4', ['4-1']]]),
+      [located({
+        displayNo: '4',
+        boundingBox: { x: 0.07, y: 0.55, width: 0.32, height: 0.03 },
+        evidenceUnits: [{
+          ...located().evidenceUnits[0],
+          evidenceId: '4-1',
+          kind: 'choice',
+          boundingBox: { x: 0.07, y: 0.55, width: 0.32, height: 0.03 }
+        }]
+      })],
+      artifact
+    );
+    assert.equal(region.locatorSource, 'paddle-layout');
+    assert.equal(region.locationStatus, 'located');
+    assert.ok(region.region.y >= 325 && region.region.y < 345, JSON.stringify(region.region));
+    assert.ok(region.region.y + region.region.height <= 365);
+    assert.equal(region.paddleText, '4 [A] [B] [C] [D]');
+    assert.equal(region.evidenceUnits[0].paddleText, '4 [A] [B] [C] [D]');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('does not attach an adjacent numbered Paddle block to a vision-located answer region', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [{
+          block_label: 'text',
+          block_content: '8. 上一题的大段作答\n仍然属于上一题',
+          block_bbox: [130, 230, 650, 390],
+          block_id: 1
+        }]
+      }
+    }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['9'],
+      new Map([['9', ['9-answer']]]),
+      [located({
+        displayNo: '9',
+        boundingBox: { x: 0.15, y: 0.25, width: 0.7, height: 0.18 },
+        evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '9-answer', boundingBox: { x: 0.2, y: 0.28, width: 0.5, height: 0.08 } }]
+      })],
+      artifact
+    );
+    assert.equal(region.locatorSource, 'vision-layout');
+    assert.equal(region.paddleText, '');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('rejects numbered instructions and uses the Paddle choice row on another page', async () => {
+  const first = await makeChoicePage(1);
+  const second = await makeChoicePage(2);
+  const artifact: PaddleParserArtifact = { model: 'PaddleOCR-VL-1.6', pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [{ block_label: 'text', block_content: '3. 必须在题号对应区域作答。', block_bbox: [60, 260, 360, 300], block_id: 1 }] } }, { pageNumber: 2, prunedResult: { width: 800, height: 1000, parsing_res_list: [{ block_label: 'text', block_content: '3 [A] [B] [C] [D]', block_bbox: [60, 330, 350, 365], block_id: 2 }] } }] };
+  try {
+    const [region] = await createVisionLocatedRegions(taskId, assetId, [first, second], ['3'], new Map([['3', ['3-answer']]]), [located({ displayNo: '3', pageNumber: 1, boundingBox: { x: 0.07, y: 0.26, width: 0.4, height: 0.04 }, evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '3-answer', kind: 'choice' }] })], artifact);
+    assert.equal(region.region.pageNumber, 2);
+    assert.equal(region.paddleText, '3 [A] [B] [C] [D]');
+    assert.equal(region.locatorSource, 'paddle-layout');
+  } finally {
+    await rm(first.sourceImagePath, { force: true });
+    await rm(second.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('recovers a misread choice number from the following choice row', async () => {
+  const page = await makeChoicePage();
+  const artifact: PaddleParserArtifact = { model: 'PaddleOCR-VL-1.6', pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [{ block_label: 'text', block_content: '1 [A] [B] [C] [D]\n4 [A] [B] [C] [D]', block_bbox: [60, 300, 350, 360], block_id: 1 }] } }] };
+  try {
+    const [region] = await createVisionLocatedRegions(taskId, assetId, [page], ['3'], new Map([['3', ['3-answer']]]), [located({ displayNo: '3', evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '3-answer', kind: 'choice' }] })], artifact);
+    assert.equal(region.locatorSource, 'paddle-layout');
+    assert.equal(region.paddleText, '1 [A] [B] [C] [D]');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('uses the known question type when vision mislabels a choice as text', async () => {
+  const page = await makeChoicePage();
+  const artifact: PaddleParserArtifact = { model: 'PaddleOCR-VL-1.6', pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [{ block_label: 'text', block_content: '1 [A] [B] [C] [D]\n4 [A] [B] [C] [D]', block_bbox: [60, 300, 350, 360], block_id: 1 }] } }] };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['3'],
+      new Map([['3', ['3-answer']]]),
+      [located({ displayNo: '3', boundingBox: { x: 0.07, y: 0.29, width: 0.35, height: 0.08 }, evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '3-answer', kind: 'text' }] })],
+      artifact,
+      new Map([['3', 'choice']])
+    );
+    assert.equal(region.locatorSource, 'paddle-layout');
+    assert.equal(region.evidenceUnits[0].kind, 'choice');
+    assert.ok(region.region.height < 45, JSON.stringify(region.region));
+    assert.equal(region.paddleText, '1 [A] [B] [C] [D]');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('uses Paddle answer blocks when vision omits a text question', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = { model: 'PaddleOCR-VL-1.6', pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [
+    { block_label: 'text', block_content: '1. ① first answer', block_bbox: [70, 280, 330, 315], block_id: 1 },
+    { block_label: 'text', block_content: '② second answer', block_bbox: [70, 320, 350, 355], block_id: 2 },
+    { block_label: 'text', block_content: '2. next question', block_bbox: [70, 390, 350, 425], block_id: 3 }
+  ] } }] };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['1'],
+      new Map([['1', ['1①-1', '1②-1']]]),
+      [],
+      artifact,
+      new Map([['1', 'text']])
+    );
+    assert.equal(region.locatorSource, 'paddle-layout');
+    assert.equal(region.locationStatus, 'located');
+    assert.equal(region.evidenceUnits.length, 2);
+    assert.ok(region.region.height < 120, JSON.stringify(region.region));
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('uses geometric Paddle blocks even when block_order is reversed', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [
+          { block_label: 'text', block_content: '4 [A] [B] [C] [D]', block_bbox: [60, 340, 300, 365], block_id: 2, block_order: 1 },
+          { block_label: 'text', block_content: '3 [A] [B] [C] [D]', block_bbox: [60, 300, 300, 325], block_id: 1, block_order: 2 }
+        ]
+      }
+    }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['4'],
+      new Map([['4', ['4-1']]]),
+      [located({
+        displayNo: '4',
+        boundingBox: { x: 0.07, y: 0.33, width: 0.32, height: 0.05 },
+        evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '4-1', kind: 'choice' }]
+      })],
+      artifact
+    );
+    assert.ok(region.region.y >= 335 && region.region.y < 345, JSON.stringify(region.region));
+    assert.ok(region.region.y + region.region.height <= 370);
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('keeps continuation blocks in the same column when other columns interleave', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [
+          { block_label: 'text', block_content: '5. ① 活动名称', block_bbox: [60, 700, 260, 725], block_id: 1, block_order: 1 },
+          { block_label: 'text', block_content: '13 [A] [B] [C] [D]', block_bbox: [410, 715, 650, 740], block_id: 2, block_order: 2 },
+          { block_label: 'text', block_content: '② 活动说明', block_bbox: [60, 735, 330, 765], block_id: 3, block_order: 3 },
+          { block_label: 'text', block_content: '7. 下一题', block_bbox: [60, 850, 330, 880], block_id: 4, block_order: 4 }
+        ]
+      }
+    }]
+  };
+  const visual = located({
+    displayNo: '5',
+    boundingBox: { x: 0.05, y: 0.68, width: 0.9, height: 0.15 },
+    evidenceUnits: [
+      { ...located().evidenceUnits[0], evidenceId: '5-1', boundingBox: { x: 0.08, y: 0.7, width: 0.3, height: 0.04 } },
+      { ...located().evidenceUnits[0], evidenceId: '5-2', boundingBox: { x: 0.08, y: 0.74, width: 0.4, height: 0.05 } }
+    ]
+  });
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['5'],
+      new Map([['5', ['5-1', '5-2']]]),
+      [visual],
+      artifact
+    );
+    assert.ok(region.region.x + region.region.width < 380, JSON.stringify(region.region));
+    assert.ok(region.region.y <= 700 && region.region.y + region.region.height >= 765);
+    assert.equal(region.paddleText, '5. ① 活动名称\n② 活动说明');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('keeps adjacent-question text out when the visual crop overlaps it', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [
+          { block_label: 'text', block_content: '1. ① 本题答案\n2. 下一题答案', block_bbox: [80, 300, 300, 370], block_id: 1, block_order: 1 }
+        ]
+      }
+    }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['1'],
+      new Map([['1', ['1①-1']]]),
+      [located({
+        boundingBox: { x: 0.08, y: 0.28, width: 0.4, height: 0.12 },
+        evidenceUnits: [{
+          ...located().evidenceUnits[0],
+          evidenceId: '1①-1',
+          boundingBox: { x: 0.1, y: 0.3, width: 0.28, height: 0.04 }
+        }]
+      })],
+      artifact
+    );
+    assert.equal(region.paddleText, '1. ① 本题答案');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('uses the overlapping answer block when Paddle omits the printed question number', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [
+          { block_label: 'text', block_content: '我准备为杨利伟画像。', block_bbox: [160, 260, 520, 360], block_id: 1, block_order: 1 },
+          { block_label: 'text', block_content: '7 [A] [B] [C] [D]', block_bbox: [160, 380, 360, 410], block_id: 2, block_order: 2 }
+        ]
+      }
+    }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['6'],
+      new Map([['6', ['6-answer']]]),
+      [located({
+        displayNo: '6',
+        boundingBox: { x: 0.18, y: 0.24, width: 0.5, height: 0.14 },
+        evidenceUnits: [{
+          ...located().evidenceUnits[0],
+          evidenceId: '6-answer',
+          boundingBox: { x: 0.2, y: 0.26, width: 0.45, height: 0.1 }
+        }]
+      })],
+      artifact
+    );
+    assert.equal(region.paddleText, '我准备为杨利伟画像。');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('keeps the complete visual question when Paddle merges the previous answer into one block', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [
+          { block_label: 'text', block_content: '8. 上一题长答案\n9. 第一空 第二空', block_bbox: [420, 260, 750, 400], block_id: 1, block_order: 1 },
+          { block_label: 'text', block_content: '10. 下一题', block_bbox: [420, 415, 620, 440], block_id: 2, block_order: 2 }
+        ]
+      }
+    }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['9'],
+      new Map([['9', ['9-answer']]]),
+      [located({
+        displayNo: '9',
+        boundingBox: { x: 0.51, y: 0.35, width: 0.44, height: 0.07 },
+        evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '9-answer', boundingBox: { x: 0.53, y: 0.36, width: 0.4, height: 0.05 } }]
+      })],
+      artifact
+    );
+    assert.ok(region.region.y <= 350, JSON.stringify(region.region));
+    assert.ok(region.region.y + region.region.height >= 390, JSON.stringify(region.region));
+    assert.ok(region.region.y > 300, JSON.stringify(region.region));
+    assert.equal(region.locationStatus, 'located');
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('stops a numbered answer at a separated unnumbered composition block', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [
+          { block_label: 'text', block_content: '22. 本题第一行\n本题第二行', block_bbox: [70, 560, 330, 635], block_id: 1, block_order: 1 },
+          { block_label: 'text', block_content: '题目：我的创意', block_bbox: [120, 670, 300, 695], block_id: 2, block_order: 2 },
+          { block_label: 'paragraph_title', block_content: '作文第一段', block_bbox: [70, 700, 335, 850], block_id: 3, block_order: 3 }
+        ]
+      }
+    }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['22'],
+      new Map([['22', ['22-answer']]]),
+      [located({
+        displayNo: '22',
+        boundingBox: { x: 0.05, y: 0.52, width: 0.9, height: 0.4 },
+        evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '22-answer', boundingBox: { x: 0.08, y: 0.55, width: 0.85, height: 0.35 } }]
+      })],
+      artifact
+    );
+    assert.equal(region.paddleText, '22. 本题第一行\n本题第二行');
+    assert.ok(region.region.y + region.region.height < 670, JSON.stringify(region.region));
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('keeps a partially obscured answer-card rule as the panel boundary', async () => {
+  await mkdir(sourceDirectory, { recursive: true });
+  const sourcePath = path.join(sourceDirectory, `${assetId}-obscured-rule.jpg`);
+  const ink = Buffer.from('<svg width="800" height="1000"><path d="M50 300H750 M50 340H750 M50 380H670 M50 420H750" stroke="black" stroke-width="2"/><text x="80" y="370" font-size="20">previous answer</text><text x="80" y="410" font-size="20">target answer</text></svg>');
+  await sharp({ create: { width: 800, height: 1000, channels: 3, background: 'white' } })
+    .composite([{ input: ink }])
+    .jpeg({ quality: 100 })
+    .toFile(sourcePath);
+  const page = { pageNumber: 1, sourceImagePath: sourcePath };
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [
+      { block_label: 'text', block_content: '上一题的大段识别内容', block_bbox: [50, 300, 750, 405], block_id: 1 },
+      { block_label: 'text', block_content: '10. 下一题', block_bbox: [50, 430, 300, 460], block_id: 2 }
+    ] } }]
+  };
+  try {
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['9'],
+      new Map([['9', ['9-answer']]]),
+      [located({
+        displayNo: '9',
+        boundingBox: { x: 0.06, y: 0.28, width: 0.88, height: 0.16 },
+        evidenceUnits: [{ ...located().evidenceUnits[0], evidenceId: '9-answer', boundingBox: { x: 0.08, y: 0.36, width: 0.8, height: 0.06 } }]
+      })],
+      artifact
+    );
+    assert.ok(region.region.y >= 375, JSON.stringify(region.region));
+    assert.ok(region.region.y + region.region.height <= 425, JSON.stringify(region.region));
+    assert.equal(region.needsFocusedOcr, true);
+  } finally {
+    await rm(sourcePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});

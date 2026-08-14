@@ -21,7 +21,7 @@ interface GradingWorkspaceProps {
   onCreateTask: (task: WorkbenchTask) => void;
   onEnterWorkflow: (task: WorkbenchTask) => void;
   onSelectTask: (task: WorkbenchTask) => void;
-  onUpdateTask: (task: WorkbenchTask) => void;
+  onUpdateTask: (task: WorkbenchTask) => Promise<void>;
   onUpdateState: (taskId: string, updated: Partial<WorkflowState>) => void;
   onSyncToProfiles: (aiResults: WorkflowState['aiResults']) => void;
   onConfirmReview: (reviewId: string, finalScore: number, changeReason: string) => void;

@@ -16,7 +16,9 @@ import {
   RequestTimeoutError
 } from '@paddleocr/api-sdk';
 import { DocumentParserConfig } from '../../config/documentParserConfig';
+import { saveParserArtifact } from '../../repositories/parserArtifactRepository';
 import { MaterialParser, MaterialParserError, MaterialParserInput } from './MaterialParser';
+import { enhanceRecognitionPage } from './recognitionImagePreprocessor';
 
 export class PaddleVisionMaterialParser implements MaterialParser {
   constructor(private readonly config: DocumentParserConfig) {}
@@ -38,29 +40,65 @@ export class PaddleVisionMaterialParser implements MaterialParser {
         filePath: input.filePath,
         model: this.config.paddleModel || Model.PaddleOCRVL16,
         options: {
+          // Keep the upload geometry stable. Geometric correction is only safe once its transform
+          // can be retained and applied consistently to source evidence.
+          useDocOrientationClassify: false,
+          useDocUnwarping: false,
           useLayoutDetection: true,
           useChartRecognition: true,
+          useOcrForImageBlock: true,
+          mergeLayoutBlocks: false,
+          layoutShapeMode: 'rect',
           prettifyMarkdown: true,
           showFormulaNumber: true,
           returnMarkdownImages: true
         }
       });
+      saveParserArtifact(input.assetId, {
+        model: this.config.paddleModel || Model.PaddleOCRVL16,
+        jobId: result.jobId,
+        dataInfo: result.dataInfo,
+        pages: result.pages.map((page, index) => ({
+          pageNumber: index + 1,
+          prunedResult: page.prunedResult,
+          raw: page.raw,
+          exports: page.exports,
+          markdown: page.markdown,
+          inputImageUrl: page.inputImageUrl
+        }))
+      });
       const resourceDirectory = path.resolve('var/uploads/parsed', input.assetId, 'resources');
       await mkdir(resourceDirectory, { recursive: true });
       const resourcePlans = result.pages.flatMap((page, pageIndex) => [
+        ...(page.inputImageUrl ? [{
+          fileName: `page-${pageIndex + 1}-source.jpg`,
+          resourceUrl: page.inputImageUrl,
+          role: 'source-page' as const,
+          pageNumber: pageIndex + 1
+        }] : []),
         ...Object.entries(page.markdownImages).map(([resourceName, resourceUrl], resourceIndex) => ({
           fileName: `page-${pageIndex + 1}-content-${resourceIndex + 1}${path.extname(resourceName) || '.jpg'}`,
-          resourceUrl
+          resourceUrl,
+          role: 'content' as const,
+          pageNumber: pageIndex + 1
         })),
         ...Object.entries(page.outputImages).map(([resourceName, resourceUrl], resourceIndex) => ({
           fileName: `page-${pageIndex + 1}-${resourceName.replace(/[^a-zA-Z0-9._-]/g, '-')}-${resourceIndex + 1}${path.extname(new URL(resourceUrl).pathname) || '.jpg'}`,
-          resourceUrl
+          resourceUrl,
+          role: 'layout-visualization' as const,
+          pageNumber: pageIndex + 1
         }))
       ]);
-      const savedResources = await Promise.all(resourcePlans.map(plan => client.saveResource(plan.resourceUrl, resourceDirectory, {
-        overwrite: true,
-        filename: plan.fileName
+      const savedResources = await Promise.all(resourcePlans.map(async plan => ({
+        ...plan,
+        resourcePath: await client.saveResource(plan.resourceUrl, resourceDirectory, {
+          overwrite: true,
+          filename: plan.fileName
+        })
       })));
+      await Promise.all(savedResources
+        .filter(resource => resource.role === 'source-page')
+        .map(resource => enhanceRecognitionPage(resource.resourcePath)));
       const warnings = result.pages.flatMap((page, index) => page.markdownText.trim() ? [] : [{
         code: 'PADDLEOCR_EMPTY_PAGE',
         message: `第 ${index + 1} 页没有生成可用的 Markdown。`
@@ -69,19 +107,54 @@ export class PaddleVisionMaterialParser implements MaterialParser {
         assetId: input.assetId,
         sourceFormat: input.mimeType === 'application/pdf' ? 'pdf' as const : 'image' as const,
         markdown: result.pages.map(page => page.markdownText).join('\n\n'),
-        blocks: result.pages.map((page, index) => ({
-          id: `page-${index + 1}`,
-          order: index,
-          type: 'page' as const,
-          text: page.markdownText,
-          markdown: page.markdownText,
-          pageNumber: index + 1
-        })),
-        resources: savedResources.map(resourcePath => ({
+        blocks: result.pages.flatMap((page, pageIndex) => {
+          const pageResult = page.prunedResult as {
+            width: number;
+            height: number;
+            parsing_res_list: Array<{
+              block_id: number;
+              block_order?: number | null;
+              block_label: string;
+              block_content: string;
+              block_bbox: [number, number, number, number];
+            }>;
+          };
+          const pageWidth = pageResult.width;
+          const pageHeight = pageResult.height;
+          return pageResult.parsing_res_list
+            .filter(block => block.block_content.trim())
+            .map((block, blockIndex) => {
+              const [left, top, right, bottom] = block.block_bbox;
+              const type = block.block_label.includes('title')
+                ? 'heading' as const
+                : block.block_label.includes('formula')
+                  ? 'formula' as const
+                  : block.block_label.includes('table')
+                    ? 'table' as const
+                    : 'paragraph' as const;
+              return {
+                id: `page-${pageIndex + 1}-block-${block.block_id}`,
+                order: pageIndex * 10_000 + (block.block_order ?? blockIndex),
+                type,
+                text: block.block_content.trim(),
+                markdown: block.block_content.trim(),
+                pageNumber: pageIndex + 1,
+                boundingBox: {
+                  x: left / pageWidth,
+                  y: top / pageHeight,
+                  width: (right - left) / pageWidth,
+                  height: (bottom - top) / pageHeight
+                }
+              };
+            });
+        }),
+        resources: savedResources.map(resource => ({
           id: randomUUID(),
-          fileName: path.basename(resourcePath),
-          mimeType: path.extname(resourcePath).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg',
-          publicUrl: `/uploads/parsed/${input.assetId}/resources/${encodeURIComponent(path.basename(resourcePath))}`
+          fileName: path.basename(resource.resourcePath),
+          mimeType: path.extname(resource.resourcePath).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg',
+          publicUrl: `/uploads/parsed/${input.assetId}/resources/${encodeURIComponent(path.basename(resource.resourcePath))}`,
+          role: resource.role,
+          pageNumber: resource.pageNumber
         })),
         warnings,
         pageCount: result.pages.length,
