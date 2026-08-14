@@ -123,6 +123,20 @@ export const getTaskTrialGrading = async (taskId: string) => {
   return body.result;
 };
 
+export const regradeTrialQuestion = async (
+  taskId: string,
+  question: TrialGradingQuestionInput,
+  submissions: TrialGradingSubmissionInput[]
+) => {
+  const response = await fetch(`/api/grading-tasks/${taskId}/trial-grading/regrade-question`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ questions: [question], submissions })
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { result: TrialGradingResult }).result;
+};
+
 export const correctTrialOcr = async (taskId: string, sampleId: string, correctedText: string, question: TrialGradingQuestionInput, submission: TrialGradingSubmissionInput) => {
   const response = await fetch(`/api/grading-tasks/${taskId}/trial-grading/${encodeURIComponent(sampleId)}/ocr-correction`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ correctedText, question, submission }) });
   if (!response.ok) throw new Error(await readErrorCode(response));

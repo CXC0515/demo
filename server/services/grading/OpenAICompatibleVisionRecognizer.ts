@@ -12,6 +12,9 @@ import { extractJson } from '../model/extractJson';
 export const getWholeQuestionAnswer = (recognizedAnswer: string, answerFields: Array<{ text: string }>) =>
   recognizedAnswer.trim() || [...new Set(answerFields.map(field => field.text.trim()).filter(Boolean))].join('\n');
 
+export const bindSingleRegionIdentity = <T extends { displayNo: string }>(items: T[], regions: LocatedRegion[]) =>
+  items.length === 1 && regions.length === 1 ? [{ ...items[0], displayNo: regions[0].displayNo }] : items;
+
 export const buildRecognitionRegionPrompt = (region: LocatedRegion) => {
   const isChoice = region.evidenceUnits.length > 0 && region.evidenceUnits.every(unit => unit.kind === 'choice');
   const choiceCandidates = region.evidenceUnits
@@ -42,7 +45,8 @@ export class OpenAICompatibleVisionRecognizer {
         '划掉内容仅放入 crossedOutText。教师分数、勾叉和批注仅放入 existingMarkings。',
         '非选择题只返回一份按图片原有行序排列的整题 recognizedAnswer，answerFields 必须为空；不得把同一行复制到多个字段。',
         'selectedOption 仅用于确实可见的选择题填涂。visualEvidence 只描述可见笔迹，不解释题意。',
-        '严格返回 JSON：{"items":[{"displayNo":"2","recognizedAnswer":"按图片行序排列的整题作答","answerFields":[],"crossedOutText":[],"selectedOption":null,"visualEvidence":"","existingMarkings":[],"confidence":0,"needsReview":false}]}。'
+        '当 PaddleOCR 候选明显混入相邻题内容，或与图片可见作答存在较大差异时，requiresFocusedOcr=true；个别字形不确定只需 needsReview=true。',
+        '严格返回 JSON：{"items":[{"displayNo":"2","recognizedAnswer":"按图片行序排列的整题作答","answerFields":[],"crossedOutText":[],"selectedOption":null,"visualEvidence":"","existingMarkings":[],"confidence":0,"needsReview":false,"requiresFocusedOcr":false}]}。'
       ].join('\n')
     }];
     for (const region of regions) {
@@ -68,13 +72,14 @@ export class OpenAICompatibleVisionRecognizer {
     const responseContent = payload.choices?.[0]?.message?.content;
     if (!responseContent) throw new Error('MODEL_EMPTY_RESPONSE');
     const parsed = visionRecognitionOutputSchema.parse(extractJson(responseContent));
+    const parsedItems = bindSingleRegionIdentity(parsed.items, regions);
     const regionByNo = new Map(regions.map(region => [region.displayNo, region]));
-    const returnedNumbers = new Set(parsed.items.map(item => item.displayNo));
+    const returnedNumbers = new Set(parsedItems.map(item => item.displayNo));
     const missingNumbers = regions.map(region => region.displayNo).filter(displayNo => !returnedNumbers.has(displayNo));
     const retriedItems = missingNumbers.length && retryMissing
       ? (await this.recognize(regions.filter(region => missingNumbers.includes(region.displayNo)), false)).items
       : [];
-    const allItems = [...parsed.items, ...retriedItems];
+    const allItems = [...parsedItems, ...retriedItems];
     const completedNumbers = new Set(allItems.map(item => item.displayNo));
     const stillMissing = regions.map(region => region.displayNo).filter(displayNo => !completedNumbers.has(displayNo));
     if (stillMissing.length) throw new Error(`VISION_RECOGNITION_INCOMPLETE:${stillMissing.join(',')}`);

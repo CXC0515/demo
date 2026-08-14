@@ -50,7 +50,8 @@ export const visionRecognitionOutputSchema = z.object({
     visualEvidence: z.string().default(''),
     existingMarkings: z.array(z.string()).default([]),
     confidence: z.number().min(0).max(1),
-    needsReview: z.boolean()
+    needsReview: z.boolean(),
+    requiresFocusedOcr: z.boolean().default(false)
   }))
 });
 export type VisionRecognitionOutput = z.infer<typeof visionRecognitionOutputSchema>;

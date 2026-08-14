@@ -11,6 +11,7 @@ import sharp from 'sharp';
 import { z } from 'zod';
 import { AnalysisEvidenceRef, FirstSectionAnalysis, GradingMode, TrialGradingResult, VisionValidationResult } from '../../src/domain/types';
 import { getModelConfig, isModelConfigured } from '../config/modelConfig';
+import { getDocumentParserConfig, isPaddleCloudConfigured } from '../config/documentParserConfig';
 import { deleteFirstSectionAnalysis, getFirstSectionAnalysis, saveFirstSectionAnalysis } from '../repositories/analysisRepository';
 import { appendMaterials, getMaterials, removeMaterialsForKind, replaceMaterialsForKind, StoredMaterial, updateMaterial } from '../repositories/materialRepository';
 import { getTaskRubrics, saveTaskRubric } from '../repositories/gradingRubricRepository';
@@ -29,10 +30,11 @@ import { OpenAICompatibleVisionRegionLocator } from '../services/grading/OpenAIC
 import { createVisionLocatedRegions } from '../services/grading/questionRegionCropper';
 import { hasSuspiciousRepeatedShortAnswer, inferAnswerCardOption } from '../services/grading/trialScore';
 import { buildExpectedAnswerFields } from '../services/grading/answerFieldSchema';
-import { findSubmissionsNeedingTrialGrading, mergeCurrentTrialSamples } from '../services/grading/trialResultReconciler';
+import { buildTeacherAnswerOverrides, findSubmissionsNeedingTrialGrading, mergeCurrentTrialSamples, mergeRegradedQuestionSamples } from '../services/grading/trialResultReconciler';
 import { gradeTrialSubmissions } from '../services/grading/trialGradingService';
 import { buildGradingDiagnosis } from '../services/grading/gradingDiagnosis';
 import { applyTeacherReviewDecision } from '../services/grading/teacherReviewDecision';
+import { FocusedPaddleRecognizer } from '../services/grading/FocusedPaddleRecognizer';
 import { MaterialParserError } from '../services/materials/MaterialParser';
 import { parseMaterial } from '../services/materials/materialParserRegistry';
 
@@ -350,7 +352,39 @@ router.post('/:taskId/vision-validation', async (request, response) => {
     }
     const recognizer = new OpenAICompatibleVisionRecognizer(config);
     const recognizableRegions = regions.filter(region => region.locationStatus === 'located');
-    const recognition = await recognizer.recognize(recognizableRegions);
+    let recognition = await recognizer.recognize(recognizableRegions);
+    const initialRecognitionByNo = new Map(recognition.items.map(item => [item.displayNo, item]));
+    const focusedRegions = recognizableRegions.filter(region =>
+      region.needsFocusedOcr || initialRecognitionByNo.get(region.displayNo)?.requiresFocusedOcr
+    );
+    if (focusedRegions.length) {
+      const paddleConfig = getDocumentParserConfig();
+      if (isPaddleCloudConfigured(paddleConfig)) {
+        const focusedRecognizer = new FocusedPaddleRecognizer(paddleConfig);
+        const focusedResults = await Promise.allSettled(focusedRegions.map(async region => ({
+          displayNo: region.displayNo,
+          text: await focusedRecognizer.recognize(region.cropPath)
+        })));
+        const focusedTextByNo = new Map(focusedResults.flatMap(result =>
+          result.status === 'fulfilled' && result.value.text ? [[result.value.displayNo, result.value.text] as const] : []
+        ));
+        regions = regions.map(region => focusedTextByNo.has(region.displayNo)
+          ? { ...region, paddleText: focusedTextByNo.get(region.displayNo)!, needsFocusedOcr: false }
+          : region
+        );
+        const refreshedRegions = regions.filter(region => focusedTextByNo.has(region.displayNo));
+        if (refreshedRegions.length) {
+          const refreshed = await recognizer.recognize(refreshedRegions);
+          const refreshedNumbers = new Set(refreshed.items.map(item => item.displayNo));
+          recognition = {
+            items: [
+              ...recognition.items.filter(item => !refreshedNumbers.has(item.displayNo)),
+              ...refreshed.items
+            ]
+          };
+        }
+      }
+    }
     const recognitionByNo = new Map(recognition.items.map(item => [item.displayNo, item]));
     const previousResult = getVisionValidationResult(request.params.taskId, material.id);
     const requestedNumbers = new Set(parsedRequest.data.questionNos);
@@ -559,6 +593,39 @@ router.put('/:taskId/trial-grading/:sampleId/teacher-review', (request, response
   }
   const result = saveTrialGradingResult({ ...existing, samples: existing.samples.map(sample => sample.id === current.id ? updated : sample), createdAt: new Date().toISOString() });
   response.json({ sample: updated, result });
+});
+
+router.post('/:taskId/trial-grading/regrade-question', async (request, response) => {
+  const parsed = trialGradingRequestSchema.safeParse(request.body);
+  const existing = getTrialGradingResult(request.params.taskId);
+  const config = getModelConfig();
+  if (!parsed.success || parsed.data.questions.length !== 1) { response.status(400).json({ code: 'INVALID_QUESTION_REGRADING_REQUEST' }); return; }
+  if (!existing) { response.status(404).json({ code: 'TRIAL_GRADING_NOT_FOUND' }); return; }
+  if (!isModelConfigured(config)) { response.status(503).json({ code: 'MODEL_NOT_CONFIGURED' }); return; }
+  const [question] = parsed.data.questions;
+  const submissions = parsed.data.submissions.filter(submission => {
+    const sample = existing.samples.find(item => item.questionId === question.questionId && item.sourceAssetId === submission.assetId);
+    return sample?.status !== 'confirmed';
+  });
+  try {
+    const overrides = buildTeacherAnswerOverrides(existing, question.questionId, question.displayNo);
+    const settled = await Promise.allSettled(submissions.map(submission => gradeTrialSubmissions(
+      request.params.taskId,
+      { questions: [question], submissions: [submission] },
+      getMaterials(request.params.taskId),
+      config,
+      overrides
+    )));
+    const failed = settled.find((item): item is PromiseRejectedResult => item.status === 'rejected');
+    if (failed) throw failed.reason;
+    const refreshed = settled.flatMap(item => item.status === 'fulfilled' ? item.value : []);
+    const samples = mergeRegradedQuestionSamples(existing, question.questionId, question.rubricVersion, refreshed);
+    const result = saveTrialGradingResult({ ...existing, model: config.visionModel, samples, createdAt: new Date().toISOString() });
+    response.json({ result });
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'question_regrading_failed', taskId: request.params.taskId, questionId: question.questionId, error: error instanceof Error ? error.message : String(error) }));
+    response.status(502).json({ code: 'QUESTION_REGRADING_FAILED' });
+  }
 });
 
 router.get('/:taskId/batch-grading', (request, response) => {

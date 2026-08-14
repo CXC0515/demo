@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { LocatedRegion } from './questionRegionCropper';
-import { buildRecognitionRegionPrompt, getWholeQuestionAnswer } from './OpenAICompatibleVisionRecognizer';
+import { bindSingleRegionIdentity, buildRecognitionRegionPrompt, getWholeQuestionAnswer } from './OpenAICompatibleVisionRecognizer';
 
 const region = (kind: 'text' | 'choice'): LocatedRegion => ({
   displayNo: '2',
@@ -49,4 +49,8 @@ test('legacy per-field output is collapsed without duplicating a whole line', ()
     { text: '濯清涟而不妖 周敦颐' },
     { text: '濯清涟而不妖 周敦颐' }
   ]), '濯清涟而不妖 周敦颐');
+});
+
+test('binds a single crop response to the question identity owned by the request', () => {
+  assert.deepEqual(bindSingleRegionIdentity([{ displayNo: '8', text: '答案' }], [{ ...region('text'), displayNo: '9' }]), [{ displayNo: '9', text: '答案' }]);
 });

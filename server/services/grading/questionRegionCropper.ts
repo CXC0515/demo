@@ -55,6 +55,7 @@ export interface LocatedRegion {
   locatorSource: 'vision-layout' | 'paddle-layout';
   locationStatus: 'located' | 'needs-teacher';
   locationReasons: string[];
+  needsFocusedOcr?: boolean;
   paddleText: string;
   cropPath: string;
   cropUrl: string;
@@ -413,6 +414,51 @@ const emptyPanelFromPaddle = (
     .sort((first, second) => overlapRatio(second, visualQuestion) - overlapRatio(first, visualQuestion))[0];
 };
 
+const panelBeforeNextQuestion = async (
+  sourcePath: string,
+  artifact: PaddleParserArtifact,
+  pageNumber: number,
+  displayNo: string,
+  visualRegion: PixelRegion
+): Promise<PixelRegion | undefined> => {
+  const page = artifact.pages.find(candidate => candidate.pageNumber === pageNumber);
+  if (!page) return undefined;
+  const nextAnchor = page.prunedResult.parsing_res_list
+    .filter(block => {
+      const number = Number(block.block_content.trim().match(/^(\d+)(?:\s|[.、（(])/u)?.[1]);
+      return Number.isFinite(number) && number > Number(displayNo);
+    })
+    .sort((first, second) => Number(first.block_content.trim().match(/^(\d+)/)?.[1]) - Number(second.block_content.trim().match(/^(\d+)/)?.[1]) || first.block_bbox[1] - second.block_bbox[1])[0];
+  if (!nextAnchor) return undefined;
+  const nextTop = Math.max(1, nextAnchor.block_bbox[1]);
+  const scanLeft = Math.max(0, visualRegion.x);
+  const scanRight = Math.min(page.prunedResult.width, visualRegion.x + visualRegion.width);
+  if (scanRight <= scanLeft) return undefined;
+  const { data, info } = await sharp(sourcePath)
+    .extract({ left: scanLeft, top: 0, width: scanRight - scanLeft, height: nextTop })
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const rowRatios = Array.from({ length: info.height }, (_, y) => {
+    let darkPixels = 0;
+    for (let x = 0; x < info.width; x += 1) if (data[y * info.width + x] < 180) darkPixels += 1;
+    return darkPixels / info.width;
+  });
+  const threshold = Math.max(0.55, Math.max(...rowRatios) * 0.85);
+  const ruleRows = rowRatios.flatMap((ratio, y) => ratio >= threshold ? [y] : []);
+  const rules = ruleRows.reduce<Array<{ top: number; bottom: number }>>((result, y) => {
+    const current = result[result.length - 1];
+    if (!current || y - current.bottom > 1) result.push({ top: y, bottom: y });
+    else current.bottom = y;
+    return result;
+  }, []);
+  if (rules.length < 2) return undefined;
+  const lower = rules[rules.length - 1];
+  const upper = rules[rules.length - 2];
+  if (lower.top - upper.bottom < 8) return undefined;
+  return { x: scanLeft, y: upper.top, width: scanRight - scanLeft, height: lower.bottom - upper.top + 1 };
+};
+
 const padRegion = (region: PixelRegion, limit: PixelRegion, xPadding = 12, yPadding = 8): PixelRegion => {
   const limitRight = limit.x + limit.width;
   const limitBottom = limit.y + limit.height;
@@ -501,15 +547,18 @@ export const createVisionLocatedRegions = async (
     const alignedChoiceRow = expectedKind === 'choice' && fallbackChoiceRow
       ? await alignBlockLineToInk(page.sourceImagePath, fallbackChoiceRow)
       : undefined;
-    const questionPixels = alignedChoiceRow?.region ?? paddleQuestionRow?.region
+    const boundedVisualPanel = vision && artifact
+      ? await panelBeforeNextQuestion(page.sourceImagePath, artifact, page.pageNumber, displayNo, visualQuestion)
+      : undefined;
+    const questionPixels = alignedChoiceRow?.region
       ?? (paddleRows.length && (usingPaddleFallback || paddleRows.length === usableEvidencePlans.length)
         ? unionRegions(paddleRows)
-        : answerPanel ?? visualQuestion);
+        : paddleQuestionRow?.region ?? boundedVisualPanel ?? answerPanel ?? visualQuestion);
     const questionRegion = padRegion(
       questionPixels,
       fullPage,
       12,
-      sourceEvidence.length && sourceEvidence.every(unit => unit.kind === 'choice') && paddleRows.length === evidencePlans.length ? 0 : 8
+      boundedVisualPanel === questionPixels || (sourceEvidence.length && sourceEvidence.every(unit => unit.kind === 'choice') && paddleRows.length === evidencePlans.length) ? 0 : 8
     );
     const questionFileName = `question-${displayNo}.jpg`;
     const questionPath = path.join(cropDirectory, questionFileName);
@@ -590,12 +639,19 @@ export const createVisionLocatedRegions = async (
             : overlappingStartsWithAnotherQuestion ? '' : overlappingPaddleText)
           || evidencePaddleText
         : evidencePaddleText;
+    const paddleContainsAnotherQuestion = paddleText
+      .split(/\r?\n/)
+      .some(line => {
+        const number = line.trim().match(/^(\d+)(?:\s|[.、])/u)?.[1];
+        return number !== undefined && number !== displayNo;
+      });
     return {
       displayNo,
       region: { ...questionRegion, pageNumber: page.pageNumber },
       locatorSource: paddleChoice || paddleQuestion || (usingPaddleFallback && paddleRows.length) ? 'paddle-layout' : 'vision-layout',
       locationStatus: locationReasons.length ? 'needs-teacher' : 'located',
       locationReasons,
+      needsFocusedOcr: overlappingStartsWithAnotherQuestion || paddleContainsAnotherQuestion,
       paddleText,
       cropPath: recognitionPath,
       cropUrl: `/uploads/validation/${encodeURIComponent(taskId)}/${encodeURIComponent(assetId)}/${encodeURIComponent(questionFileName)}`,

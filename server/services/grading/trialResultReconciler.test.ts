@@ -6,34 +6,27 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { CalibrationSample, TrialGradingResult } from '../../../src/domain/types';
-import { TrialGradingRequest } from '../../schemas/trialGrading';
-import { findSubmissionsNeedingTrialGrading, mergeCurrentTrialSamples } from './trialResultReconciler';
+import { buildTeacherAnswerOverrides, mergeRegradedQuestionSamples } from './trialResultReconciler';
 
-const request = (assetIds: string[]): TrialGradingRequest => ({
-  questions: [{ questionId: 'q1', displayNo: '1', stem: '', fullScore: 1, standardAnswer: '', rubricPoints: [], teacherRules: [], rubricVersion: 1 }],
-  submissions: assetIds.map(assetId => ({ assetId, studentId: assetId, studentName: assetId, studentNo: assetId }))
-});
-const sample = (assetId: string): CalibrationSample => ({
-  id: `q1-${assetId}`, questionId: 'q1', studentId: assetId, studentName: assetId, studentNo: assetId,
-  sampleType: 'middle', rawImageDescription: '', rawOcrText: '', ocrText: '', ocrSource: 'paddle',
-  ocrConfidence: 1, aiScore: 1, fullScore: 1, gradingConfidence: 1, needsTeacherReview: false,
-  matchedPoints: [], missedPoints: [], gradingReason: '', sourceAssetId: assetId, sourceFileName: '',
-  sourcePreviewType: 'image', status: 'pending', rubricVersion: 1
-});
-const result = (assetIds: string[]): TrialGradingResult => ({ taskId: 'task', model: 'model', samples: assetIds.map(sample), createdAt: '' });
-
-test('grades only newly added submissions', () => {
-  assert.deepEqual(findSubmissionsNeedingTrialGrading(result(['a', 'b', 'c']), request(['a', 'b', 'c', 'd', 'e'])).map(item => item.assetId), ['d', 'e']);
+const sample = (overrides: Partial<CalibrationSample>): CalibrationSample => ({
+  id: 'q1-a1', questionId: 'q1', studentId: 's1', studentName: '学生', studentNo: '01', sampleType: 'middle', rawImageDescription: '', ocrText: '原文', ocrConfidence: 0.9, aiScore: 1, fullScore: 2, gradingConfidence: 0.9, matchedPoints: [], missedPoints: [], sourceAssetId: 'a1', status: 'pending', rubricVersion: 1, ...overrides
 });
 
-test('retains current samples, adds new samples and removes deleted students', () => {
-  const merged = mergeCurrentTrialSamples(result(['a', 'b', 'removed']), request(['a', 'b', 'c']), [sample('c')]);
-  assert.deepEqual(merged.map(item => item.sourceAssetId), ['a', 'b', 'c']);
+const result = (samples: CalibrationSample[]): TrialGradingResult => ({ taskId: 'task', model: 'model', samples, createdAt: '' });
+
+test('regrades pending samples while preserving confirmed samples and other questions', () => {
+  const confirmed = sample({ id: 'q1-a1', sourceAssetId: 'a1', status: 'confirmed', teacherScore: 2 });
+  const pending = sample({ id: 'q1-a2', sourceAssetId: 'a2' });
+  const otherQuestion = sample({ id: 'q2-a1', questionId: 'q2' });
+  const refreshed = sample({ id: 'q1-a2', sourceAssetId: 'a2', aiScore: 2, rubricVersion: 2 });
+  const merged = mergeRegradedQuestionSamples(result([confirmed, pending, otherQuestion]), 'q1', 2, [refreshed]);
+  assert.equal(merged.find(item => item.id === 'q1-a1')?.teacherScore, 2);
+  assert.equal(merged.find(item => item.id === 'q1-a1')?.rubricVersion, 2);
+  assert.equal(merged.find(item => item.id === 'q1-a2')?.aiScore, 2);
+  assert.ok(merged.some(item => item.id === 'q2-a1'));
 });
 
-test('removes questions outside the current authoritative grading range', () => {
-  const previous = result(['a']);
-  previous.samples.push({ ...sample('a'), id: 'q2-a', questionId: 'q2' });
-  const merged = mergeCurrentTrialSamples(previous, request(['a']), [sample('a')]);
-  assert.deepEqual(merged.map(item => item.questionId), ['q1']);
+test('retains teacher OCR corrections as regrading overrides', () => {
+  const overrides = buildTeacherAnswerOverrides(result([sample({ teacherCorrectedText: '教师修正' })]), 'q1', '9');
+  assert.equal(overrides.get('a1:9'), '教师修正');
 });

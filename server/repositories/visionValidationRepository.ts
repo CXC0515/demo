@@ -21,7 +21,7 @@ const loadResults = () => {
 
 const results = loadResults();
 const keyFor = (taskId: string, assetId: string) => `${taskId}:${assetId}`;
-export const NON_CHOICE_RECOGNITION_VERSION = 6;
+export const NON_CHOICE_RECOGNITION_VERSION = 10;
 
 export const isVisionValidationItemCurrent = (item: VisionValidationResult['items'][number]) =>
   item.pipelineVersion === NON_CHOICE_RECOGNITION_VERSION;

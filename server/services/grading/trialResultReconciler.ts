@@ -29,3 +29,31 @@ export const mergeCurrentTrialSamples = (
   );
   return [...retained, ...refreshedSamples];
 };
+
+export const buildTeacherAnswerOverrides = (
+  result: TrialGradingResult,
+  questionId: string,
+  displayNo: string
+) => new Map(result.samples.flatMap(sample =>
+  sample.questionId === questionId && sample.sourceAssetId && sample.teacherCorrectedText !== undefined
+    ? [[`${sample.sourceAssetId}:${displayNo}`, sample.teacherCorrectedText] as const]
+    : []
+));
+
+export const mergeRegradedQuestionSamples = (
+  result: TrialGradingResult,
+  questionId: string,
+  rubricVersion: number,
+  refreshedSamples: TrialGradingResult['samples']
+) => {
+  const refreshedByAsset = new Map(refreshedSamples.map(sample => [sample.sourceAssetId, sample]));
+  const existingAssets = new Set(result.samples.filter(sample => sample.questionId === questionId).map(sample => sample.sourceAssetId));
+  return [
+    ...result.samples.map(sample => {
+      if (sample.questionId !== questionId) return sample;
+      if (sample.status === 'confirmed') return { ...sample, rubricVersion };
+      return refreshedByAsset.get(sample.sourceAssetId) ?? sample;
+    }),
+    ...refreshedSamples.filter(sample => !existingAssets.has(sample.sourceAssetId))
+  ];
+};
