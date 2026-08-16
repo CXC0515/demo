@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import AppLayout from './app/AppLayout';
 import { createNavGroups, PageId } from './app/navigation';
 
 // Import Types and Mock Data
 import {
   Student, SchoolClass, WorkbenchTask, ScheduleItem,
-  TimerReminder, ReviewItem, WorkflowState, TeacherObservation, RosterStudent
+  TimerReminder, ReviewItem, WorkflowState, TeacherObservation, RosterStudent, KnowledgeNode
 } from './domain/types';
 import { createEmptyWorkflowState } from './domain/gradingTask';
 import { listGradingTasks, saveGradingTask } from './services/gradingTaskApi';
@@ -33,6 +33,7 @@ import StudentManagement from './features/students/StudentManagement';
 import ScheduleReminder from './features/schedule/ScheduleReminder';
 import SystemSettings from './features/settings/SystemSettingsPanel';
 import KnowledgeLibrary from './features/knowledge/KnowledgeLibrary';
+import { getKnowledgeGraph } from './services/resourceApi';
 import TagManagement from './features/tags/TagManagement';
 import LessonPlanWorkspace from './features/lesson-plan/LessonPlanWorkspace';
 import GradingWorkspace from './features/grading/GradingWorkspace';
@@ -87,6 +88,21 @@ export default function App() {
   const [reminders, setReminders] = useState<TimerReminder[]>([]);
   const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([]);
   const [workflowStates, setWorkflowStates] = useState<Record<string, WorkflowState>>({});
+  const [knowledgeNodes, setKnowledgeNodes] = useState<KnowledgeNode[]>([]);
+
+  const loadKnowledgeCatalog = useCallback(async () => {
+    const graph = await getKnowledgeGraph();
+    setKnowledgeNodes(graph.nodes
+      .filter(node => node.type === 'knowledge' || node.type === 'ability')
+      .map(node => ({
+        id: node.id,
+        name: node.name,
+        type: node.type === 'ability' ? 'capability' : 'knowledge',
+        typeName: node.type === 'ability' ? '能力点' : '知识点',
+        desc: node.description,
+        weight: 3
+      })));
+  }, []);
 
   // Toast notifications state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -112,11 +128,12 @@ export default function App() {
 
   useEffect(() => {
     void loadRoster();
+    void loadKnowledgeCatalog().catch(() => undefined);
     void listGradingTasks().then(loadedTasks => {
       setTasks(loadedTasks);
       setWorkflowStates(Object.fromEntries(loadedTasks.map(task => [task.id, createInitialWorkflowState(task)])));
     }).catch(() => undefined);
-  }, []);
+  }, [loadKnowledgeCatalog]);
 
   // Trigger Toast helper
   const triggerToast = (msg: string) => {
@@ -539,7 +556,7 @@ export default function App() {
               classes={classes}
               defaultClassId={selectedClassId}
               workflowStates={workflowStates}
-              knowledgeNodes={[]}
+              knowledgeNodes={knowledgeNodes}
               reviewQueue={reviewQueue}
               lowConfidenceThreshold={lowConfidenceThreshold}
               ocrHumanReviewThreshold={ocrHumanReviewThreshold}
@@ -596,12 +613,12 @@ export default function App() {
 
           {(activePage === 'knowledge-graph' || activePage === 'library-editor') && (
             <KnowledgeLibrary
-              nodes={[]}
               mode={activePage === 'library-editor' ? 'editor' : libraryMode}
               onSwitchMode={(mode) => {
                 setLibraryMode(mode);
                 setActivePage(mode === 'graph' ? 'knowledge-graph' : 'library-editor');
               }}
+              onKnowledgeChanged={loadKnowledgeCatalog}
               onShowToast={triggerToast}
             />
           )}

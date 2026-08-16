@@ -605,4 +605,119 @@ export interface KnowledgeNode {
   parentId?: string;
 }
 
+export type ResourceKind = 'textbook' | 'supplement' | 'worksheet' | 'lesson-plan' | 'ppt-template' | 'notice' | 'other';
+export type ResourceStatus = 'uploaded' | 'processing' | 'ready' | 'needs-review' | 'failed';
+export type KnowledgeEntityType = 'knowledge' | 'question-type' | 'method' | 'example' | 'ability' | 'error';
+export type KnowledgeRelationType = 'parent' | 'prerequisite' | 'related' | 'confusable' | 'examines' | 'applies-to' | 'demonstrates' | 'explains';
+
+export interface LibraryResource {
+  id: string;
+  title: string;
+  fileName: string;
+  mimeType: string;
+  kind: ResourceKind;
+  subject: string;
+  grade: string;
+  publisher: string;
+  edition: string;
+  isPrimary: boolean;
+  status: ResourceStatus;
+  pageCount: number | null;
+  publicUrl: string;
+  parseErrorCode?: string;
+  summary: string;
+  tags: string[];
+  parsedPageStart?: number;
+  parsedPageEnd?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ResourceChunk {
+  id: string;
+  resourceId: string;
+  parentId?: string;
+  level: 'document' | 'section' | 'content';
+  title: string;
+  summary: string;
+  text: string;
+  tags: string[];
+  pageStart: number;
+  pageEnd: number;
+  boundingBox?: { x: number; y: number; width: number; height: number };
+  order: number;
+}
+
+export interface KnowledgeEntity {
+  id: string;
+  name: string;
+  type: KnowledgeEntityType;
+  description: string;
+  aliases: string[];
+  subject: string;
+  grade: string;
+  source: 'base' | 'teacher' | 'ai-confirmed';
+  version: number;
+  status: 'active' | 'archived' | 'merged';
+  mergedIntoId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeRelation {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  type: KnowledgeRelationType;
+  description: string;
+  source: 'base' | 'teacher' | 'ai-confirmed';
+  version: number;
+  status: 'active' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeSourceLink {
+  id: string;
+  nodeId: string;
+  resourceId: string;
+  chunkId: string;
+  pageNumber: number;
+  isPrimary: boolean;
+  quote: string;
+  boundingBox?: { x: number; y: number; width: number; height: number };
+  createdAt: string;
+}
+
+export interface DiscoverySuggestion {
+  id: string;
+  resourceId: string;
+  kind: 'node' | 'relation' | 'source-link';
+  status: 'pending' | 'accepted' | 'ignored' | 'merged';
+  proposedType: KnowledgeEntityType | KnowledgeRelationType;
+  proposedName: string;
+  description: string;
+  aliases: string[];
+  confidence: number;
+  rationale: string;
+  sourceChunkIds: string[];
+  existingNodeId?: string;
+  targetNodeId?: string;
+  createdNodeId?: string;
+  createdAt: string;
+  reviewedAt?: string;
+}
+
+export interface ResourceDetail extends LibraryResource {
+  chunks: ResourceChunk[];
+  suggestions: DiscoverySuggestion[];
+}
+
+export interface KnowledgeGraphSnapshot {
+  nodes: KnowledgeEntity[];
+  relations: KnowledgeRelation[];
+  sourceLinks: KnowledgeSourceLink[];
+  resources: LibraryResource[];
+}
+
 export type MorandiTheme = 'morandi-green' | 'fog-blue' | 'dusty-pink' | 'warm-gray' | 'dark-graphite';
