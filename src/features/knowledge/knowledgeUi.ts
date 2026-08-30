@@ -30,7 +30,7 @@ export const entityTones: Record<KnowledgeEntityType, string> = {
 };
 
 export const relationLabels: Record<KnowledgeRelationType, string> = {
-  parent: "属于",
+  parent: "母子",
   prerequisite: "先修",
   related: "相关",
   confusable: "易混淆",

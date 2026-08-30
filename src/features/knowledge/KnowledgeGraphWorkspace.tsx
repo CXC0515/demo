@@ -3,18 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useMemo, useState } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   Archive,
   ArrowDownToLine,
   BookOpen,
-  ChevronRight,
   Edit3,
-  GitBranch,
   Link2,
   LoaderCircle,
   Merge,
-  Network,
   Plus,
   Search,
   Tag,
@@ -41,6 +38,8 @@ import {
   relationLabels,
   resourceKindLabels,
 } from "./knowledgeUi";
+
+const KnowledgeGraphCanvas = lazy(() => import("./KnowledgeGraphCanvas"));
 
 interface KnowledgeGraphWorkspaceProps {
   graph: KnowledgeGraphSnapshot;
@@ -340,57 +339,59 @@ export default function KnowledgeGraphWorkspace({
   const [selectedId, setSelectedId] = useState(graph.nodes[0]?.id ?? "");
   const [query, setQuery] = useState("");
   const [type, setType] = useState<"all" | KnowledgeEntityType>("all");
+  const [subject, setSubject] = useState("all");
+  const [grade, setGrade] = useState("all");
   const [dialog, setDialog] = useState<
     "create" | "edit" | "relation" | "merge" | null
   >(null);
   const selected =
     graph.nodes.find((node) => node.id === selectedId) ?? graph.nodes[0];
-  const filtered = useMemo(
+  const subjects = useMemo(
+    () => Array.from(new Set(graph.nodes.map((node) => node.subject).filter(Boolean))),
+    [graph.nodes],
+  );
+  const grades = useMemo(
+    () => Array.from(new Set(graph.nodes.map((node) => node.grade).filter(Boolean))),
+    [graph.nodes],
+  );
+  const graphNodes = useMemo(
     () =>
       graph.nodes.filter(
         (node) =>
           (type === "all" || node.type === type) &&
+          (subject === "all" || node.subject === subject) &&
+          (grade === "all" || node.grade === grade),
+      ),
+    [graph.nodes, type, subject, grade],
+  );
+  const graphNodeIds = useMemo(() => new Set(graphNodes.map((node) => node.id)), [graphNodes]);
+  const graphRelations = useMemo(
+    () =>
+      graph.relations.filter(
+        (relation) => graphNodeIds.has(relation.sourceNodeId) && graphNodeIds.has(relation.targetNodeId),
+      ),
+    [graph.relations, graphNodeIds],
+  );
+  const filtered = useMemo(
+    () =>
+      graphNodes.filter(
+        (node) =>
           `${node.name}${node.description}${node.aliases.join("")}`
             .toLowerCase()
             .includes(query.toLowerCase()),
       ),
-    [graph.nodes, query, type],
+    [graphNodes, query],
   );
-  const connected = selected
-    ? graph.relations
-        .reduce<
-          Array<{
-            relation: KnowledgeRelation;
-            node: KnowledgeEntity | undefined;
-            direction: "in" | "out";
-          }>
-        >((items, relation) => {
-          if (relation.sourceNodeId === selected.id)
-            items.push({
-              relation,
-              node: graph.nodes.find(
-                (node) => node.id === relation.targetNodeId,
-              ),
-              direction: "out",
-            });
-          if (relation.targetNodeId === selected.id)
-            items.push({
-              relation,
-              node: graph.nodes.find(
-                (node) => node.id === relation.sourceNodeId,
-              ),
-              direction: "in",
-            });
-          return items;
-        }, [])
-        .filter((item) => item.node)
-    : [];
+  useEffect(() => {
+    if (!graphNodes.length || graphNodeIds.has(selectedId)) return;
+    setSelectedId(graphNodes[0].id);
+  }, [graphNodes, graphNodeIds, selectedId]);
   const sourceLinks = selected
     ? graph.sourceLinks.filter((link) => link.nodeId === selected.id)
     : [];
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(240px,1fr)_280px] 2xl:grid-cols-[300px_minmax(0,1fr)_350px] gap-4 min-h-[690px]">
-      <aside className="glass-panel rounded-2xl overflow-hidden flex flex-col max-h-[420px] lg:max-h-none">
+    <div className="grid min-h-[690px] grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-[250px_minmax(420px,1fr)_300px] 2xl:grid-cols-[280px_minmax(0,1fr)_340px]">
+      <aside className="glass-panel order-2 flex max-h-[520px] flex-col overflow-hidden rounded-2xl xl:order-1 xl:max-h-none">
         <div className="p-3 border-b border-slate-200/70 dark:border-zinc-800 space-y-3">
           <button
             onClick={() => setDialog("create")}
@@ -404,6 +405,9 @@ export default function KnowledgeGraphWorkspace({
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && filtered[0]) setSelectedId(filtered[0].id);
+              }}
               placeholder="搜索名称、别名、说明"
               className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 text-sm outline-none"
             />
@@ -424,6 +428,30 @@ export default function KnowledgeGraphWorkspace({
                 {label}
               </button>
             ))}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="min-w-0">
+              <span className="sr-only">按学科筛选</span>
+              <select
+                value={subject}
+                onChange={(event) => setSubject(event.target.value)}
+                className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-600 outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+              >
+                <option value="all">全部学科</option>
+                {subjects.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </label>
+            <label className="min-w-0">
+              <span className="sr-only">按年级筛选</span>
+              <select
+                value={grade}
+                onChange={(event) => setGrade(event.target.value)}
+                className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-600 outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+              >
+                <option value="all">全部年级</option>
+                {grades.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </label>
           </div>
         </div>
         <div className="overflow-y-auto flex-1 divide-y divide-slate-200/60 dark:divide-zinc-800/70">
@@ -452,98 +480,30 @@ export default function KnowledgeGraphWorkspace({
         </div>
       </aside>
 
-      <main className="glass-panel rounded-2xl overflow-hidden flex flex-col min-w-0">
-        {!selected ? (
-          <div className="h-full grid place-items-center text-sm text-slate-400">
-            暂无知识节点
+      <main className="glass-panel order-1 min-w-0 overflow-hidden rounded-2xl md:col-span-2 xl:order-2 xl:col-span-1">
+        {!graphNodes.length ? (
+          <div className="grid min-h-[560px] place-items-center px-6 text-center text-sm text-slate-400">
+            当前筛选条件下暂无知识节点
           </div>
         ) : (
-          <>
-            <header className="px-5 py-4 border-b border-slate-200/70 dark:border-zinc-800 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-black text-slate-400">关系网络</p>
-                <h3 className="font-black text-lg mt-0.5">{selected.name}</h3>
+          <Suspense
+            fallback={
+              <div className="grid min-h-[560px] place-items-center text-slate-400">
+                <LoaderCircle className="h-5 w-5 animate-spin" />
               </div>
-              <span className="text-xs text-slate-400">
-                {connected.length} 条关系
-              </span>
-            </header>
-            <div className="p-5 flex-1 overflow-y-auto">
-              <div className="max-w-2xl mx-auto py-4">
-                <div className="relative border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-xl px-5 py-4 shadow-sm">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-emerald-700 text-white grid place-items-center">
-                      <Network className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <span
-                        className={`inline-flex px-2 py-0.5 rounded-md border text-[10px] font-bold ${entityTones[selected.type]}`}
-                      >
-                        {entityLabels[selected.type]}
-                      </span>
-                      <p className="font-black mt-1 truncate">
-                        {selected.name}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                <div className="w-px h-8 bg-slate-300 dark:bg-zinc-700 mx-auto" />
-                {connected.length ? (
-                  <div className="grid 2xl:grid-cols-2 gap-3">
-                    {connected.map(
-                      ({ relation, node, direction }) =>
-                        node && (
-                          <button
-                            key={relation.id}
-                            onClick={() => setSelectedId(node.id)}
-                            className="border border-slate-200 dark:border-zinc-800 rounded-xl p-3 text-left hover:border-emerald-500 hover:bg-emerald-50/30 transition-colors"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[10px] font-black text-emerald-700">
-                                {direction === "in"
-                                  ? `${relationLabels[relation.type]} → 当前`
-                                  : `当前 → ${relationLabels[relation.type]}`}
-                              </span>
-                              <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
-                            </div>
-                            <div className="flex items-center gap-2 mt-2">
-                              <span
-                                className={`px-1.5 py-0.5 rounded border text-[9px] font-bold ${entityTones[node.type]}`}
-                              >
-                                {entityLabels[node.type]}
-                              </span>
-                              <span className="text-sm font-bold break-words">
-                                {node.name}
-                              </span>
-                            </div>
-                            {relation.description && (
-                              <p className="text-xs text-slate-400 mt-2 line-clamp-2">
-                                {relation.description}
-                              </p>
-                            )}
-                          </button>
-                        ),
-                    )}
-                  </div>
-                ) : (
-                  <div className="py-14 text-center border border-dashed border-slate-200 dark:border-zinc-800 rounded-xl">
-                    <GitBranch className="w-6 h-6 mx-auto text-slate-300" />
-                    <p className="text-sm text-slate-400 mt-2">暂无关系</p>
-                    <button
-                      onClick={() => setDialog("relation")}
-                      className="text-xs font-bold text-emerald-700 mt-2"
-                    >
-                      建立第一条关系
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
+            }
+          >
+            <KnowledgeGraphCanvas
+              nodes={graphNodes}
+              relations={graphRelations}
+              selectedId={selected?.id ?? graphNodes[0].id}
+              onSelect={setSelectedId}
+            />
+          </Suspense>
         )}
       </main>
 
-      <aside className="glass-panel rounded-2xl overflow-hidden flex flex-col">
+      <aside className="glass-panel order-3 flex overflow-hidden rounded-2xl xl:order-3">
         {selected ? (
           <>
             <div className="p-4 border-b border-slate-200/70 dark:border-zinc-800 flex items-center justify-between">
