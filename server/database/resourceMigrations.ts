@@ -128,6 +128,32 @@ const migrations = [
       CREATE INDEX entity_revisions_entity_idx ON entity_revisions(entity_type, entity_id, version);
     `,
   },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE knowledge_nodes ADD COLUMN primary_mother_id TEXT REFERENCES knowledge_nodes(id) ON DELETE SET NULL;
+      ALTER TABLE knowledge_nodes ADD COLUMN trainable INTEGER NOT NULL DEFAULT 0 CHECK (trainable IN (0, 1));
+      ALTER TABLE knowledge_nodes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+
+      UPDATE knowledge_nodes
+      SET trainable = CASE WHEN type IN ('knowledge', 'ability') THEN 1 ELSE 0 END;
+
+      UPDATE knowledge_nodes
+      SET primary_mother_id = (
+        SELECT target_node_id
+        FROM knowledge_relations
+        WHERE type = 'parent'
+          AND status = 'active'
+          AND source_node_id = knowledge_nodes.id
+        ORDER BY created_at
+        LIMIT 1
+      )
+      WHERE primary_mother_id IS NULL;
+
+      DELETE FROM knowledge_relations WHERE type = 'parent';
+      CREATE INDEX knowledge_nodes_mother_order_idx ON knowledge_nodes(primary_mother_id, sort_order, name);
+    `,
+  },
 ];
 
 export const runResourceMigrations = (database: Database.Database) => {

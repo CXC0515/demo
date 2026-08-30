@@ -6,9 +6,11 @@
 import {
   DiscoverySuggestion,
   KnowledgeEntity,
+  KnowledgeFocusSnapshot,
   KnowledgeGraphSnapshot,
   KnowledgeRelation,
   KnowledgeRelationType,
+  KnowledgeTreeSnapshot,
   LibraryResource,
   ResourceDetail,
   ResourceKind,
@@ -109,7 +111,9 @@ export const getKnowledgeGraph = async (query = "") => {
 export type KnowledgeNodeInput = Pick<
   KnowledgeEntity,
   "name" | "type" | "description" | "aliases" | "subject" | "grade"
->;
+> & Partial<Pick<KnowledgeEntity, "trainable" | "sortOrder">> & {
+  primaryMotherId?: string | null;
+};
 export const createKnowledgeNode = async (input: KnowledgeNodeInput) =>
   (
     await requestJson<{ node: KnowledgeEntity }>("/api/knowledge/nodes", {
@@ -126,6 +130,35 @@ export const updateKnowledgeNode = async (
   (
     await requestJson<{ node: KnowledgeEntity }>(
       `/api/knowledge/nodes/${nodeId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    )
+  ).node;
+
+export const getKnowledgeTree = async (subject: string) =>
+  requestJson<KnowledgeTreeSnapshot>(
+    `/api/knowledge/tree?subject=${encodeURIComponent(subject)}`,
+  );
+
+export const getKnowledgeFocus = async (nodeId: string) =>
+  requestJson<KnowledgeFocusSnapshot>(
+    `/api/knowledge/nodes/${nodeId}/focus`,
+  );
+
+export const updateKnowledgeStructure = async (
+  nodeId: string,
+  input: {
+    primaryMotherId?: string | null;
+    trainable?: boolean;
+    sortOrder?: number;
+  },
+) =>
+  (
+    await requestJson<{ node: KnowledgeEntity }>(
+      `/api/knowledge/nodes/${nodeId}/structure`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

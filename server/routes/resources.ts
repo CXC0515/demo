@@ -55,6 +55,8 @@ const analyzeSchema = z.object({
   pageEnd: z.number().int().positive(),
 });
 const entityTypeSchema = z.enum([
+  "domain",
+  "topic",
   "knowledge",
   "question-type",
   "method",
@@ -63,7 +65,6 @@ const entityTypeSchema = z.enum([
   "error",
 ]);
 const relationTypeSchema = z.enum([
-  "parent",
   "prerequisite",
   "related",
   "confusable",
@@ -79,6 +80,16 @@ const nodeInputSchema = z.object({
   aliases: z.array(z.string().trim().min(1).max(80)).max(20).default([]),
   subject: z.string().trim().max(60).default(""),
   grade: z.string().trim().max(60).default(""),
+  primaryMotherId: z.string().min(1).nullable().optional(),
+  trainable: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).max(100000).optional(),
+});
+const structureInputSchema = z.object({
+  primaryMotherId: z.string().min(1).nullable().optional(),
+  trainable: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).max(100000).optional(),
+}).refine((value) => Object.keys(value).length > 0, {
+  message: "EMPTY_STRUCTURE_UPDATE",
 });
 const relationInputSchema = z
   .object({
@@ -289,6 +300,27 @@ router.get("/knowledge", (request, response) => {
   });
 });
 
+router.get("/knowledge/tree", (request, response) => {
+  const subject =
+    typeof request.query.subject === "string"
+      ? request.query.subject.trim()
+      : "";
+  if (!subject) {
+    response.status(400).json({ code: "SUBJECT_REQUIRED" });
+    return;
+  }
+  response.json(resourceRepository.listKnowledgeTree(subject));
+});
+
+router.get("/knowledge/nodes/:nodeId/focus", (request, response) => {
+  const focus = resourceRepository.getKnowledgeFocus(request.params.nodeId);
+  if (!focus) {
+    response.status(404).json({ code: "KNOWLEDGE_NODE_NOT_FOUND" });
+    return;
+  }
+  response.json(focus);
+});
+
 router.get("/resource-retrieval/knowledge-catalog", (request, response) => {
   const subject =
     typeof request.query.subject === "string"
@@ -297,7 +329,10 @@ router.get("/resource-retrieval/knowledge-catalog", (request, response) => {
   const nodes = resourceRepository
     .listNodes()
     .filter(
-      (node) => !subject || node.subject === subject || node.subject === "通用",
+      (node) =>
+        node.trainable &&
+        (node.type === "knowledge" || node.type === "ability") &&
+        (!subject || node.subject === subject || node.subject === "通用"),
     );
   response.json({
     nodes: nodes.map((node) => ({
@@ -306,6 +341,9 @@ router.get("/resource-retrieval/knowledge-catalog", (request, response) => {
       type: node.type,
       aliases: node.aliases,
       description: node.description,
+      path: resourceRepository
+        .getKnowledgeFocus(node.id)
+        ?.motherChain.map((item) => item.name) ?? [],
       version: node.version,
     })),
     relations: resourceRepository
@@ -421,8 +459,11 @@ router.post("/knowledge/nodes", (request, response) => {
     response
       .status(201)
       .json({ node: resourceRepository.createNode(parsed.data) });
-  } catch {
-    response.status(409).json({ code: "KNOWLEDGE_NODE_ALREADY_EXISTS" });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    response.status(code === "INVALID_PRIMARY_MOTHER" ? 400 : 409).json({
+      code: code === "INVALID_PRIMARY_MOTHER" ? code : "KNOWLEDGE_NODE_ALREADY_EXISTS",
+    });
   }
 });
 
@@ -442,8 +483,39 @@ router.patch("/knowledge/nodes/:nodeId", (request, response) => {
       return;
     }
     response.json({ node });
-  } catch {
-    response.status(409).json({ code: "KNOWLEDGE_NODE_ALREADY_EXISTS" });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    const structureErrors = new Set([
+      "INVALID_PRIMARY_MOTHER",
+      "KNOWLEDGE_STRUCTURE_CYCLE",
+      "KNOWLEDGE_STRUCTURE_HAS_CHILDREN",
+    ]);
+    response.status(409).json({
+      code: structureErrors.has(code) ? code : "KNOWLEDGE_NODE_ALREADY_EXISTS",
+    });
+  }
+});
+
+router.patch("/knowledge/nodes/:nodeId/structure", (request, response) => {
+  const parsed = structureInputSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ code: "INVALID_STRUCTURE_UPDATE" });
+    return;
+  }
+  try {
+    const node = resourceRepository.updateNodeStructure(
+      request.params.nodeId,
+      parsed.data,
+    );
+    if (!node) {
+      response.status(404).json({ code: "KNOWLEDGE_NODE_NOT_FOUND" });
+      return;
+    }
+    response.json({ node });
+  } catch (error) {
+    response.status(409).json({
+      code: error instanceof Error ? error.message : "INVALID_STRUCTURE_UPDATE",
+    });
   }
 });
 

@@ -6,6 +6,8 @@ import {
 } from "../../domain/types";
 
 export const entityLabels: Record<KnowledgeEntityType, string> = {
+  domain: "知识板块",
+  topic: "知识主题",
   knowledge: "知识点",
   "question-type": "题型",
   method: "解法",
@@ -15,6 +17,10 @@ export const entityLabels: Record<KnowledgeEntityType, string> = {
 };
 
 export const entityTones: Record<KnowledgeEntityType, string> = {
+  domain:
+    "bg-slate-800 text-white border-slate-800 dark:bg-zinc-100 dark:text-zinc-900",
+  topic:
+    "bg-teal-100 text-teal-800 border-teal-200 dark:bg-teal-900/30 dark:text-teal-200",
   knowledge:
     "bg-violet-100 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-200",
   "question-type":

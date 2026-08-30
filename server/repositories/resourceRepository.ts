@@ -79,6 +79,11 @@ const toNode = (row: JsonObject): KnowledgeEntity => ({
   aliases: parseJson(String(row.aliases_json), []),
   subject: String(row.subject),
   grade: String(row.grade),
+  primaryMotherId: row.primary_mother_id
+    ? String(row.primary_mother_id)
+    : undefined,
+  trainable: Boolean(row.trainable),
+  sortOrder: Number(row.sort_order ?? 0),
   source: row.source as KnowledgeEntity["source"],
   version: Number(row.version),
   status: row.status as KnowledgeEntity["status"],
@@ -145,13 +150,49 @@ export class ResourceRepository {
 
   seedBaseKnowledge() {
     const now = new Date().toISOString();
-    const nodes = [
+    const nodes: Array<[
+      string,
+      string,
+      KnowledgeEntity["type"],
+      string,
+      string,
+      string,
+      string | null,
+      number,
+      number,
+    ]> = [
+      [
+        "kd_zh_modern_reading",
+        "现代文阅读",
+        "domain",
+        "围绕现代文本理解、分析和鉴赏形成的知识板块",
+        "[]",
+        "语文",
+        null,
+        0,
+        10,
+      ],
+      [
+        "kt_zh_expression_techniques",
+        "表达技巧",
+        "topic",
+        "作者组织语言、塑造形象和表达情感的常用方式",
+        '["表达手法"]',
+        "语文",
+        "kd_zh_modern_reading",
+        0,
+        10,
+      ],
       [
         "kn_zh_reading_literary",
         "文学类文本阅读",
         "ability",
         "理解、分析和鉴赏文学类文本的综合能力",
         "[]",
+        "语文",
+        null,
+        1,
+        10,
       ],
       [
         "kn_zh_rhetoric",
@@ -159,6 +200,10 @@ export class ResourceRepository {
         "knowledge",
         "识别并分析常见修辞手法及其表达效果",
         '["修辞"]',
+        "语文",
+        "kt_zh_expression_techniques",
+        1,
+        10,
       ],
       [
         "kn_zh_metaphor",
@@ -166,6 +211,10 @@ export class ResourceRepository {
         "knowledge",
         "用有相似点的事物描写或说明另一事物",
         '["明喻","暗喻","借喻"]',
+        "语文",
+        "kn_zh_rhetoric",
+        1,
+        10,
       ],
       [
         "kn_zh_personification",
@@ -173,6 +222,10 @@ export class ResourceRepository {
         "knowledge",
         "把物当作人或把人当作物来描写",
         '["拟人","拟物"]',
+        "语文",
+        "kn_zh_rhetoric",
+        1,
+        20,
       ],
       [
         "kn_zh_parallelism",
@@ -180,6 +233,10 @@ export class ResourceRepository {
         "knowledge",
         "三个或以上结构相似、语气一致的短语或句子",
         "[]",
+        "语文",
+        "kn_zh_rhetoric",
+        1,
+        30,
       ],
       [
         "kn_zh_scene_description",
@@ -187,6 +244,10 @@ export class ResourceRepository {
         "knowledge",
         "通过景物特征、顺序和感官等组织描写",
         "[]",
+        "语文",
+        "kt_zh_expression_techniques",
+        1,
+        20,
       ],
       [
         "kn_zh_effect_analysis",
@@ -194,6 +255,10 @@ export class ResourceRepository {
         "question-type",
         "结合手法、内容和情感分析句子的表达效果",
         '["句子赏析"]',
+        "语文",
+        null,
+        0,
+        10,
       ],
       [
         "kn_zh_effect_method",
@@ -201,17 +266,199 @@ export class ResourceRepository {
         "method",
         "先判断手法，再联系具体内容，最后说明表达效果或情感",
         '["三步赏析法"]',
+        "语文",
+        null,
+        0,
+        10,
+      ],
+      [
+        "kd_math_number_algebra",
+        "数与代数",
+        "domain",
+        "研究数、式、方程和函数关系的数学知识板块",
+        "[]",
+        "数学",
+        null,
+        0,
+        10,
+      ],
+      [
+        "kt_math_algebra_foundations",
+        "代数基础",
+        "topic",
+        "支撑方程与函数学习的基本运算和变形",
+        "[]",
+        "数学",
+        "kd_math_number_algebra",
+        0,
+        10,
+      ],
+      [
+        "kt_math_equations",
+        "方程与不等式",
+        "topic",
+        "用代数关系描述并求解未知量",
+        "[]",
+        "数学",
+        "kd_math_number_algebra",
+        0,
+        20,
+      ],
+      [
+        "kt_math_functions",
+        "函数",
+        "topic",
+        "研究变量之间的对应关系及其图像",
+        "[]",
+        "数学",
+        "kd_math_number_algebra",
+        0,
+        30,
+      ],
+      [
+        "kn_math_polynomial_operations",
+        "整式运算",
+        "knowledge",
+        "进行整式的加减乘除与恒等变形",
+        "[]",
+        "数学",
+        "kt_math_algebra_foundations",
+        1,
+        10,
+      ],
+      [
+        "kn_math_factorization",
+        "因式分解",
+        "knowledge",
+        "把多项式化为若干整式乘积",
+        "[]",
+        "数学",
+        "kt_math_algebra_foundations",
+        1,
+        20,
+      ],
+      [
+        "kn_math_square_root",
+        "平方根",
+        "knowledge",
+        "理解平方根并进行相关运算",
+        "[]",
+        "数学",
+        "kt_math_algebra_foundations",
+        1,
+        30,
+      ],
+      [
+        "kn_math_linear_equation",
+        "一元一次方程",
+        "knowledge",
+        "理解并求解只含一个未知数的一次方程",
+        "[]",
+        "数学",
+        "kt_math_equations",
+        1,
+        10,
+      ],
+      [
+        "kn_math_quadratic_equation",
+        "一元二次方程",
+        "knowledge",
+        "理解一元二次方程并选择适当方法求解",
+        "[]",
+        "数学",
+        "kt_math_equations",
+        1,
+        20,
+      ],
+      [
+        "kn_math_discriminant",
+        "根的判别式",
+        "knowledge",
+        "利用判别式判断一元二次方程实数根的情况",
+        '["判别式"]',
+        "数学",
+        "kn_math_quadratic_equation",
+        1,
+        10,
+      ],
+      [
+        "kn_math_vieta",
+        "根与系数的关系",
+        "knowledge",
+        "利用一元二次方程根与系数的关系解决问题",
+        '["韦达定理"]',
+        "数学",
+        "kn_math_quadratic_equation",
+        1,
+        20,
+      ],
+      [
+        "kn_math_quadratic_function",
+        "二次函数",
+        "knowledge",
+        "理解二次函数的图像、性质及应用",
+        "[]",
+        "数学",
+        "kt_math_functions",
+        1,
+        10,
+      ],
+      [
+        "qt_math_solve_quadratic",
+        "解一元二次方程",
+        "question-type",
+        "选择适当方法求一元二次方程的根",
+        "[]",
+        "数学",
+        null,
+        0,
+        10,
+      ],
+      [
+        "qt_math_parameter_roots",
+        "根的情况与参数取值",
+        "question-type",
+        "根据根的情况确定参数范围或取值",
+        "[]",
+        "数学",
+        null,
+        0,
+        20,
+      ],
+      [
+        "km_math_factoring",
+        "因式分解法",
+        "method",
+        "把方程一边化为零，再利用因式分解求根",
+        "[]",
+        "数学",
+        null,
+        0,
+        10,
+      ],
+      [
+        "km_math_formula",
+        "公式法",
+        "method",
+        "利用求根公式求一元二次方程的根",
+        "[]",
+        "数学",
+        null,
+        0,
+        20,
       ],
     ];
     const insertNode = this.database.prepare(`
       INSERT OR IGNORE INTO knowledge_nodes
-      (id, name, type, description, aliases_json, subject, grade, source, version, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, '语文', '通用', 'base', 1, 'active', ?, ?)
+      (id, name, type, description, aliases_json, subject, grade, primary_mother_id, trainable, sort_order, source, version, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, '通用', ?, ?, ?, 'base', 1, 'active', ?, ?)
+    `);
+    const updateStructure = this.database.prepare(`
+      UPDATE knowledge_nodes
+      SET primary_mother_id = ?, trainable = ?, sort_order = ?
+      WHERE id = ? AND source = 'base'
     `);
     const relations: Array<[string, string, KnowledgeRelationType, string]> = [
-      ["kn_zh_metaphor", "kn_zh_rhetoric", "parent", "比喻属于修辞手法"],
-      ["kn_zh_personification", "kn_zh_rhetoric", "parent", "比拟属于修辞手法"],
-      ["kn_zh_parallelism", "kn_zh_rhetoric", "parent", "排比属于修辞手法"],
       [
         "kn_zh_effect_analysis",
         "kn_zh_metaphor",
@@ -236,6 +483,60 @@ export class ResourceRepository {
         "prerequisite",
         "景物描写分析是文学阅读的基础能力之一",
       ],
+      [
+        "kn_math_polynomial_operations",
+        "kn_math_quadratic_equation",
+        "prerequisite",
+        "整式运算是一元二次方程变形的基础",
+      ],
+      [
+        "kn_math_factorization",
+        "kn_math_quadratic_equation",
+        "prerequisite",
+        "因式分解支持一元二次方程求解",
+      ],
+      [
+        "kn_math_square_root",
+        "kn_math_quadratic_equation",
+        "prerequisite",
+        "平方根知识支持配方法和公式法",
+      ],
+      [
+        "kn_math_linear_equation",
+        "kn_math_quadratic_equation",
+        "prerequisite",
+        "一元一次方程是方程求解的先修知识",
+      ],
+      [
+        "kn_math_quadratic_equation",
+        "kn_math_quadratic_function",
+        "prerequisite",
+        "一元二次方程支持理解二次函数与横轴交点",
+      ],
+      [
+        "qt_math_solve_quadratic",
+        "kn_math_quadratic_equation",
+        "examines",
+        "该题型直接考查一元二次方程求解",
+      ],
+      [
+        "qt_math_parameter_roots",
+        "kn_math_discriminant",
+        "examines",
+        "该题型考查判别式与参数关系",
+      ],
+      [
+        "km_math_factoring",
+        "qt_math_solve_quadratic",
+        "applies-to",
+        "因式分解法适用于可分解的一元二次方程",
+      ],
+      [
+        "km_math_formula",
+        "qt_math_solve_quadratic",
+        "applies-to",
+        "公式法适用于一般一元二次方程",
+      ],
     ];
     const insertRelation = this.database.prepare(`
       INSERT OR IGNORE INTO knowledge_relations
@@ -243,7 +544,10 @@ export class ResourceRepository {
       VALUES (?, ?, ?, ?, ?, 'base', 1, 'active', ?, ?)
     `);
     this.database.transaction(() => {
-      nodes.forEach((node) => insertNode.run(...node, now, now));
+      nodes.forEach((node) => {
+        insertNode.run(...node, now, now);
+        updateStructure.run(node[6], node[7], node[8], node[0]);
+      });
       relations.forEach(([source, target, type, description]) =>
         insertRelation.run(
           `kr_${source}_${type}_${target}`,
@@ -255,6 +559,9 @@ export class ResourceRepository {
           now,
         ),
       );
+      this.database
+        .prepare("DELETE FROM knowledge_relations WHERE type = 'parent'")
+        .run();
     })();
   }
 
@@ -518,19 +825,183 @@ export class ResourceRepository {
     return row ? toNode(row) : undefined;
   }
 
+  listKnowledgeTree(subject: string) {
+    const structuralTypes = new Set<KnowledgeEntity["type"]>([
+      "domain",
+      "topic",
+      "knowledge",
+    ]);
+    const nodes = this.listNodes()
+      .filter(
+        (node) =>
+          node.subject === subject && structuralTypes.has(node.type),
+      )
+      .sort((first, second) => first.sortOrder - second.sortOrder || first.name.localeCompare(second.name));
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    return {
+      subject,
+      nodes,
+      unclassified: nodes.filter(
+        (node) =>
+          node.type !== "domain" &&
+          (!node.primaryMotherId || !nodeIds.has(node.primaryMotherId)),
+      ),
+    };
+  }
+
+  getKnowledgeFocus(id: string) {
+    const node = this.getNode(id);
+    if (!node || node.status !== "active") return undefined;
+    const nodes = this.listNodes();
+    const nodeById = new Map(nodes.map((item) => [item.id, item]));
+    const relations = this.listRelations();
+    const uniqueNodes = (ids: Iterable<string>) =>
+      Array.from(new Set(ids))
+        .map((nodeId) => nodeById.get(nodeId))
+        .filter((item): item is KnowledgeEntity => Boolean(item));
+    const motherChain: KnowledgeEntity[] = [];
+    const visited = new Set<string>([node.id]);
+    let motherId = node.primaryMotherId;
+    while (motherId && !visited.has(motherId)) {
+      visited.add(motherId);
+      const mother = nodeById.get(motherId);
+      if (!mother) break;
+      motherChain.unshift(mother);
+      motherId = mother.primaryMotherId;
+    }
+    const prerequisites = uniqueNodes(
+      relations
+        .filter((relation) => relation.type === "prerequisite" && relation.targetNodeId === id)
+        .map((relation) => relation.sourceNodeId),
+    );
+    const dependents = uniqueNodes(
+      relations
+        .filter((relation) => relation.type === "prerequisite" && relation.sourceNodeId === id)
+        .map((relation) => relation.targetNodeId),
+    );
+    const questionTypes = uniqueNodes(
+      relations
+        .filter((relation) => relation.type === "examines" && relation.targetNodeId === id)
+        .map((relation) => relation.sourceNodeId),
+    );
+    const questionTypeIds = new Set(questionTypes.map((item) => item.id));
+    if (node.type === "question-type") questionTypeIds.add(node.id);
+    const methods = uniqueNodes(
+      relations
+        .filter(
+          (relation) =>
+            relation.type === "applies-to" &&
+            (relation.targetNodeId === id || questionTypeIds.has(relation.targetNodeId)),
+        )
+        .map((relation) => relation.sourceNodeId),
+    );
+    const demonstrationTargets = new Set([
+      id,
+      ...questionTypeIds,
+      ...methods.map((item) => item.id),
+    ]);
+    const examples = uniqueNodes(
+      relations
+        .filter(
+          (relation) =>
+            relation.type === "demonstrates" &&
+            demonstrationTargets.has(relation.targetNodeId),
+        )
+        .map((relation) => relation.sourceNodeId),
+    );
+    const directlyConnectedIds = relations.flatMap((relation) => {
+      if (relation.sourceNodeId === id) return [relation.targetNodeId];
+      if (relation.targetNodeId === id) return [relation.sourceNodeId];
+      return [];
+    });
+    const directNodes = uniqueNodes(directlyConnectedIds);
+    const related = uniqueNodes(
+      relations
+        .filter(
+          (relation) =>
+            relation.type === "related" &&
+            (relation.sourceNodeId === id || relation.targetNodeId === id),
+        )
+        .map((relation) =>
+          relation.sourceNodeId === id
+            ? relation.targetNodeId
+            : relation.sourceNodeId,
+        ),
+    );
+    const confusable = uniqueNodes(
+      relations
+        .filter(
+          (relation) =>
+            relation.type === "confusable" &&
+            (relation.sourceNodeId === id || relation.targetNodeId === id),
+        )
+        .map((relation) =>
+          relation.sourceNodeId === id
+            ? relation.targetNodeId
+            : relation.sourceNodeId,
+        ),
+    );
+    const sourceLinks = this.listSourceLinks().filter((link) => link.nodeId === id);
+    const resourceIds = new Set(sourceLinks.map((link) => link.resourceId));
+    return {
+      node,
+      motherChain,
+      children: nodes
+        .filter((item) => item.primaryMotherId === id)
+        .sort((first, second) => first.sortOrder - second.sortOrder || first.name.localeCompare(second.name)),
+      prerequisites,
+      dependents,
+      questionTypes,
+      methods,
+      examples,
+      abilities: directNodes.filter((item) => item.type === "ability"),
+      errors: directNodes.filter((item) => item.type === "error"),
+      related,
+      confusable,
+      sourceLinks,
+      resources: this.listResources().filter((resource) => resourceIds.has(resource.id)),
+    };
+  }
+
   createNode(
     input: Pick<
       KnowledgeEntity,
       "name" | "type" | "description" | "aliases" | "subject" | "grade"
-    > & { id?: string; source?: KnowledgeEntity["source"] },
+    > & {
+      id?: string;
+      primaryMotherId?: string;
+      trainable?: boolean;
+      sortOrder?: number;
+      source?: KnowledgeEntity["source"];
+    },
   ) {
     const id = input.id ?? randomUUID();
     const now = new Date().toISOString();
+    if (input.primaryMotherId) {
+      const mother = this.getNode(input.primaryMotherId);
+      const structuralTypes = new Set<KnowledgeEntity["type"]>([
+        "domain",
+        "topic",
+        "knowledge",
+      ]);
+      if (
+        !mother ||
+        mother.status !== "active" ||
+        mother.subject !== input.subject ||
+        !structuralTypes.has(mother.type) ||
+        !structuralTypes.has(input.type)
+      ) {
+        throw new Error("INVALID_PRIMARY_MOTHER");
+      }
+    }
+    const trainable =
+      input.trainable ??
+      (input.type === "knowledge" || input.type === "ability");
     this.database
       .prepare(
         `
-      INSERT INTO knowledge_nodes (id, name, type, description, aliases_json, subject, grade, source, version, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, ?)
+      INSERT INTO knowledge_nodes (id, name, type, description, aliases_json, subject, grade, primary_mother_id, trainable, sort_order, source, version, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, ?)
     `,
       )
       .run(
@@ -541,6 +1012,9 @@ export class ResourceRepository {
         JSON.stringify(input.aliases),
         input.subject,
         input.grade,
+        input.primaryMotherId ?? null,
+        trainable ? 1 : 0,
+        input.sortOrder ?? 0,
         input.source ?? "teacher",
         now,
         now,
@@ -561,21 +1035,65 @@ export class ResourceRepository {
         | "aliases"
         | "subject"
         | "grade"
+        | "trainable"
+        | "sortOrder"
         | "status"
       >
-    >,
+    > & { primaryMotherId?: string | null },
   ) {
     const current = this.getNode(id);
     if (!current) return undefined;
-    const next = {
+    const next: KnowledgeEntity = {
       ...current,
       ...update,
+      primaryMotherId:
+        update.primaryMotherId === null
+          ? undefined
+          : update.primaryMotherId ?? current.primaryMotherId,
       version: current.version + 1,
       updatedAt: new Date().toISOString(),
     };
+    const structuralTypes = new Set<KnowledgeEntity["type"]>([
+      "domain",
+      "topic",
+      "knowledge",
+    ]);
+    const activeChildren = this.listNodes().filter(
+      (node) => node.primaryMotherId === id,
+    );
+    if (
+      activeChildren.length &&
+      (next.subject !== current.subject || !structuralTypes.has(next.type))
+    ) {
+      throw new Error("KNOWLEDGE_STRUCTURE_HAS_CHILDREN");
+    }
+    if (next.primaryMotherId) {
+      const mother = this.getNode(next.primaryMotherId);
+      if (
+        !mother ||
+        mother.status !== "active" ||
+        mother.subject !== next.subject ||
+        !structuralTypes.has(mother.type) ||
+        !structuralTypes.has(next.type)
+      ) {
+        throw new Error("INVALID_PRIMARY_MOTHER");
+      }
+      const visited = new Set([id]);
+      let cursor: KnowledgeEntity | undefined = mother;
+      while (cursor) {
+        if (visited.has(cursor.id)) {
+          throw new Error("KNOWLEDGE_STRUCTURE_CYCLE");
+        }
+        visited.add(cursor.id);
+        cursor = cursor.primaryMotherId
+          ? this.getNode(cursor.primaryMotherId)
+          : undefined;
+      }
+    }
+    if (!structuralTypes.has(next.type)) next.primaryMotherId = undefined;
     this.database
       .prepare(
-        `UPDATE knowledge_nodes SET name=?, type=?, description=?, aliases_json=?, subject=?, grade=?, status=?, version=?, updated_at=? WHERE id=?`,
+        `UPDATE knowledge_nodes SET name=?, type=?, description=?, aliases_json=?, subject=?, grade=?, primary_mother_id=?, trainable=?, sort_order=?, status=?, version=?, updated_at=? WHERE id=?`,
       )
       .run(
         next.name,
@@ -584,6 +1102,9 @@ export class ResourceRepository {
         JSON.stringify(next.aliases),
         next.subject,
         next.grade,
+        next.primaryMotherId ?? null,
+        next.trainable ? 1 : 0,
+        next.sortOrder,
         next.status,
         next.version,
         next.updatedAt,
@@ -593,12 +1114,45 @@ export class ResourceRepository {
     return this.getNode(id);
   }
 
+  updateNodeStructure(
+    id: string,
+    update: {
+      primaryMotherId?: string | null;
+      trainable?: boolean;
+      sortOrder?: number;
+    },
+  ) {
+    const node = this.getNode(id);
+    if (!node) return undefined;
+    const nextMotherId =
+      update.primaryMotherId === undefined
+        ? node.primaryMotherId
+        : update.primaryMotherId || undefined;
+    return this.updateNode(id, {
+      primaryMotherId: nextMotherId ?? null,
+      trainable: update.trainable ?? node.trainable,
+      sortOrder: update.sortOrder ?? node.sortOrder,
+    });
+  }
+
   mergeNode(sourceId: string, targetId: string) {
     const source = this.getNode(sourceId);
     const target = this.getNode(targetId);
     if (!source || !target || sourceId === targetId) return undefined;
     const now = new Date().toISOString();
     this.database.transaction(() => {
+      if (target.primaryMotherId === sourceId) {
+        this.database
+          .prepare(
+            "UPDATE knowledge_nodes SET primary_mother_id = ? WHERE id = ?",
+          )
+          .run(source.primaryMotherId ?? null, targetId);
+      }
+      this.database
+        .prepare(
+          "UPDATE knowledge_nodes SET primary_mother_id = ? WHERE primary_mother_id = ? AND id <> ?",
+        )
+        .run(targetId, sourceId, targetId);
       this.database
         .prepare(
           "UPDATE OR IGNORE knowledge_source_links SET node_id = ? WHERE node_id = ?",
@@ -761,13 +1315,19 @@ export class ResourceRepository {
         suggestion.existingNodeId &&
         suggestion.targetNodeId
       ) {
-        this.createRelation({
-          sourceNodeId: suggestion.existingNodeId,
-          targetNodeId: suggestion.targetNodeId,
-          type: suggestion.proposedType as KnowledgeRelationType,
-          description: suggestion.description,
-          source: "ai-confirmed",
-        });
+        if (suggestion.proposedType === "parent") {
+          this.updateNodeStructure(suggestion.existingNodeId, {
+            primaryMotherId: suggestion.targetNodeId,
+          });
+        } else {
+          this.createRelation({
+            sourceNodeId: suggestion.existingNodeId,
+            targetNodeId: suggestion.targetNodeId,
+            type: suggestion.proposedType as KnowledgeRelationType,
+            description: suggestion.description,
+            source: "ai-confirmed",
+          });
+        }
       }
       if (decision === "merged" && mergeTargetId && sourceChunk) {
         nodeId = mergeTargetId;

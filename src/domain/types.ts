@@ -607,7 +607,7 @@ export interface KnowledgeNode {
 
 export type ResourceKind = 'textbook' | 'supplement' | 'worksheet' | 'lesson-plan' | 'ppt-template' | 'notice' | 'other';
 export type ResourceStatus = 'uploaded' | 'processing' | 'ready' | 'needs-review' | 'failed';
-export type KnowledgeEntityType = 'knowledge' | 'question-type' | 'method' | 'example' | 'ability' | 'error';
+export type KnowledgeEntityType = 'domain' | 'topic' | 'knowledge' | 'question-type' | 'method' | 'example' | 'ability' | 'error';
 export type KnowledgeRelationType = 'parent' | 'prerequisite' | 'related' | 'confusable' | 'examines' | 'applies-to' | 'demonstrates' | 'explains';
 
 export interface LibraryResource {
@@ -656,6 +656,9 @@ export interface KnowledgeEntity {
   aliases: string[];
   subject: string;
   grade: string;
+  primaryMotherId?: string;
+  trainable: boolean;
+  sortOrder: number;
   source: 'base' | 'teacher' | 'ai-confirmed';
   version: number;
   status: 'active' | 'archived' | 'merged';
@@ -716,6 +719,29 @@ export interface ResourceDetail extends LibraryResource {
 export interface KnowledgeGraphSnapshot {
   nodes: KnowledgeEntity[];
   relations: KnowledgeRelation[];
+  sourceLinks: KnowledgeSourceLink[];
+  resources: LibraryResource[];
+}
+
+export interface KnowledgeTreeSnapshot {
+  subject: string;
+  nodes: KnowledgeEntity[];
+  unclassified: KnowledgeEntity[];
+}
+
+export interface KnowledgeFocusSnapshot {
+  node: KnowledgeEntity;
+  motherChain: KnowledgeEntity[];
+  children: KnowledgeEntity[];
+  prerequisites: KnowledgeEntity[];
+  dependents: KnowledgeEntity[];
+  questionTypes: KnowledgeEntity[];
+  methods: KnowledgeEntity[];
+  examples: KnowledgeEntity[];
+  abilities: KnowledgeEntity[];
+  errors: KnowledgeEntity[];
+  related: KnowledgeEntity[];
+  confusable: KnowledgeEntity[];
   sourceLinks: KnowledgeSourceLink[];
   resources: LibraryResource[];
 }

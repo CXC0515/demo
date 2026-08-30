@@ -138,3 +138,77 @@ test("merging nodes preserves the target and archives the source id", () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("base knowledge is organized by a stable mother chain", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "resource-tree-"));
+  const database = createResourceDatabase(path.join(directory, "resources.sqlite"));
+  try {
+    const repository = new ResourceRepository(database);
+    repository.seedBaseKnowledge();
+    const tree = repository.listKnowledgeTree("语文");
+    assert.equal(tree.nodes.find((node) => node.id === "kt_zh_expression_techniques")?.primaryMotherId, "kd_zh_modern_reading");
+    assert.equal(tree.nodes.find((node) => node.id === "kn_zh_rhetoric")?.primaryMotherId, "kt_zh_expression_techniques");
+    assert.equal(repository.listRelations().some((relation) => relation.type === "parent"), false);
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("knowledge structure rejects a mother-chain cycle", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "resource-cycle-"));
+  const database = createResourceDatabase(path.join(directory, "resources.sqlite"));
+  try {
+    const repository = new ResourceRepository(database);
+    const domain = repository.createNode({
+      name: "数与代数",
+      type: "domain",
+      description: "",
+      aliases: [],
+      subject: "数学",
+      grade: "通用",
+    });
+    const topic = repository.createNode({
+      name: "方程",
+      type: "topic",
+      description: "",
+      aliases: [],
+      subject: "数学",
+      grade: "通用",
+      primaryMotherId: domain.id,
+    });
+    assert.throws(
+      () => repository.updateNodeStructure(domain.id, { primaryMotherId: topic.id }),
+      /KNOWLEDGE_STRUCTURE_CYCLE/,
+    );
+    assert.throws(
+      () => repository.updateNode(domain.id, { primaryMotherId: topic.id }),
+      /KNOWLEDGE_STRUCTURE_CYCLE/,
+    );
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("knowledge focus separates prerequisites, dependents, question types and methods", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "resource-focus-"));
+  const database = createResourceDatabase(path.join(directory, "resources.sqlite"));
+  try {
+    const repository = new ResourceRepository(database);
+    repository.seedBaseKnowledge();
+    const focus = repository.getKnowledgeFocus("kn_math_quadratic_equation");
+    assert.ok(focus);
+    assert.deepEqual(focus.motherChain.map((node) => node.id), [
+      "kd_math_number_algebra",
+      "kt_math_equations",
+    ]);
+    assert.ok(focus.prerequisites.some((node) => node.id === "kn_math_factorization"));
+    assert.ok(focus.dependents.some((node) => node.id === "kn_math_quadratic_function"));
+    assert.ok(focus.questionTypes.some((node) => node.id === "qt_math_solve_quadratic"));
+    assert.ok(focus.methods.some((node) => node.id === "km_math_factoring"));
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

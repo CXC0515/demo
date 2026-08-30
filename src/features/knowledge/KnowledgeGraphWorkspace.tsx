@@ -6,42 +6,44 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   Archive,
-  ArrowDownToLine,
+  ArrowLeft,
+  ArrowRight,
   BookOpen,
+  ChevronRight,
+  CircleDot,
   Edit3,
   Link2,
   LoaderCircle,
   Merge,
   Plus,
+  Route,
   Search,
-  Tag,
   X,
 } from "lucide-react";
 import {
   KnowledgeEntity,
   KnowledgeEntityType,
+  KnowledgeFocusSnapshot,
   KnowledgeGraphSnapshot,
-  KnowledgeRelation,
   KnowledgeRelationType,
 } from "../../domain/types";
 import {
   archiveKnowledgeNode,
   createKnowledgeNode,
   createKnowledgeRelation,
+  getKnowledgeFocus,
   KnowledgeNodeInput,
   mergeKnowledgeNode,
   updateKnowledgeNode,
 } from "../../services/resourceApi";
-import {
-  entityLabels,
-  entityTones,
-  relationLabels,
-  resourceKindLabels,
-} from "./knowledgeUi";
+import { entityLabels, entityTones, relationLabels, resourceKindLabels } from "./knowledgeUi";
 
 const KnowledgeGraphCanvas = lazy(() => import("./KnowledgeGraphCanvas"));
+const structuralTypes = new Set<KnowledgeEntityType>(["domain", "topic", "knowledge"]);
+const fieldClass =
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-600 dark:border-zinc-700 dark:bg-zinc-900";
 
-interface KnowledgeGraphWorkspaceProps {
+interface WorkspaceProps {
   graph: KnowledgeGraphSnapshot;
   loading: boolean;
   onDataChanged: () => Promise<void>;
@@ -49,678 +51,488 @@ interface KnowledgeGraphWorkspaceProps {
   onShowToast: (message: string) => void;
 }
 
-const fieldClass =
-  "w-full px-3 py-2 rounded-xl bg-white/80 dark:bg-zinc-900/70 border border-slate-200 dark:border-zinc-800 text-sm outline-none focus:border-emerald-600";
-
-const NodeDialog = ({
-  node,
+const DialogShell = ({
+  title,
+  subtitle,
   onClose,
-  onSaved,
-  onShowToast,
+  children,
 }: {
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) => (
+  <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/35 p-4 backdrop-blur-sm" onMouseDown={onClose}>
+    <div
+      className="glass-panel max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl shadow-2xl"
+      onMouseDown={(event) => event.stopPropagation()}
+    >
+      <header className="flex items-start justify-between border-b border-slate-200/70 px-5 py-4 dark:border-zinc-800">
+        <div>
+          <h3 className="font-black text-slate-900 dark:text-zinc-50">{title}</h3>
+          {subtitle ? <p className="mt-1 text-xs text-slate-400">{subtitle}</p> : null}
+        </div>
+        <button type="button" onClick={onClose} title="关闭" className="grid h-8 w-8 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800">
+          <X className="h-4 w-4" />
+        </button>
+      </header>
+      {children}
+    </div>
+  </div>
+);
+
+const NodeDialog = ({ node, nodes, defaultSubject, onClose, onSaved, onShowToast }: {
   node?: KnowledgeEntity;
+  nodes: KnowledgeEntity[];
+  defaultSubject: string;
   onClose: () => void;
   onSaved: () => Promise<void>;
   onShowToast: (message: string) => void;
 }) => {
-  const [input, setInput] = useState<KnowledgeNodeInput>(
-    node
-      ? {
-          name: node.name,
-          type: node.type,
-          description: node.description,
-          aliases: node.aliases,
-          subject: node.subject,
-          grade: node.grade,
-        }
-      : {
-          name: "",
-          type: "knowledge",
-          description: "",
-          aliases: [],
-          subject: "语文",
-          grade: "通用",
-        },
-  );
+  const [input, setInput] = useState<KnowledgeNodeInput>(node ? {
+    name: node.name,
+    type: node.type,
+    description: node.description,
+    aliases: node.aliases,
+    subject: node.subject,
+    grade: node.grade,
+    primaryMotherId: node.primaryMotherId,
+    trainable: node.trainable,
+    sortOrder: node.sortOrder,
+  } : {
+    name: "",
+    type: "knowledge",
+    description: "",
+    aliases: [],
+    subject: defaultSubject || "语文",
+    grade: "通用",
+    trainable: true,
+    sortOrder: 0,
+  });
   const [aliasText, setAliasText] = useState(input.aliases.join("、"));
   const [saving, setSaving] = useState(false);
+  const isStructural = structuralTypes.has(input.type);
+  const motherCandidates = nodes.filter((candidate) =>
+    candidate.id !== node?.id &&
+    candidate.subject === input.subject &&
+    structuralTypes.has(candidate.type),
+  );
+  const update = <K extends keyof KnowledgeNodeInput>(key: K, value: KnowledgeNodeInput[K]) =>
+    setInput((current) => ({ ...current, [key]: value }));
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setSaving(true);
     try {
-      const payload = {
+      const payload: KnowledgeNodeInput = {
         ...input,
-        aliases: aliasText
-          .split(/[、,，]/)
-          .map((value) => value.trim())
-          .filter(Boolean),
+        primaryMotherId: isStructural ? input.primaryMotherId : undefined,
+        aliases: aliasText.split(/[、,，]/).map((value) => value.trim()).filter(Boolean),
       };
-      if (node) await updateKnowledgeNode(node.id, payload);
-      else await createKnowledgeNode(payload);
+      if (node) {
+        await updateKnowledgeNode(node.id, {
+          ...payload,
+          primaryMotherId: isStructural ? payload.primaryMotherId ?? null : null,
+        });
+      } else {
+        await createKnowledgeNode(payload);
+      }
       await onSaved();
-      onShowToast(node ? "节点已更新" : "节点已加入图谱");
+      onShowToast(node ? "节点已更新" : "节点已加入知识库");
       onClose();
     } catch (error) {
-      onShowToast(
-        `保存失败：${error instanceof Error ? error.message : "未知错误"}`,
-      );
+      onShowToast(`保存失败：${error instanceof Error ? error.message : "未知错误"}`);
     } finally {
       setSaving(false);
     }
   };
-  const update = <K extends keyof KnowledgeNodeInput>(
-    key: K,
-    value: KnowledgeNodeInput[K],
-  ) => setInput((current) => ({ ...current, [key]: value }));
+
   return (
-    <div
-      className="fixed inset-0 z-50 bg-slate-950/30 backdrop-blur-sm grid place-items-center p-4"
-      onMouseDown={onClose}
-    >
-      <form
-        onSubmit={submit}
-        onMouseDown={(event) => event.stopPropagation()}
-        className="glass-panel w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl"
-      >
-        <div className="px-5 py-4 border-b border-slate-200/70 dark:border-zinc-800 flex justify-between">
-          <div>
-            <h3 className="font-black">{node ? "编辑节点" : "新增节点"}</h3>
-            {node && (
-              <p className="text-xs text-slate-400 mt-0.5">
-                稳定 ID：{node.id}
-              </p>
-            )}
-          </div>
-          <button type="button" onClick={onClose} title="关闭">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="p-5 grid grid-cols-2 gap-4">
-          <label className="col-span-2 space-y-1">
+    <DialogShell title={node ? "编辑节点" : "新增节点"} subtitle={node ? `稳定 ID：${node.id}` : "先确定它在知识结构中的位置"} onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
+          <label className="space-y-1 sm:col-span-2">
             <span className="text-xs font-bold text-slate-500">名称</span>
-            <input
-              required
-              value={input.name}
-              onChange={(event) => update("name", event.target.value)}
-              className={fieldClass}
-            />
+            <input required value={input.name} onChange={(event) => update("name", event.target.value)} className={fieldClass} />
           </label>
           <label className="space-y-1">
             <span className="text-xs font-bold text-slate-500">类型</span>
-            <select
-              value={input.type}
-              onChange={(event) =>
-                update("type", event.target.value as KnowledgeEntityType)
-              }
-              className={fieldClass}
-            >
-              {Object.entries(entityLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
+            <select value={input.type} onChange={(event) => {
+              const nextType = event.target.value as KnowledgeEntityType;
+              setInput((current) => ({
+                ...current,
+                type: nextType,
+                primaryMotherId: structuralTypes.has(nextType) ? current.primaryMotherId : undefined,
+                trainable: nextType === "knowledge" || nextType === "ability" ? current.trainable ?? true : false,
+              }));
+            }} className={fieldClass}>
+              {Object.entries(entityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </label>
           <label className="space-y-1">
             <span className="text-xs font-bold text-slate-500">学科</span>
-            <input
-              value={input.subject}
-              onChange={(event) => update("subject", event.target.value)}
-              className={fieldClass}
-            />
+            <input value={input.subject} onChange={(event) => update("subject", event.target.value)} className={fieldClass} />
           </label>
+          {isStructural ? (
+            <label className="space-y-1 sm:col-span-2">
+              <span className="text-xs font-bold text-slate-500">主要母节点</span>
+              <select value={input.primaryMotherId ?? ""} onChange={(event) => update("primaryMotherId", event.target.value || undefined)} className={fieldClass}>
+                <option value="">无（作为学科根层）</option>
+                {motherCandidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{entityLabels[candidate.type]} · {candidate.name}</option>)}
+              </select>
+            </label>
+          ) : null}
           <label className="space-y-1">
             <span className="text-xs font-bold text-slate-500">适用年级</span>
-            <input
-              value={input.grade}
-              onChange={(event) => update("grade", event.target.value)}
-              className={fieldClass}
-            />
+            <input value={input.grade} onChange={(event) => update("grade", event.target.value)} className={fieldClass} />
           </label>
           <label className="space-y-1">
+            <span className="text-xs font-bold text-slate-500">排序</span>
+            <input type="number" value={input.sortOrder ?? 0} onChange={(event) => update("sortOrder", Number(event.target.value))} className={fieldClass} />
+          </label>
+          <label className="space-y-1 sm:col-span-2">
             <span className="text-xs font-bold text-slate-500">别名</span>
-            <input
-              value={aliasText}
-              onChange={(event) => setAliasText(event.target.value)}
-              placeholder="用顿号分隔"
-              className={fieldClass}
-            />
+            <input value={aliasText} onChange={(event) => setAliasText(event.target.value)} placeholder="用顿号分隔，供 AI 对齐使用" className={fieldClass} />
           </label>
-          <label className="col-span-2 space-y-1">
+          <label className="space-y-1 sm:col-span-2">
             <span className="text-xs font-bold text-slate-500">说明</span>
-            <textarea
-              rows={4}
-              value={input.description}
-              onChange={(event) => update("description", event.target.value)}
-              className={fieldClass}
-            />
+            <textarea rows={3} value={input.description} onChange={(event) => update("description", event.target.value)} className={fieldClass} />
+          </label>
+          <label className="flex items-center gap-2 text-sm font-bold text-slate-600 dark:text-zinc-300 sm:col-span-2">
+            <input type="checkbox" checked={Boolean(input.trainable)} onChange={(event) => update("trainable", event.target.checked)} className="h-4 w-4 accent-emerald-700" />
+            可被 AI 批改与学生画像作为训练目标引用
           </label>
         </div>
-        <div className="px-5 py-4 border-t border-slate-200/70 dark:border-zinc-800 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn-secondary px-4 py-2 text-sm"
-          >
-            取消
+        <footer className="flex justify-end gap-2 border-t border-slate-200/70 px-5 py-4 dark:border-zinc-800">
+          <button type="button" onClick={onClose} className="btn-secondary px-4 py-2 text-sm">取消</button>
+          <button disabled={saving} className="btn-primary flex items-center gap-2 px-4 py-2 text-sm">
+            {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}保存
           </button>
-          <button
-            disabled={saving}
-            className="btn-primary px-4 py-2 text-sm flex items-center gap-2"
-          >
-            {saving && <LoaderCircle className="w-4 h-4 animate-spin" />}保存
-          </button>
-        </div>
+        </footer>
       </form>
-    </div>
+    </DialogShell>
   );
 };
 
-const RelationDialog = ({
-  selected,
-  nodes,
-  onClose,
-  onSaved,
-  onShowToast,
-}: {
+const RelationDialog = ({ selected, nodes, onClose, onSaved, onShowToast }: {
   selected: KnowledgeEntity;
   nodes: KnowledgeEntity[];
   onClose: () => void;
   onSaved: () => Promise<void>;
   onShowToast: (message: string) => void;
 }) => {
+  const relationOptions = Object.entries(relationLabels).filter(([value]) => value !== "parent") as [KnowledgeRelationType, string][];
   const [targetNodeId, setTargetNodeId] = useState("");
   const [type, setType] = useState<KnowledgeRelationType>("related");
   const [description, setDescription] = useState("");
+  const [saving, setSaving] = useState(false);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    setSaving(true);
     try {
-      await createKnowledgeRelation({
-        sourceNodeId: selected.id,
-        targetNodeId,
-        type,
-        description,
-      });
+      await createKnowledgeRelation({ sourceNodeId: selected.id, targetNodeId, type, description });
       await onSaved();
       onShowToast("关系已建立");
       onClose();
     } catch (error) {
-      onShowToast(
-        `保存失败：${error instanceof Error ? error.message : "未知错误"}`,
-      );
+      onShowToast(`保存失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setSaving(false);
     }
   };
   return (
-    <div
-      className="fixed inset-0 z-50 bg-slate-950/30 backdrop-blur-sm grid place-items-center p-4"
-      onMouseDown={onClose}
-    >
-      <form
-        onSubmit={submit}
-        onMouseDown={(event) => event.stopPropagation()}
-        className="glass-panel w-full max-w-md rounded-2xl overflow-hidden shadow-2xl"
-      >
-        <div className="px-5 py-4 border-b border-slate-200/70 dark:border-zinc-800 flex justify-between">
-          <h3 className="font-black">建立关系</h3>
-          <button type="button" onClick={onClose}>
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="p-5 space-y-4">
-          <div className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-zinc-900 text-sm font-bold">
-            {selected.name}
-          </div>
-          <label className="space-y-1 block">
+    <DialogShell title="建立辅助关系" subtitle="知识归属请在“编辑节点”中修改主要母节点" onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="space-y-4 p-5">
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold dark:bg-zinc-900">起点：{selected.name}</div>
+          <label className="block space-y-1">
             <span className="text-xs font-bold text-slate-500">关系</span>
-            <select
-              value={type}
-              onChange={(event) =>
-                setType(event.target.value as KnowledgeRelationType)
-              }
-              className={fieldClass}
-            >
-              {Object.entries(relationLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
+            <select value={type} onChange={(event) => setType(event.target.value as KnowledgeRelationType)} className={fieldClass}>
+              {relationOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </label>
-          <label className="space-y-1 block">
+          <label className="block space-y-1">
             <span className="text-xs font-bold text-slate-500">目标节点</span>
-            <select
-              required
-              value={targetNodeId}
-              onChange={(event) => setTargetNodeId(event.target.value)}
-              className={fieldClass}
-            >
-              <option value="">请选择...</option>
-              {nodes
-                .filter((node) => node.id !== selected.id)
-                .map((node) => (
-                  <option key={node.id} value={node.id}>
-                    {entityLabels[node.type]} · {node.name}
-                  </option>
-                ))}
+            <select required value={targetNodeId} onChange={(event) => setTargetNodeId(event.target.value)} className={fieldClass}>
+              <option value="">请选择</option>
+              {nodes.filter((candidate) => candidate.id !== selected.id).map((candidate) =>
+                <option key={candidate.id} value={candidate.id}>{entityLabels[candidate.type]} · {candidate.name}</option>,
+              )}
             </select>
           </label>
-          <label className="space-y-1 block">
+          <label className="block space-y-1">
             <span className="text-xs font-bold text-slate-500">说明</span>
-            <textarea
-              rows={3}
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              className={fieldClass}
-            />
+            <textarea rows={3} value={description} onChange={(event) => setDescription(event.target.value)} className={fieldClass} />
           </label>
         </div>
-        <div className="px-5 py-4 border-t border-slate-200/70 dark:border-zinc-800 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn-secondary px-4 py-2 text-sm"
-          >
-            取消
-          </button>
-          <button className="btn-primary px-4 py-2 text-sm">建立关系</button>
-        </div>
+        <footer className="flex justify-end gap-2 border-t border-slate-200/70 px-5 py-4 dark:border-zinc-800">
+          <button type="button" onClick={onClose} className="btn-secondary px-4 py-2 text-sm">取消</button>
+          <button disabled={saving} className="btn-primary px-4 py-2 text-sm">建立关系</button>
+        </footer>
       </form>
+    </DialogShell>
+  );
+};
+
+const NodePill = ({ node, onSelect }: { key?: React.Key; node: KnowledgeEntity; onSelect: (id: string) => void }) => (
+  <button type="button" onClick={() => onSelect(node.id)} className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left hover:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900">
+    <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-black ${entityTones[node.type]}`}>{entityLabels[node.type]}</span>
+    <span className="truncate text-xs font-bold text-slate-700 dark:text-zinc-200">{node.name}</span>
+  </button>
+);
+
+const Collection = ({ title, nodes, empty, onSelect }: { title: string; nodes: KnowledgeEntity[]; empty: string; onSelect: (id: string) => void }) => (
+  <section>
+    <h4 className="mb-2 text-[11px] font-black text-slate-500">{title} <span className="font-medium text-slate-300">{nodes.length}</span></h4>
+    {nodes.length ? <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{nodes.map((node) => <NodePill key={node.id} node={node} onSelect={onSelect} />)}</div> : <p className="text-xs text-slate-400">{empty}</p>}
+  </section>
+);
+
+const FocusPanel = ({ focus, loading, onSelect, onEdit, onRelation, onOpenSource }: {
+  focus?: KnowledgeFocusSnapshot;
+  loading: boolean;
+  onSelect: (id: string) => void;
+  onEdit: () => void;
+  onRelation: () => void;
+  onOpenSource: (resourceId: string, pageNumber: number) => void;
+}) => {
+  if (loading) return <div className="grid min-h-52 place-items-center"><LoaderCircle className="h-5 w-5 animate-spin text-slate-400" /></div>;
+  if (!focus) return <div className="grid min-h-52 place-items-center text-sm text-slate-400">选择一个主干节点查看它的位置</div>;
+  const resourceById = new Map(focus.resources.map((resource) => [resource.id, resource]));
+  return (
+    <div className="divide-y divide-slate-200/70 dark:divide-zinc-800">
+      <header className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1 text-[11px] font-bold text-slate-400">
+            {[...focus.motherChain, focus.node].map((node, index) => (
+              <React.Fragment key={node.id}>
+                {index ? <ChevronRight className="h-3 w-3" /> : null}
+                <button type="button" onClick={() => onSelect(node.id)} className={node.id === focus.node.id ? "text-emerald-700" : "hover:text-slate-700"}>{node.name}</button>
+              </React.Fragment>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <span className={`rounded border px-2 py-0.5 text-[10px] font-black ${entityTones[focus.node.type]}`}>{entityLabels[focus.node.type]}</span>
+            <h3 className="truncate text-lg font-black text-slate-900 dark:text-zinc-50">{focus.node.name}</h3>
+            {focus.node.trainable ? <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/30">可训练</span> : null}
+          </div>
+        </div>
+        <div className="flex shrink-0 gap-1">
+          <button type="button" onClick={onEdit} title="编辑节点" className="grid h-8 w-8 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><Edit3 className="h-4 w-4" /></button>
+          <button type="button" onClick={onRelation} title="建立辅助关系" className="grid h-8 w-8 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><Link2 className="h-4 w-4" /></button>
+        </div>
+      </header>
+
+      <section className="grid grid-cols-1 gap-3 bg-slate-50/60 p-4 md:grid-cols-[1fr_1.15fr_1fr] dark:bg-zinc-950/20">
+        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900">
+          <div className="mb-3 flex items-center gap-2 text-xs font-black text-slate-500"><ArrowLeft className="h-4 w-4" />学习前需要</div>
+          <div className="grid gap-2">{focus.prerequisites.length ? focus.prerequisites.map((node) => <NodePill key={node.id} node={node} onSelect={onSelect} />) : <p className="text-xs text-slate-400">暂无先修要求</p>}</div>
+        </div>
+        <div className="rounded-lg border-2 border-emerald-600 bg-white p-4 dark:bg-zinc-900">
+          <div className="mb-2 flex items-center gap-2 text-xs font-black text-emerald-700"><CircleDot className="h-4 w-4" />当前定位</div>
+          <p className="text-base font-black text-slate-900 dark:text-zinc-50">{focus.node.name}</p>
+          <p className="mt-2 text-xs leading-5 text-slate-500">{focus.node.description || "暂时还没有补充说明。"}</p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900">
+          <div className="mb-3 flex items-center gap-2 text-xs font-black text-slate-500">后续会用到<ArrowRight className="h-4 w-4" /></div>
+          <div className="grid gap-2">{focus.dependents.length ? focus.dependents.map((node) => <NodePill key={node.id} node={node} onSelect={onSelect} />) : <p className="text-xs text-slate-400">暂无直接后续节点</p>}</div>
+        </div>
+      </section>
+
+      <div className="grid gap-5 p-4 lg:grid-cols-2">
+        <Collection title="向下细分" nodes={focus.children} empty="这个节点目前没有更细的知识点" onSelect={onSelect} />
+        <Collection title="对应题型" nodes={focus.questionTypes} empty="还没有关联题型" onSelect={onSelect} />
+        <Collection title="常用解法" nodes={focus.methods} empty="还没有关联解法" onSelect={onSelect} />
+        <Collection title="典型例题" nodes={focus.examples} empty="还没有关联例题" onSelect={onSelect} />
+        <Collection title="可观察能力" nodes={focus.abilities} empty="还没有关联能力点" onSelect={onSelect} />
+        <Collection title="常见错误" nodes={focus.errors} empty="还没有关联错误类型" onSelect={onSelect} />
+        <Collection title="相关知识" nodes={focus.related} empty="暂无相关知识" onSelect={onSelect} />
+        <Collection title="容易混淆" nodes={focus.confusable} empty="暂无易混淆知识" onSelect={onSelect} />
+      </div>
+
+      <section className="p-4">
+        <h4 className="mb-3 flex items-center gap-2 text-xs font-black text-slate-600"><BookOpen className="h-4 w-4" />来源定位</h4>
+        {focus.sourceLinks.length ? (
+          <div className="grid gap-2 md:grid-cols-2">
+            {focus.sourceLinks.map((link) => {
+              const resource = resourceById.get(link.resourceId);
+              return (
+                <button key={link.id} type="button" onClick={() => onOpenSource(link.resourceId, link.pageNumber)} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-left hover:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900">
+                  <span className="min-w-0"><span className="block truncate text-xs font-black">{resource?.title ?? "资料来源"}</span><span className="mt-1 block truncate text-[10px] text-slate-400">{resource ? resourceKindLabels[resource.kind] : "资料"} · 第 {link.pageNumber} 页 · {link.quote}</span></span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+                </button>
+              );
+            })}
+          </div>
+        ) : <p className="text-xs text-slate-400">还没有确认过的课本或教辅来源</p>}
+      </section>
     </div>
   );
 };
 
-export default function KnowledgeGraphWorkspace({
-  graph,
-  loading,
-  onDataChanged,
-  onOpenSource,
-  onShowToast,
-}: KnowledgeGraphWorkspaceProps) {
-  const [selectedId, setSelectedId] = useState(graph.nodes[0]?.id ?? "");
+export default function KnowledgeGraphWorkspace({ graph, loading, onDataChanged, onOpenSource, onShowToast }: WorkspaceProps) {
+  const subjects = useMemo(() => Array.from(new Set(graph.nodes.map((node) => node.subject).filter(Boolean))), [graph.nodes]);
+  const [subject, setSubject] = useState("语文");
+  const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
-  const [type, setType] = useState<"all" | KnowledgeEntityType>("all");
-  const [subject, setSubject] = useState("all");
-  const [grade, setGrade] = useState("all");
-  const [dialog, setDialog] = useState<
-    "create" | "edit" | "relation" | "merge" | null
-  >(null);
-  const selected =
-    graph.nodes.find((node) => node.id === selectedId) ?? graph.nodes[0];
-  const subjects = useMemo(
-    () => Array.from(new Set(graph.nodes.map((node) => node.subject).filter(Boolean))),
-    [graph.nodes],
-  );
-  const grades = useMemo(
-    () => Array.from(new Set(graph.nodes.map((node) => node.grade).filter(Boolean))),
-    [graph.nodes],
-  );
-  const graphNodes = useMemo(
-    () =>
-      graph.nodes.filter(
-        (node) =>
-          (type === "all" || node.type === type) &&
-          (subject === "all" || node.subject === subject) &&
-          (grade === "all" || node.grade === grade),
-      ),
-    [graph.nodes, type, subject, grade],
-  );
-  const graphNodeIds = useMemo(() => new Set(graphNodes.map((node) => node.id)), [graphNodes]);
-  const graphRelations = useMemo(
-    () =>
-      graph.relations.filter(
-        (relation) => graphNodeIds.has(relation.sourceNodeId) && graphNodeIds.has(relation.targetNodeId),
-      ),
-    [graph.relations, graphNodeIds],
-  );
-  const filtered = useMemo(
-    () =>
-      graphNodes.filter(
-        (node) =>
-          `${node.name}${node.description}${node.aliases.join("")}`
-            .toLowerCase()
-            .includes(query.toLowerCase()),
-      ),
-    [graphNodes, query],
-  );
+  const [type, setType] = useState<"all" | "domain" | "topic" | "knowledge">("all");
+  const [dialog, setDialog] = useState<"create" | "edit" | "relation" | "merge" | null>(null);
+  const [focus, setFocus] = useState<KnowledgeFocusSnapshot>();
+  const [focusLoading, setFocusLoading] = useState(false);
+  const subjectNodes = useMemo(() => graph.nodes.filter((node) => node.subject === subject && structuralTypes.has(node.type)), [graph.nodes, subject]);
+  const selected = graph.nodes.find((node) => node.id === selectedId);
+  const filtered = useMemo(() => subjectNodes.filter((node) =>
+    (type === "all" || node.type === type) && `${node.name}${node.description}${node.aliases.join("")}`.toLowerCase().includes(query.toLowerCase()),
+  ), [subjectNodes, type, query]);
+  const unclassified = subjectNodes.filter((node) => node.type !== "domain" && !node.primaryMotherId);
+
   useEffect(() => {
-    if (!graphNodes.length || graphNodeIds.has(selectedId)) return;
-    setSelectedId(graphNodes[0].id);
-  }, [graphNodes, graphNodeIds, selectedId]);
-  const sourceLinks = selected
-    ? graph.sourceLinks.filter((link) => link.nodeId === selected.id)
-    : [];
+    if (!subjects.length) return;
+    if (!subjects.includes(subject)) setSubject(subjects[0]);
+  }, [subjects, subject]);
+  useEffect(() => {
+    if (subjectNodes.some((node) => node.id === selectedId)) return;
+    const first = subjectNodes.find((node) => node.type === "domain" && !node.primaryMotherId) ?? subjectNodes[0];
+    setSelectedId(first?.id ?? "");
+  }, [subjectNodes, selectedId]);
+  useEffect(() => {
+    if (!selectedId) {
+      setFocus(undefined);
+      return;
+    }
+    let cancelled = false;
+    setFocusLoading(true);
+    void getKnowledgeFocus(selectedId)
+      .then((next) => { if (!cancelled) setFocus(next); })
+      .catch((error) => { if (!cancelled) onShowToast(`读取节点失败：${error instanceof Error ? error.message : "未知错误"}`); })
+      .finally(() => { if (!cancelled) setFocusLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedId, onShowToast]);
+
+  const archiveSelected = async () => {
+    if (!selected || !window.confirm(`归档“${selected.name}”？稳定 ID 和历史记录仍会保留。`)) return;
+    try {
+      await archiveKnowledgeNode(selected.id);
+      await onDataChanged();
+      onShowToast("节点已归档");
+    } catch (error) {
+      onShowToast(`归档失败：${error instanceof Error ? error.message : "未知错误"}`);
+    }
+  };
+
   return (
-    <div className="grid min-h-[690px] grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-[250px_minmax(420px,1fr)_300px] 2xl:grid-cols-[280px_minmax(0,1fr)_340px]">
-      <aside className="glass-panel order-2 flex max-h-[520px] flex-col overflow-hidden rounded-2xl xl:order-1 xl:max-h-none">
-        <div className="p-3 border-b border-slate-200/70 dark:border-zinc-800 space-y-3">
-          <button
-            onClick={() => setDialog("create")}
-            className="btn-primary w-full py-2.5 text-sm flex justify-center items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            新增节点
-          </button>
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && filtered[0]) setSelectedId(filtered[0].id);
-              }}
-              placeholder="搜索名称、别名、说明"
-              className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 text-sm outline-none"
-            />
+    <div className="grid min-h-[760px] grid-cols-1 gap-4 xl:grid-cols-[260px_minmax(0,1fr)]">
+      <aside className="glass-panel order-2 flex max-h-[620px] flex-col overflow-hidden rounded-xl xl:order-1 xl:max-h-none">
+        <div className="space-y-3 border-b border-slate-200/70 p-3 dark:border-zinc-800">
+          <div className="flex gap-2">
+            <label className="min-w-0 flex-1">
+              <span className="sr-only">选择学科</span>
+              <select value={subject} onChange={(event) => setSubject(event.target.value)} className={fieldClass}>
+                {subjects.map((value) => <option key={value} value={value}>{value}知识主干</option>)}
+              </select>
+            </label>
+            <button type="button" onClick={() => setDialog("create")} title="新增节点" className="btn-primary grid h-9 w-9 shrink-0 place-items-center"><Plus className="h-4 w-4" /></button>
           </div>
-          <div className="flex gap-1 overflow-x-auto pb-1">
-            <button
-              onClick={() => setType("all")}
-              className={`px-2 py-1 rounded-md text-[11px] whitespace-nowrap ${type === "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500 dark:bg-zinc-800"}`}
-            >
-              全部
-            </button>
-            {Object.entries(entityLabels).map(([value, label]) => (
-              <button
-                key={value}
-                onClick={() => setType(value as KnowledgeEntityType)}
-                className={`px-2 py-1 rounded-md text-[11px] whitespace-nowrap ${type === value ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500 dark:bg-zinc-800"}`}
-              >
-                {label}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索知识主干" className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-emerald-600 dark:border-zinc-800 dark:bg-zinc-900" />
+          </div>
+          <div className="grid grid-cols-4 gap-1">
+            {([['all', '全部'], ['domain', '板块'], ['topic', '主题'], ['knowledge', '知识点']] as const).map(([value, label]) => (
+              <button key={value} type="button" onClick={() => setType(value)} className={`rounded-md px-1 py-1.5 text-[10px] font-bold ${type === value ? "bg-slate-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "bg-slate-100 text-slate-500 dark:bg-zinc-800"}`}>{label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <div className="flex items-center justify-between px-3 pb-2 pt-3 text-[10px] font-black text-slate-400"><span>主干索引</span><span>{filtered.length}</span></div>
+          <div className="divide-y divide-slate-200/60 dark:divide-zinc-800">
+            {filtered.map((node) => (
+              <button key={node.id} type="button" onClick={() => setSelectedId(node.id)} className={`w-full border-l-2 px-3 py-3 text-left ${selectedId === node.id ? "border-emerald-700 bg-emerald-700/10" : "border-transparent hover:bg-slate-50 dark:hover:bg-zinc-900"}`}>
+                <div className="flex items-center gap-2"><span className={`rounded border px-1.5 py-0.5 text-[9px] font-black ${entityTones[node.type]}`}>{entityLabels[node.type]}</span><span className="truncate text-xs font-black">{node.name}</span></div>
+                <p className="mt-1.5 truncate text-[10px] text-slate-400">{node.description || "暂无说明"}</p>
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="min-w-0">
-              <span className="sr-only">按学科筛选</span>
-              <select
-                value={subject}
-                onChange={(event) => setSubject(event.target.value)}
-                className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-600 outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
-              >
-                <option value="all">全部学科</option>
-                {subjects.map((value) => <option key={value} value={value}>{value}</option>)}
-              </select>
-            </label>
-            <label className="min-w-0">
-              <span className="sr-only">按年级筛选</span>
-              <select
-                value={grade}
-                onChange={(event) => setGrade(event.target.value)}
-                className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-600 outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
-              >
-                <option value="all">全部年级</option>
-                {grades.map((value) => <option key={value} value={value}>{value}</option>)}
-              </select>
-            </label>
-          </div>
+          {unclassified.length ? (
+            <div className="m-3 border-t border-amber-200 pt-3">
+              <p className="mb-2 flex items-center gap-1 text-[10px] font-black text-amber-700"><Route className="h-3 w-3" />待归类 {unclassified.length}</p>
+              <div className="grid gap-1">{unclassified.map((node) => <button key={node.id} type="button" onClick={() => setSelectedId(node.id)} className="truncate rounded-md bg-amber-50 px-2 py-1.5 text-left text-[11px] font-bold text-amber-800">{node.name}</button>)}</div>
+            </div>
+          ) : null}
         </div>
-        <div className="overflow-y-auto flex-1 divide-y divide-slate-200/60 dark:divide-zinc-800/70">
-          {filtered.map((node) => (
-            <button
-              key={node.id}
-              onClick={() => setSelectedId(node.id)}
-              className={`w-full px-3.5 py-3 text-left ${selected?.id === node.id ? "bg-emerald-700/10 border-l-2 border-emerald-700" : "hover:bg-slate-50 dark:hover:bg-zinc-900/50 border-l-2 border-transparent"}`}
-            >
-              <div className="flex items-center gap-2">
-                <span
-                  className={`px-2 py-0.5 rounded-md border text-[10px] font-bold ${entityTones[node.type]}`}
-                >
-                  {entityLabels[node.type]}
-                </span>
-                <span className="text-sm font-bold truncate">{node.name}</span>
-              </div>
-              <p className="text-xs text-slate-400 truncate mt-1.5">
-                {node.description || "暂无说明"}
-              </p>
-            </button>
-          ))}
-          {loading && (
-            <LoaderCircle className="w-5 h-5 animate-spin mx-auto mt-10 text-slate-400" />
-          )}
-        </div>
-      </aside>
-
-      <main className="glass-panel order-1 min-w-0 overflow-hidden rounded-2xl md:col-span-2 xl:order-2 xl:col-span-1">
-        {!graphNodes.length ? (
-          <div className="grid min-h-[560px] place-items-center px-6 text-center text-sm text-slate-400">
-            当前筛选条件下暂无知识节点
-          </div>
-        ) : (
-          <Suspense
-            fallback={
-              <div className="grid min-h-[560px] place-items-center text-slate-400">
-                <LoaderCircle className="h-5 w-5 animate-spin" />
-              </div>
-            }
-          >
-            <KnowledgeGraphCanvas
-              nodes={graphNodes}
-              relations={graphRelations}
-              selectedId={selected?.id ?? graphNodes[0].id}
-              onSelect={setSelectedId}
-            />
-          </Suspense>
-        )}
-      </main>
-
-      <aside className="glass-panel order-3 flex overflow-hidden rounded-2xl xl:order-3">
         {selected ? (
-          <>
-            <div className="p-4 border-b border-slate-200/70 dark:border-zinc-800 flex items-center justify-between">
-              <h3 className="font-black">节点详情</h3>
-              <div className="flex">
-                <button
-                  onClick={() => setDialog("edit")}
-                  className="w-8 h-8 rounded-lg grid place-items-center hover:bg-slate-100 dark:hover:bg-zinc-800"
-                  title="编辑"
-                >
-                  <Edit3 className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => setDialog("relation")}
-                  className="w-8 h-8 rounded-lg grid place-items-center hover:bg-slate-100 dark:hover:bg-zinc-800"
-                  title="建立关系"
-                >
-                  <Link2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-            <div className="p-4 overflow-y-auto space-y-5">
-              <div>
-                <div className="flex items-center justify-between">
-                  <span
-                    className={`px-2 py-1 rounded-md border text-[10px] font-bold ${entityTones[selected.type]}`}
-                  >
-                    {entityLabels[selected.type]}
-                  </span>
-                  <span className="text-[10px] text-slate-400">
-                    v{selected.version}
-                  </span>
-                </div>
-                <h3 className="text-xl font-black mt-3">{selected.name}</h3>
-                <p className="text-sm leading-6 text-slate-500 mt-2">
-                  {selected.description || "暂无说明"}
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div className="p-3 rounded-lg bg-slate-50 dark:bg-zinc-900/60">
-                  <span className="text-slate-400 block">学科</span>
-                  <span className="font-bold block mt-1">
-                    {selected.subject || "通用"}
-                  </span>
-                </div>
-                <div className="p-3 rounded-lg bg-slate-50 dark:bg-zinc-900/60">
-                  <span className="text-slate-400 block">年级</span>
-                  <span className="font-bold block mt-1">
-                    {selected.grade || "通用"}
-                  </span>
-                </div>
-              </div>
-              {!!selected.aliases.length && (
-                <div>
-                  <p className="text-xs font-black text-slate-400 flex items-center gap-1.5">
-                    <Tag className="w-3.5 h-3.5" />
-                    别名
-                  </p>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {selected.aliases.map((alias) => (
-                      <span
-                        key={alias}
-                        className="px-2 py-1 rounded-md bg-slate-100 dark:bg-zinc-800 text-xs"
-                      >
-                        {alias}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div>
-                <p className="text-xs font-black text-slate-400 flex items-center gap-1.5">
-                  <BookOpen className="w-3.5 h-3.5" />
-                  资料来源
-                </p>
-                <div className="mt-2 space-y-2">
-                  {sourceLinks.map((link) => {
-                    const resource = graph.resources.find(
-                      (item) => item.id === link.resourceId,
-                    );
-                    return (
-                      <button
-                        key={link.id}
-                        onClick={() =>
-                          onOpenSource(link.resourceId, link.pageNumber)
-                        }
-                        className="w-full p-3 rounded-lg border border-slate-200 dark:border-zinc-800 text-left hover:border-emerald-500"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold truncate">
-                            {resource?.title ?? "未知资料"}
-                          </span>
-                          <ArrowDownToLine className="w-3.5 h-3.5 text-emerald-700" />
-                        </div>
-                        <p className="text-[10px] text-slate-400 mt-1">
-                          {resource ? resourceKindLabels[resource.kind] : ""} ·
-                          第 {link.pageNumber} 页
-                          {link.isPrimary ? " · 主要来源" : ""}
-                        </p>
-                        <p className="text-xs text-slate-500 mt-2 line-clamp-3">
-                          {link.quote}
-                        </p>
-                      </button>
-                    );
-                  })}
-                  {!sourceLinks.length && (
-                    <p className="text-xs text-slate-400 py-4">
-                      暂无已确认来源
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="pt-3 border-t border-slate-200/70 dark:border-zinc-800 flex items-center justify-between">
-                <button
-                  onClick={() => setDialog("merge")}
-                  className="text-xs text-slate-500 hover:text-emerald-700 flex items-center gap-1.5"
-                >
-                  <Merge className="w-3.5 h-3.5" />
-                  合并节点
-                </button>
-                <button
-                  onClick={async () => {
-                    if (
-                      !window.confirm(
-                        `归档“${selected.name}”？稳定 ID 和历史记录会保留。`,
-                      )
-                    )
-                      return;
-                    try {
-                      await archiveKnowledgeNode(selected.id);
-                      await onDataChanged();
-                      onShowToast("节点已归档");
-                    } catch (error) {
-                      onShowToast(
-                        `归档失败：${error instanceof Error ? error.message : "未知错误"}`,
-                      );
-                    }
-                  }}
-                  className="text-xs text-rose-500 flex items-center gap-1.5"
-                >
-                  <Archive className="w-3.5 h-3.5" />
-                  归档
-                </button>
-              </div>
-            </div>
-          </>
+          <div className="grid grid-cols-4 border-t border-slate-200/70 p-2 dark:border-zinc-800">
+            <button type="button" onClick={() => setDialog("edit")} title="编辑节点" className="grid h-8 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><Edit3 className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setDialog("relation")} title="辅助关系" className="grid h-8 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><Link2 className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setDialog("merge")} title="合并节点" className="grid h-8 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><Merge className="h-4 w-4" /></button>
+            <button type="button" onClick={() => void archiveSelected()} title="归档节点" className="grid h-8 place-items-center rounded-md text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"><Archive className="h-4 w-4" /></button>
+          </div>
         ) : null}
       </aside>
-      {(dialog === "create" || dialog === "edit") && (
-        <NodeDialog
-          node={dialog === "edit" ? selected : undefined}
-          onClose={() => setDialog(null)}
-          onSaved={onDataChanged}
-          onShowToast={onShowToast}
-        />
-      )}
-      {dialog === "relation" && selected && (
-        <RelationDialog
-          selected={selected}
-          nodes={graph.nodes}
-          onClose={() => setDialog(null)}
-          onSaved={onDataChanged}
-          onShowToast={onShowToast}
-        />
-      )}
-      {dialog === "merge" && selected && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/30 backdrop-blur-sm grid place-items-center p-4"
-          onMouseDown={() => setDialog(null)}
-        >
-          <div
-            onMouseDown={(event) => event.stopPropagation()}
-            className="glass-panel w-full max-w-md rounded-2xl p-5 shadow-2xl"
-          >
-            <h3 className="font-black">合并“{selected.name}”</h3>
-            <p className="text-xs text-slate-400 mt-1">
-              来源和关系将迁移，原稳定 ID 保留为已合并状态。
-            </p>
-            <div className="mt-4 max-h-72 overflow-y-auto space-y-1">
-              {graph.nodes
-                .filter((node) => node.id !== selected.id)
-                .map((node) => (
-                  <button
-                    key={node.id}
-                    onClick={async () => {
-                      try {
-                        await mergeKnowledgeNode(selected.id, node.id);
-                        await onDataChanged();
-                        setSelectedId(node.id);
-                        setDialog(null);
-                        onShowToast(`已合并到“${node.name}”`);
-                      } catch (error) {
-                        onShowToast(
-                          `合并失败：${error instanceof Error ? error.message : "未知错误"}`,
-                        );
-                      }
-                    }}
-                    className="w-full p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-zinc-900 flex items-center gap-2 text-left"
-                  >
-                    <span
-                      className={`px-2 py-0.5 rounded border text-[10px] font-bold ${entityTones[node.type]}`}
-                    >
-                      {entityLabels[node.type]}
-                    </span>
-                    <span className="text-sm font-bold">{node.name}</span>
-                  </button>
-                ))}
-            </div>
-            <button
-              onClick={() => setDialog(null)}
-              className="btn-secondary w-full py-2 mt-4 text-sm"
-            >
-              取消
-            </button>
-          </div>
-        </div>
-      )}
+
+      <div className="order-1 min-w-0 space-y-4 xl:order-2">
+        <section className="glass-panel min-h-[590px] overflow-hidden rounded-xl">
+          {subjectNodes.length ? (
+            <Suspense fallback={<div className="grid min-h-[590px] place-items-center"><LoaderCircle className="h-5 w-5 animate-spin text-slate-400" /></div>}>
+              <KnowledgeGraphCanvas subject={subject} nodes={subjectNodes} selectedId={selectedId} onSelect={setSelectedId} />
+            </Suspense>
+          ) : <div className="grid min-h-[590px] place-items-center text-sm text-slate-400">这个学科还没有知识主干</div>}
+        </section>
+        <section className="glass-panel overflow-hidden rounded-xl">
+          <FocusPanel focus={focus} loading={focusLoading || loading} onSelect={setSelectedId} onEdit={() => setDialog("edit")} onRelation={() => setDialog("relation")} onOpenSource={onOpenSource} />
+        </section>
+      </div>
+
+      {dialog === "create" ? <NodeDialog nodes={graph.nodes} defaultSubject={subject} onClose={() => setDialog(null)} onSaved={onDataChanged} onShowToast={onShowToast} /> : null}
+      {dialog === "edit" && selected ? <NodeDialog node={selected} nodes={graph.nodes} defaultSubject={subject} onClose={() => setDialog(null)} onSaved={onDataChanged} onShowToast={onShowToast} /> : null}
+      {dialog === "relation" && selected ? <RelationDialog selected={selected} nodes={graph.nodes} onClose={() => setDialog(null)} onSaved={onDataChanged} onShowToast={onShowToast} /> : null}
+      {dialog === "merge" && selected ? (
+        <MergeDialog selected={selected} nodes={graph.nodes} onClose={() => setDialog(null)} onSaved={onDataChanged} onShowToast={onShowToast} />
+      ) : null}
     </div>
   );
 }
+
+const MergeDialog = ({ selected, nodes, onClose, onSaved, onShowToast }: {
+  selected: KnowledgeEntity;
+  nodes: KnowledgeEntity[];
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+  onShowToast: (message: string) => void;
+}) => {
+  const [targetId, setTargetId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await mergeKnowledgeNode(selected.id, targetId);
+      await onSaved();
+      onShowToast("节点已合并，旧 ID 已保留追踪");
+      onClose();
+    } catch (error) {
+      onShowToast(`合并失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <DialogShell title="合并重复节点" subtitle={`将“${selected.name}”合并到保留节点`} onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="p-5">
+          <label className="block space-y-1">
+            <span className="text-xs font-bold text-slate-500">保留哪个节点</span>
+            <select required value={targetId} onChange={(event) => setTargetId(event.target.value)} className={fieldClass}>
+              <option value="">请选择</option>
+              {nodes.filter((node) => node.id !== selected.id && node.subject === selected.subject).map((node) => <option key={node.id} value={node.id}>{entityLabels[node.type]} · {node.name}</option>)}
+            </select>
+          </label>
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-slate-200/70 px-5 py-4 dark:border-zinc-800">
+          <button type="button" onClick={onClose} className="btn-secondary px-4 py-2 text-sm">取消</button>
+          <button disabled={saving} className="btn-primary px-4 py-2 text-sm">确认合并</button>
+        </footer>
+      </form>
+    </DialogShell>
+  );
+};
