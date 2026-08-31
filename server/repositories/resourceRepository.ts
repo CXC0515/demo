@@ -11,6 +11,9 @@ import {
   KnowledgeRelation,
   KnowledgeRelationType,
   KnowledgeSourceLink,
+  KnowledgeStage,
+  KnowledgeSubject,
+  KnowledgeTag,
   LibraryResource,
   ResourceChunk,
 } from "../../src/domain/types";
@@ -78,12 +81,15 @@ const toChunk = (row: JsonObject): ResourceChunk => ({
 
 const toNode = (row: JsonObject): KnowledgeEntity => ({
   id: String(row.id),
+  code: row.code ? String(row.code) : "",
   name: String(row.name),
   type: row.type as KnowledgeEntity["type"],
   description: String(row.description),
   aliases: parseJson(String(row.aliases_json), []),
   subject: String(row.subject),
   grade: String(row.grade),
+  stageIds: parseJson(String(row.stage_ids_json ?? "[]"), []),
+  tags: parseJson(String(row.tags_json ?? "[]"), []),
   primaryMotherId: row.primary_mother_id
     ? String(row.primary_mother_id)
     : undefined,
@@ -151,7 +157,139 @@ export interface StoredLibraryResource extends LibraryResource {
 }
 
 export class ResourceRepository {
-  constructor(private readonly database: Database.Database) {}
+  constructor(private readonly database: Database.Database) {
+    this.seedKnowledgeCatalogs();
+  }
+
+  private seedKnowledgeCatalogs() {
+    const now = new Date().toISOString();
+    const subjects = [
+      ["subject_chinese", "CHN", "语文", 10],
+      ["subject_math", "MATH", "数学", 20],
+      ["subject_english", "ENG", "英语", 30],
+      ["subject_physics", "PHY", "物理", 40],
+      ["subject_chemistry", "CHEM", "化学", 50],
+      ["subject_biology", "BIO", "生物", 60],
+      ["subject_history", "HIS", "历史", 70],
+      ["subject_geography", "GEO", "地理", 80],
+      ["subject_politics", "POL", "道德与法治", 90],
+    ] as const;
+    const stages = [
+      ["stage_general", "通用", 0],
+      ["stage_grade7_1", "七年级上", 10],
+      ["stage_grade7_2", "七年级下", 20],
+      ["stage_grade8_1", "八年级上", 30],
+      ["stage_grade8_2", "八年级下", 40],
+      ["stage_grade9_1", "九年级上", 50],
+      ["stage_grade9_2", "九年级下", 60],
+    ] as const;
+    const insertSubject = this.database.prepare(`
+      INSERT OR IGNORE INTO knowledge_subjects
+      (id, code, name, sort_order, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'active', ?, ?)
+    `);
+    const insertStage = this.database.prepare(`
+      INSERT OR IGNORE INTO knowledge_stages
+      (id, name, sort_order, status, created_at, updated_at)
+      VALUES (?, ?, ?, 'active', ?, ?)
+    `);
+    subjects.forEach((subject) => insertSubject.run(...subject, now, now));
+    stages.forEach((stage) => insertStage.run(...stage, now, now));
+  }
+
+  listKnowledgeSubjects(includeInactive = false): KnowledgeSubject[] {
+    const rows = this.database.prepare(
+      `SELECT * FROM knowledge_subjects ${includeInactive ? "" : "WHERE status = 'active'"} ORDER BY sort_order, name`,
+    ).all() as JsonObject[];
+    return rows.map((row) => ({
+      id: String(row.id), code: String(row.code), name: String(row.name),
+      sortOrder: Number(row.sort_order), status: row.status as KnowledgeSubject["status"],
+    }));
+  }
+
+  listKnowledgeStages(): KnowledgeStage[] {
+    return (this.database.prepare("SELECT * FROM knowledge_stages WHERE status = 'active' ORDER BY sort_order, name").all() as JsonObject[])
+      .map((row) => ({ id: String(row.id), name: String(row.name), sortOrder: Number(row.sort_order), status: row.status as KnowledgeStage["status"] }));
+  }
+
+  listKnowledgeTags(): KnowledgeTag[] {
+    return (this.database.prepare("SELECT * FROM knowledge_tags WHERE status = 'active' ORDER BY name").all() as JsonObject[])
+      .map((row) => ({ id: String(row.id), name: String(row.name), status: row.status as KnowledgeTag["status"] }));
+  }
+
+  createKnowledgeSubject(name: string, code: string) {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    const max = this.database.prepare("SELECT COALESCE(MAX(sort_order), 0) AS value FROM knowledge_subjects").get() as { value: number };
+    this.database.prepare(`INSERT INTO knowledge_subjects (id, code, name, sort_order, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)`)
+      .run(id, code, name, max.value + 10, now, now);
+    return this.listKnowledgeSubjects(true).find((subject) => subject.id === id)!;
+  }
+
+  updateKnowledgeSubject(id: string, update: { name?: string; status?: KnowledgeSubject["status"] }) {
+    const current = this.listKnowledgeSubjects(true).find((subject) => subject.id === id);
+    if (!current) return undefined;
+    const name = update.name ?? current.name;
+    const status = update.status ?? current.status;
+    const usage = this.database.prepare("SELECT COUNT(*) AS value FROM knowledge_nodes WHERE status='active' AND subject=?").get(current.name) as { value: number };
+    if (status === "inactive" && usage.value > 0) throw new Error("KNOWLEDGE_SUBJECT_IN_USE");
+    this.database.transaction(() => {
+      this.database.prepare("UPDATE knowledge_subjects SET name=?, status=?, updated_at=? WHERE id=?")
+        .run(name, status, new Date().toISOString(), id);
+      if (name !== current.name) {
+        const affected = this.listNodes(true).filter((node) => node.subject === current.name);
+        this.database.prepare("UPDATE knowledge_nodes SET subject=?, version=version+1, updated_at=? WHERE subject=?")
+          .run(name, new Date().toISOString(), current.name);
+        this.database.prepare("UPDATE resources SET subject=? WHERE subject=?").run(name, current.name);
+        affected.forEach((node) => {
+          const updated = this.getNode(node.id);
+          if (updated) this.recordRevision("node", node.id, updated.version, "subject-rename", updated);
+        });
+      }
+    })();
+    return this.listKnowledgeSubjects(true).find((subject) => subject.id === id);
+  }
+
+  createKnowledgeTag(name: string) {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.database.prepare(`INSERT INTO knowledge_tags (id, name, status, created_at, updated_at) VALUES (?, ?, 'active', ?, ?)`)
+      .run(id, name, now, now);
+    return this.listKnowledgeTags().find((tag) => tag.id === id)!;
+  }
+
+  private nextNodeCode(subject: string, type: KnowledgeEntity["type"]) {
+    const subjectCode = this.listKnowledgeSubjects(true).find((item) => item.name === subject)?.code ?? "GEN";
+    const typeCode: Record<KnowledgeEntity["type"], string> = {
+      domain: "DOM", topic: "TOP", knowledge: "KN", "question-type": "QT",
+      method: "MTH", example: "EX", ability: "ABL", error: "ERR",
+    };
+    const prefix = `${subjectCode}-${typeCode[type]}-`;
+    const rows = this.database.prepare("SELECT code FROM knowledge_nodes WHERE code LIKE ?").all(`${prefix}%`) as { code: string }[];
+    const next = rows.reduce((max, row) => Math.max(max, Number(row.code.slice(prefix.length)) || 0), 0) + 1;
+    return `${prefix}${String(next).padStart(6, "0")}`;
+  }
+
+  private validateNodeCatalogs(subject: string, stageIds: string[], tags: string[]) {
+    if (!this.listKnowledgeSubjects().some((item) => item.name === subject)) {
+      throw new Error("INVALID_KNOWLEDGE_SUBJECT");
+    }
+    const validStageIds = new Set(this.listKnowledgeStages().map((item) => item.id));
+    if (!stageIds.length || stageIds.some((id) => !validStageIds.has(id))) {
+      throw new Error("INVALID_KNOWLEDGE_STAGE");
+    }
+    const validTags = new Set(this.listKnowledgeTags().map((item) => item.name));
+    if (tags.some((name) => !validTags.has(name))) {
+      throw new Error("INVALID_KNOWLEDGE_TAG");
+    }
+  }
+
+  private ensureNodeCodes() {
+    const rows = this.database.prepare("SELECT id, subject, type FROM knowledge_nodes WHERE code IS NULL OR code = '' ORDER BY created_at, id").all() as Array<{ id: string; subject: string; type: KnowledgeEntity["type"] }>;
+    const update = this.database.prepare("UPDATE knowledge_nodes SET code=? WHERE id=?");
+    rows.forEach((row) => update.run(this.nextNodeCode(row.subject, row.type), row.id));
+    this.database.prepare("UPDATE knowledge_nodes SET stage_ids_json='[\"stage_general\"]' WHERE stage_ids_json='[]'").run();
+  }
 
   seedBaseKnowledge() {
     const now = new Date().toISOString();
@@ -405,6 +543,7 @@ export class ResourceRepository {
         .prepare("DELETE FROM knowledge_relations WHERE type = 'parent'")
         .run();
     })();
+    this.ensureNodeCodes();
   }
 
   createResource(
@@ -811,6 +950,8 @@ export class ResourceRepository {
       "name" | "type" | "description" | "aliases" | "subject" | "grade"
     > & {
       id?: string;
+      stageIds?: string[];
+      tags?: string[];
       primaryMotherId?: string;
       trainable?: boolean;
       sortOrder?: number;
@@ -819,6 +960,9 @@ export class ResourceRepository {
   ) {
     const id = input.id ?? randomUUID();
     const now = new Date().toISOString();
+    const stageIds = input.stageIds?.length ? input.stageIds : ["stage_general"];
+    const tags = input.tags ?? [];
+    this.validateNodeCatalogs(input.subject, stageIds, tags);
     if (input.primaryMotherId) {
       const mother = this.getNode(input.primaryMotherId);
       const structuralTypes = new Set<KnowledgeEntity["type"]>([
@@ -839,24 +983,31 @@ export class ResourceRepository {
     const trainable =
       input.trainable ??
       (input.type === "knowledge" || input.type === "ability");
+    const code = this.nextNodeCode(input.subject, input.type);
+    const siblingOrder = this.database.prepare(
+      "SELECT COALESCE(MAX(sort_order), 0) AS value FROM knowledge_nodes WHERE status='active' AND subject=? AND primary_mother_id IS ?",
+    ).get(input.subject, input.primaryMotherId ?? null) as { value: number };
     this.database
       .prepare(
         `
-      INSERT INTO knowledge_nodes (id, name, type, description, aliases_json, subject, grade, primary_mother_id, trainable, sort_order, source, version, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, ?)
+      INSERT INTO knowledge_nodes (id, code, name, type, description, aliases_json, subject, grade, stage_ids_json, tags_json, primary_mother_id, trainable, sort_order, source, version, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, ?)
     `,
       )
       .run(
         id,
+        code,
         input.name,
         input.type,
         input.description,
         JSON.stringify(input.aliases),
         input.subject,
         input.grade,
+        JSON.stringify(stageIds),
+        JSON.stringify(tags),
         input.primaryMotherId ?? null,
         trainable ? 1 : 0,
-        input.sortOrder ?? 0,
+        input.sortOrder ?? siblingOrder.value + 10,
         input.source ?? "teacher",
         now,
         now,
@@ -877,6 +1028,8 @@ export class ResourceRepository {
         | "aliases"
         | "subject"
         | "grade"
+        | "stageIds"
+        | "tags"
         | "trainable"
         | "sortOrder"
         | "status"
@@ -895,6 +1048,7 @@ export class ResourceRepository {
       version: current.version + 1,
       updatedAt: new Date().toISOString(),
     };
+    this.validateNodeCatalogs(next.subject, next.stageIds, next.tags);
     const structuralTypes = new Set<KnowledgeEntity["type"]>([
       "domain",
       "topic",
@@ -935,7 +1089,7 @@ export class ResourceRepository {
     if (!structuralTypes.has(next.type)) next.primaryMotherId = undefined;
     this.database
       .prepare(
-        `UPDATE knowledge_nodes SET name=?, type=?, description=?, aliases_json=?, subject=?, grade=?, primary_mother_id=?, trainable=?, sort_order=?, status=?, version=?, updated_at=? WHERE id=?`,
+        `UPDATE knowledge_nodes SET name=?, type=?, description=?, aliases_json=?, subject=?, grade=?, stage_ids_json=?, tags_json=?, primary_mother_id=?, trainable=?, sort_order=?, status=?, version=?, updated_at=? WHERE id=?`,
       )
       .run(
         next.name,
@@ -944,6 +1098,8 @@ export class ResourceRepository {
         JSON.stringify(next.aliases),
         next.subject,
         next.grade,
+        JSON.stringify(next.stageIds),
+        JSON.stringify(next.tags),
         next.primaryMotherId ?? null,
         next.trainable ? 1 : 0,
         next.sortOrder,

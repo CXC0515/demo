@@ -43,6 +43,8 @@ const metadataSchema = z.object({
   kind: resourceKindSchema,
   subject: z.string().trim().max(60).default(""),
   grade: z.string().trim().max(60).default(""),
+  stageIds: z.array(z.string().trim().min(1).max(80)).max(8).default(["stage_general"]),
+  tags: z.array(z.string().trim().min(1).max(40)).max(20).default([]),
   publisher: z.string().trim().max(100).default(""),
   edition: z.string().trim().max(100).default(""),
   isPrimary: z
@@ -297,7 +299,69 @@ router.get("/knowledge", (request, response) => {
     relations: resourceRepository.listRelations(),
     sourceLinks: resourceRepository.listSourceLinks(),
     resources: resourceRepository.listResources(),
+    subjects: resourceRepository.listKnowledgeSubjects(),
+    stages: resourceRepository.listKnowledgeStages(),
+    tags: resourceRepository.listKnowledgeTags(),
   });
+});
+
+router.get("/knowledge/catalogs", (_request, response) => {
+  response.json({
+    subjects: resourceRepository.listKnowledgeSubjects(),
+    stages: resourceRepository.listKnowledgeStages(),
+    tags: resourceRepository.listKnowledgeTags(),
+  });
+});
+
+router.post("/knowledge/subjects", (request, response) => {
+  const parsed = z.object({
+    name: z.string().trim().min(1).max(40),
+    code: z.string().trim().toUpperCase().regex(/^[A-Z][A-Z0-9]{1,7}$/),
+  }).safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ code: "INVALID_KNOWLEDGE_SUBJECT" });
+    return;
+  }
+  try {
+    response.status(201).json({ subject: resourceRepository.createKnowledgeSubject(parsed.data.name, parsed.data.code) });
+  } catch {
+    response.status(409).json({ code: "KNOWLEDGE_SUBJECT_ALREADY_EXISTS" });
+  }
+});
+
+router.patch("/knowledge/subjects/:subjectId", (request, response) => {
+  const parsed = z.object({
+    name: z.string().trim().min(1).max(40).optional(),
+    status: z.enum(["active", "inactive"]).optional(),
+  }).refine((value) => Object.keys(value).length > 0).safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ code: "INVALID_KNOWLEDGE_SUBJECT" });
+    return;
+  }
+  try {
+    const subject = resourceRepository.updateKnowledgeSubject(request.params.subjectId, parsed.data);
+    if (!subject) {
+      response.status(404).json({ code: "KNOWLEDGE_SUBJECT_NOT_FOUND" });
+      return;
+    }
+    response.json({ subject });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    response.status(409).json({ code: code === "KNOWLEDGE_SUBJECT_IN_USE" ? code : "KNOWLEDGE_SUBJECT_ALREADY_EXISTS" });
+  }
+});
+
+router.post("/knowledge/tags", (request, response) => {
+  const parsed = z.object({ name: z.string().trim().min(1).max(40) }).safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ code: "INVALID_KNOWLEDGE_TAG" });
+    return;
+  }
+  try {
+    response.status(201).json({ tag: resourceRepository.createKnowledgeTag(parsed.data.name) });
+  } catch {
+    response.status(409).json({ code: "KNOWLEDGE_TAG_ALREADY_EXISTS" });
+  }
 });
 
 router.get("/knowledge/tree", (request, response) => {
@@ -337,10 +401,13 @@ router.get("/resource-retrieval/knowledge-catalog", (request, response) => {
   response.json({
     nodes: nodes.map((node) => ({
       id: node.id,
+      code: node.code,
       name: node.name,
       type: node.type,
       aliases: node.aliases,
       description: node.description,
+      stageIds: node.stageIds,
+      tags: node.tags,
       path: resourceRepository
         .getKnowledgeFocus(node.id)
         ?.motherChain.map((item) => item.name) ?? [],
@@ -461,8 +528,9 @@ router.post("/knowledge/nodes", (request, response) => {
       .json({ node: resourceRepository.createNode(parsed.data) });
   } catch (error) {
     const code = error instanceof Error ? error.message : "";
-    response.status(code === "INVALID_PRIMARY_MOTHER" ? 400 : 409).json({
-      code: code === "INVALID_PRIMARY_MOTHER" ? code : "KNOWLEDGE_NODE_ALREADY_EXISTS",
+    const invalidCodes = new Set(["INVALID_PRIMARY_MOTHER", "INVALID_KNOWLEDGE_SUBJECT", "INVALID_KNOWLEDGE_STAGE", "INVALID_KNOWLEDGE_TAG"]);
+    response.status(invalidCodes.has(code) ? 400 : 409).json({
+      code: invalidCodes.has(code) ? code : "KNOWLEDGE_NODE_ALREADY_EXISTS",
     });
   }
 });
@@ -489,6 +557,9 @@ router.patch("/knowledge/nodes/:nodeId", (request, response) => {
       "INVALID_PRIMARY_MOTHER",
       "KNOWLEDGE_STRUCTURE_CYCLE",
       "KNOWLEDGE_STRUCTURE_HAS_CHILDREN",
+      "INVALID_KNOWLEDGE_SUBJECT",
+      "INVALID_KNOWLEDGE_STAGE",
+      "INVALID_KNOWLEDGE_TAG",
     ]);
     response.status(409).json({
       code: structureErrors.has(code) ? code : "KNOWLEDGE_NODE_ALREADY_EXISTS",

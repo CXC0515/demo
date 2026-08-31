@@ -3,11 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Archive,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   BookOpen,
   ChevronRight,
   CircleDot,
@@ -18,6 +20,7 @@ import {
   Plus,
   Route,
   Search,
+  Settings2,
   X,
 } from "lucide-react";
 import {
@@ -26,15 +29,20 @@ import {
   KnowledgeFocusSnapshot,
   KnowledgeGraphSnapshot,
   KnowledgeRelationType,
+  KnowledgeStage,
+  KnowledgeSubject,
 } from "../../domain/types";
 import {
   archiveKnowledgeNode,
   createKnowledgeNode,
   createKnowledgeRelation,
+  createKnowledgeSubject,
+  createKnowledgeTag,
   getKnowledgeFocus,
   KnowledgeNodeInput,
   mergeKnowledgeNode,
   updateKnowledgeNode,
+  updateKnowledgeSubject,
 } from "../../services/resourceApi";
 import { entityLabels, entityTones, relationLabels, resourceKindLabels } from "./knowledgeUi";
 
@@ -61,10 +69,10 @@ const DialogShell = ({
   subtitle?: string;
   onClose: () => void;
   children: React.ReactNode;
-}) => (
-  <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/35 p-4 backdrop-blur-sm" onMouseDown={onClose}>
+}) => createPortal(
+  <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/35 backdrop-blur-sm sm:p-4" onMouseDown={onClose}>
     <div
-      className="glass-panel max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl shadow-2xl"
+      className="glass-panel flex h-full w-full flex-col overflow-hidden shadow-2xl sm:h-auto sm:max-h-[calc(100vh-2rem)] sm:max-w-2xl sm:rounded-xl"
       onMouseDown={(event) => event.stopPropagation()}
     >
       <header className="flex items-start justify-between border-b border-slate-200/70 px-5 py-4 dark:border-zinc-800">
@@ -78,13 +86,18 @@ const DialogShell = ({
       </header>
       {children}
     </div>
-  </div>
+  </div>,
+  document.body,
 );
 
-const NodeDialog = ({ node, nodes, defaultSubject, onClose, onSaved, onShowToast }: {
+const NodeDialog = ({ node, nodes, subjects, stages, availableTags, defaultSubject, onManageSubjects, onClose, onSaved, onShowToast }: {
   node?: KnowledgeEntity;
   nodes: KnowledgeEntity[];
+  subjects: KnowledgeSubject[];
+  stages: KnowledgeStage[];
+  availableTags: string[];
   defaultSubject: string;
+  onManageSubjects: () => void;
   onClose: () => void;
   onSaved: () => Promise<void>;
   onShowToast: (message: string) => void;
@@ -96,6 +109,8 @@ const NodeDialog = ({ node, nodes, defaultSubject, onClose, onSaved, onShowToast
     aliases: node.aliases,
     subject: node.subject,
     grade: node.grade,
+    stageIds: node.stageIds,
+    tags: node.tags,
     primaryMotherId: node.primaryMotherId,
     trainable: node.trainable,
     sortOrder: node.sortOrder,
@@ -106,10 +121,13 @@ const NodeDialog = ({ node, nodes, defaultSubject, onClose, onSaved, onShowToast
     aliases: [],
     subject: defaultSubject || "语文",
     grade: "通用",
+    stageIds: ["stage_general"],
+    tags: [],
     trainable: true,
     sortOrder: 0,
   });
   const [aliasText, setAliasText] = useState(input.aliases.join("、"));
+  const [tagText, setTagText] = useState(input.tags.join("、"));
   const [saving, setSaving] = useState(false);
   const isStructural = structuralTypes.has(input.type);
   const motherCandidates = nodes.filter((candidate) =>
@@ -128,7 +146,10 @@ const NodeDialog = ({ node, nodes, defaultSubject, onClose, onSaved, onShowToast
         ...input,
         primaryMotherId: isStructural ? input.primaryMotherId : undefined,
         aliases: aliasText.split(/[、,，]/).map((value) => value.trim()).filter(Boolean),
+        tags: Array.from(new Set(tagText.split(/[、,，]/).map((value) => value.trim()).filter(Boolean))),
       };
+      const missingTags = payload.tags.filter((value) => !availableTags.includes(value));
+      await Promise.all(missingTags.map((value) => createKnowledgeTag(value)));
       if (node) {
         await updateKnowledgeNode(node.id, {
           ...payload,
@@ -148,10 +169,10 @@ const NodeDialog = ({ node, nodes, defaultSubject, onClose, onSaved, onShowToast
   };
 
   return (
-    <DialogShell title={node ? "编辑节点" : "新增节点"} subtitle={node ? `稳定 ID：${node.id}` : "先确定它在知识结构中的位置"} onClose={onClose}>
-      <form onSubmit={submit}>
-        <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
-          <label className="space-y-1 sm:col-span-2">
+    <DialogShell title={node ? "编辑节点" : "新增节点"} subtitle={node ? `稳定编码：${node.code}` : "先确定它在知识结构中的位置"} onClose={onClose}>
+      <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-4 sm:grid-cols-2 sm:overflow-visible sm:p-5">
+          <label className="space-y-1">
             <span className="text-xs font-bold text-slate-500">名称</span>
             <input required value={input.name} onChange={(event) => update("name", event.target.value)} className={fieldClass} />
           </label>
@@ -169,10 +190,10 @@ const NodeDialog = ({ node, nodes, defaultSubject, onClose, onSaved, onShowToast
               {Object.entries(entityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </label>
-          <label className="space-y-1">
+          <div className="space-y-1">
             <span className="text-xs font-bold text-slate-500">学科</span>
-            <input value={input.subject} onChange={(event) => update("subject", event.target.value)} className={fieldClass} />
-          </label>
+            <div className="flex gap-2"><select value={input.subject} onChange={(event) => setInput((current) => ({ ...current, subject: event.target.value, primaryMotherId: undefined }))} className={fieldClass}>{subjects.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}</select><button type="button" onClick={onManageSubjects} title="管理学科" className="btn-secondary grid h-9 w-9 shrink-0 place-items-center"><Settings2 className="h-4 w-4" /></button></div>
+          </div>
           {isStructural ? (
             <label className="space-y-1 sm:col-span-2">
               <span className="text-xs font-bold text-slate-500">主要母节点</span>
@@ -183,20 +204,24 @@ const NodeDialog = ({ node, nodes, defaultSubject, onClose, onSaved, onShowToast
             </label>
           ) : null}
           <label className="space-y-1">
-            <span className="text-xs font-bold text-slate-500">适用年级</span>
-            <input value={input.grade} onChange={(event) => update("grade", event.target.value)} className={fieldClass} />
-          </label>
-          <label className="space-y-1">
-            <span className="text-xs font-bold text-slate-500">排序</span>
-            <input type="number" value={input.sortOrder ?? 0} onChange={(event) => update("sortOrder", Number(event.target.value))} className={fieldClass} />
+            <span className="text-xs font-bold text-slate-500">学习阶段</span>
+            <select value={input.stageIds[0] ?? "stage_general"} onChange={(event) => {
+              const selectedStage = stages.find((stage) => stage.id === event.target.value);
+              setInput((current) => ({ ...current, stageIds: [event.target.value], grade: selectedStage?.name ?? "通用" }));
+            }} className={fieldClass}>{stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select>
           </label>
           <label className="space-y-1 sm:col-span-2">
             <span className="text-xs font-bold text-slate-500">别名</span>
             <input value={aliasText} onChange={(event) => setAliasText(event.target.value)} placeholder="用顿号分隔，供 AI 对齐使用" className={fieldClass} />
           </label>
           <label className="space-y-1 sm:col-span-2">
+            <span className="text-xs font-bold text-slate-500">分类标签</span>
+            <input value={tagText} onChange={(event) => setTagText(event.target.value)} list="knowledge-tag-options" placeholder="例如：中考重点、易错；用顿号分隔" className={fieldClass} />
+            <datalist id="knowledge-tag-options">{availableTags.map((value) => <option key={value} value={value} />)}</datalist>
+          </label>
+          <label className="space-y-1 sm:col-span-2">
             <span className="text-xs font-bold text-slate-500">说明</span>
-            <textarea rows={3} value={input.description} onChange={(event) => update("description", event.target.value)} className={fieldClass} />
+            <textarea rows={2} value={input.description} onChange={(event) => update("description", event.target.value)} className={fieldClass} />
           </label>
           <label className="flex items-center gap-2 text-sm font-bold text-slate-600 dark:text-zinc-300 sm:col-span-2">
             <input type="checkbox" checked={Boolean(input.trainable)} onChange={(event) => update("trainable", event.target.checked)} className="h-4 w-4 accent-emerald-700" />
@@ -288,12 +313,74 @@ const Collection = ({ title, nodes, empty, onSelect }: { title: string; nodes: K
   </section>
 );
 
-const FocusPanel = ({ focus, loading, onSelect, onEdit, onRelation, onOpenSource }: {
+const SubjectManagerDialog = ({ subjects, onClose, onSaved, onShowToast }: {
+  subjects: KnowledgeSubject[];
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+  onShowToast: (message: string) => void;
+}) => {
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [saving, setSaving] = useState(false);
+  const addSubject = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await createKnowledgeSubject({ name, code: code.toUpperCase() });
+      await onSaved();
+      setName("");
+      setCode("");
+      onShowToast("学科已加入下拉框");
+    } catch (error) {
+      onShowToast(`新增失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const renameSubject = async (subject: KnowledgeSubject) => {
+    const nextName = window.prompt("新的学科名称", subject.name)?.trim();
+    if (!nextName || nextName === subject.name) return;
+    try {
+      await updateKnowledgeSubject(subject.id, { name: nextName });
+      await onSaved();
+      onShowToast("学科名称已更新");
+    } catch (error) {
+      onShowToast(`修改失败：${error instanceof Error ? error.message : "未知错误"}`);
+    }
+  };
+  const deactivateSubject = async (subject: KnowledgeSubject) => {
+    if (!window.confirm(`停用“${subject.name}”？已有知识点会保留，但新增时不再显示该学科。`)) return;
+    try {
+      await updateKnowledgeSubject(subject.id, { status: "inactive" });
+      await onSaved();
+      onShowToast("学科已停用");
+    } catch (error) {
+      onShowToast(`停用失败：${error instanceof Error ? error.message : "未知错误"}`);
+    }
+  };
+  return (
+    <DialogShell title="管理学科" subtitle="学科代码创建后保持不变，用于生成知识点编码" onClose={onClose}>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+        <div className="divide-y divide-slate-200 rounded-lg border border-slate-200 dark:divide-zinc-800 dark:border-zinc-700">
+          {subjects.map((subject) => <div key={subject.id} className="flex items-center gap-3 px-3 py-2.5"><span className="w-16 shrink-0 font-mono text-[10px] font-bold text-slate-400">{subject.code}</span><span className="min-w-0 flex-1 truncate text-sm font-bold">{subject.name}</span><button type="button" onClick={() => void renameSubject(subject)} className="text-xs font-bold text-slate-500 hover:text-emerald-700">改名</button><button type="button" onClick={() => void deactivateSubject(subject)} className="text-xs font-bold text-rose-500">停用</button></div>)}
+        </div>
+        <form onSubmit={addSubject} className="mt-4 grid gap-2 sm:grid-cols-[1fr_120px_auto]">
+          <input required value={name} onChange={(event) => setName(event.target.value)} placeholder="新学科名称" className={fieldClass} />
+          <input required value={code} onChange={(event) => setCode(event.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8))} placeholder="英文代码" className={fieldClass} />
+          <button disabled={saving} className="btn-primary px-4 py-2 text-sm">新增</button>
+        </form>
+      </div>
+    </DialogShell>
+  );
+};
+
+const FocusPanel = ({ focus, loading, onSelect, onEdit, onRelation, onBackToGraph, onOpenSource }: {
   focus?: KnowledgeFocusSnapshot;
   loading: boolean;
   onSelect: (id: string) => void;
   onEdit: () => void;
   onRelation: () => void;
+  onBackToGraph: () => void;
   onOpenSource: (resourceId: string, pageNumber: number) => void;
 }) => {
   if (loading) return <div className="grid min-h-52 place-items-center"><LoaderCircle className="h-5 w-5 animate-spin text-slate-400" /></div>;
@@ -318,6 +405,7 @@ const FocusPanel = ({ focus, loading, onSelect, onEdit, onRelation, onOpenSource
           </div>
         </div>
         <div className="flex shrink-0 gap-1">
+          <button type="button" onClick={onBackToGraph} className="btn-secondary mr-1 flex h-8 items-center gap-1.5 px-3 text-xs"><ArrowUp className="h-3.5 w-3.5" />返回思维导图</button>
           <button type="button" onClick={onEdit} title="编辑节点" className="grid h-8 w-8 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><Edit3 className="h-4 w-4" /></button>
           <button type="button" onClick={onRelation} title="建立辅助关系" className="grid h-8 w-8 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><Link2 className="h-4 w-4" /></button>
         </div>
@@ -371,7 +459,9 @@ const FocusPanel = ({ focus, loading, onSelect, onEdit, onRelation, onOpenSource
 };
 
 export default function KnowledgeGraphWorkspace({ graph, loading, onDataChanged, onOpenSource, onShowToast }: WorkspaceProps) {
-  const subjects = useMemo(() => Array.from(new Set(graph.nodes.map((node) => node.subject).filter(Boolean))), [graph.nodes]);
+  const subjects = useMemo(() => graph.subjects.length ? graph.subjects : Array.from(new Set(graph.nodes.map((node) => node.subject).filter(Boolean))).map((name, index) => ({ id: name, code: `S${index + 1}`, name, sortOrder: index * 10, status: "active" as const })), [graph.nodes, graph.subjects]);
+  const subjectNames = useMemo(() => subjects.map((item) => item.name), [subjects]);
+  const availableTags = useMemo(() => Array.from(new Set([...graph.tags.map((tag) => tag.name), ...graph.nodes.flatMap((node) => node.tags)])), [graph.nodes, graph.tags]);
   const [subject, setSubject] = useState("语文");
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
@@ -379,6 +469,9 @@ export default function KnowledgeGraphWorkspace({ graph, loading, onDataChanged,
   const [dialog, setDialog] = useState<"create" | "edit" | "relation" | "merge" | null>(null);
   const [focus, setFocus] = useState<KnowledgeFocusSnapshot>();
   const [focusLoading, setFocusLoading] = useState(false);
+  const [subjectManagerOpen, setSubjectManagerOpen] = useState(false);
+  const graphSectionRef = useRef<HTMLElement>(null);
+  const detailSectionRef = useRef<HTMLElement>(null);
   const subjectNodes = useMemo(() => graph.nodes.filter((node) => node.subject === subject && structuralTypes.has(node.type)), [graph.nodes, subject]);
   const selected = graph.nodes.find((node) => node.id === selectedId);
   const filtered = useMemo(() => subjectNodes.filter((node) =>
@@ -387,9 +480,9 @@ export default function KnowledgeGraphWorkspace({ graph, loading, onDataChanged,
   const unclassified = subjectNodes.filter((node) => node.type !== "domain" && !node.primaryMotherId);
 
   useEffect(() => {
-    if (!subjects.length) return;
-    if (!subjects.includes(subject)) setSubject(subjects[0]);
-  }, [subjects, subject]);
+    if (!subjectNames.length) return;
+    if (!subjectNames.includes(subject)) setSubject(subjectNames[0]);
+  }, [subjectNames, subject]);
   useEffect(() => {
     if (subjectNodes.some((node) => node.id === selectedId)) return;
     const first = subjectNodes.find((node) => node.type === "domain" && !node.primaryMotherId) ?? subjectNodes[0];
@@ -428,7 +521,7 @@ export default function KnowledgeGraphWorkspace({ graph, loading, onDataChanged,
             <label className="min-w-0 flex-1">
               <span className="sr-only">选择学科</span>
               <select value={subject} onChange={(event) => setSubject(event.target.value)} className={fieldClass}>
-                {subjects.map((value) => <option key={value} value={value}>{value}知识主干</option>)}
+                {subjects.map((value) => <option key={value.id} value={value.name}>{value.name}知识主干</option>)}
               </select>
             </label>
             <button type="button" onClick={() => setDialog("create")} title="新增节点" className="btn-primary grid h-9 w-9 shrink-0 place-items-center"><Plus className="h-4 w-4" /></button>
@@ -471,24 +564,25 @@ export default function KnowledgeGraphWorkspace({ graph, loading, onDataChanged,
       </aside>
 
       <div className="order-1 min-w-0 space-y-4 xl:order-2">
-        <section className="glass-panel min-h-[590px] overflow-hidden rounded-xl">
+        <section ref={graphSectionRef} className="glass-panel scroll-mt-4 overflow-hidden rounded-xl">
           {subjectNodes.length ? (
-            <Suspense fallback={<div className="grid min-h-[590px] place-items-center"><LoaderCircle className="h-5 w-5 animate-spin text-slate-400" /></div>}>
-              <KnowledgeGraphCanvas subject={subject} nodes={subjectNodes} selectedId={selectedId} onSelect={setSelectedId} />
+            <Suspense fallback={<div className="grid h-[clamp(560px,72dvh,840px)] place-items-center"><LoaderCircle className="h-5 w-5 animate-spin text-slate-400" /></div>}>
+              <KnowledgeGraphCanvas subject={subject} nodes={subjectNodes} stages={graph.stages} availableTags={availableTags} selectedId={selectedId} onSelect={setSelectedId} onShowDetails={() => detailSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} />
             </Suspense>
-          ) : <div className="grid min-h-[590px] place-items-center text-sm text-slate-400">这个学科还没有知识主干</div>}
+          ) : <div className="grid h-[clamp(560px,72dvh,840px)] place-items-center text-sm text-slate-400">这个学科还没有知识主干</div>}
         </section>
-        <section className="glass-panel overflow-hidden rounded-xl">
-          <FocusPanel focus={focus} loading={focusLoading || loading} onSelect={setSelectedId} onEdit={() => setDialog("edit")} onRelation={() => setDialog("relation")} onOpenSource={onOpenSource} />
+        <section ref={detailSectionRef} className="glass-panel scroll-mt-4 overflow-hidden rounded-xl">
+          <FocusPanel focus={focus} loading={focusLoading || loading} onSelect={setSelectedId} onEdit={() => setDialog("edit")} onRelation={() => setDialog("relation")} onBackToGraph={() => graphSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} onOpenSource={onOpenSource} />
         </section>
       </div>
 
-      {dialog === "create" ? <NodeDialog nodes={graph.nodes} defaultSubject={subject} onClose={() => setDialog(null)} onSaved={onDataChanged} onShowToast={onShowToast} /> : null}
-      {dialog === "edit" && selected ? <NodeDialog node={selected} nodes={graph.nodes} defaultSubject={subject} onClose={() => setDialog(null)} onSaved={onDataChanged} onShowToast={onShowToast} /> : null}
+      {dialog === "create" ? <NodeDialog nodes={graph.nodes} subjects={subjects} stages={graph.stages} availableTags={availableTags} defaultSubject={subject} onManageSubjects={() => setSubjectManagerOpen(true)} onClose={() => setDialog(null)} onSaved={onDataChanged} onShowToast={onShowToast} /> : null}
+      {dialog === "edit" && selected ? <NodeDialog node={selected} nodes={graph.nodes} subjects={subjects} stages={graph.stages} availableTags={availableTags} defaultSubject={subject} onManageSubjects={() => setSubjectManagerOpen(true)} onClose={() => setDialog(null)} onSaved={onDataChanged} onShowToast={onShowToast} /> : null}
       {dialog === "relation" && selected ? <RelationDialog selected={selected} nodes={graph.nodes} onClose={() => setDialog(null)} onSaved={onDataChanged} onShowToast={onShowToast} /> : null}
       {dialog === "merge" && selected ? (
         <MergeDialog selected={selected} nodes={graph.nodes} onClose={() => setDialog(null)} onSaved={onDataChanged} onShowToast={onShowToast} />
       ) : null}
+      {subjectManagerOpen ? <SubjectManagerDialog subjects={subjects} onClose={() => setSubjectManagerOpen(false)} onSaved={onDataChanged} onShowToast={onShowToast} /> : null}
     </div>
   );
 }

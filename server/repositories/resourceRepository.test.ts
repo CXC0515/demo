@@ -191,6 +191,57 @@ test("knowledge structure rejects a mother-chain cycle", () => {
   }
 });
 
+test("knowledge codes stay stable while names and stages change", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "resource-code-"));
+  const database = createResourceDatabase(path.join(directory, "resources.sqlite"));
+  try {
+    const repository = new ResourceRepository(database);
+    repository.seedBaseKnowledge();
+    repository.createKnowledgeTag("中考重点");
+    const node = repository.createNode({
+      name: "一次函数图象",
+      type: "knowledge",
+      description: "",
+      aliases: [],
+      subject: "数学",
+      grade: "八年级上",
+      stageIds: ["stage_grade8_1"],
+      tags: ["中考重点"],
+    });
+    assert.match(node.code, /^MATH-KN-\d{6}$/);
+    const updated = repository.updateNode(node.id, {
+      name: "一次函数的图象",
+      grade: "通用",
+      stageIds: ["stage_general"],
+    });
+    assert.equal(updated?.id, node.id);
+    assert.equal(updated?.code, node.code);
+    assert.deepEqual(updated?.stageIds, ["stage_general"]);
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("subject vocabulary controls names without rewriting node identity", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "resource-subject-"));
+  const database = createResourceDatabase(path.join(directory, "resources.sqlite"));
+  try {
+    const repository = new ResourceRepository(database);
+    repository.seedBaseKnowledge();
+    const subject = repository.createKnowledgeSubject("信息技术", "IT");
+    const node = repository.createNode({ name: "算法基础", type: "knowledge", description: "", aliases: [], subject: subject.name, grade: "通用" });
+    repository.updateKnowledgeSubject(subject.id, { name: "信息科技" });
+    const updated = repository.getNode(node.id);
+    assert.equal(updated?.subject, "信息科技");
+    assert.equal(updated?.id, node.id);
+    assert.equal(updated?.code, node.code);
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("knowledge focus separates prerequisites, dependents, question types and methods", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "resource-focus-"));
   const database = createResourceDatabase(path.join(directory, "resources.sqlite"));

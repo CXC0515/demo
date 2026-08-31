@@ -154,6 +154,43 @@ const migrations = [
       CREATE INDEX knowledge_nodes_mother_order_idx ON knowledge_nodes(primary_mother_id, sort_order, name);
     `,
   },
+  {
+    version: 3,
+    sql: `
+      ALTER TABLE knowledge_nodes ADD COLUMN code TEXT;
+      ALTER TABLE knowledge_nodes ADD COLUMN stage_ids_json TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE knowledge_nodes ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]';
+
+      CREATE UNIQUE INDEX knowledge_nodes_code_idx ON knowledge_nodes(code) WHERE code IS NOT NULL;
+
+      CREATE TABLE knowledge_subjects (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE knowledge_stages (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE knowledge_tags (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export const runResourceMigrations = (database: Database.Database) => {

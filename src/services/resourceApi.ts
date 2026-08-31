@@ -8,6 +8,8 @@ import {
   KnowledgeEntity,
   KnowledgeFocusSnapshot,
   KnowledgeGraphSnapshot,
+  KnowledgeSubject,
+  KnowledgeTag,
   KnowledgeRelation,
   KnowledgeRelationType,
   KnowledgeTreeSnapshot,
@@ -110,7 +112,7 @@ export const getKnowledgeGraph = async (query = "") => {
 
 export type KnowledgeNodeInput = Pick<
   KnowledgeEntity,
-  "name" | "type" | "description" | "aliases" | "subject" | "grade"
+  "name" | "type" | "description" | "aliases" | "subject" | "grade" | "stageIds" | "tags"
 > & Partial<Pick<KnowledgeEntity, "trainable" | "sortOrder">> & {
   primaryMotherId?: string | null;
 };
@@ -166,6 +168,29 @@ export const updateKnowledgeStructure = async (
       },
     )
   ).node;
+
+export const createKnowledgeSubject = async (input: { name: string; code: string }) =>
+  (await requestJson<{ subject: KnowledgeSubject }>("/api/knowledge/subjects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  })).subject;
+
+export const updateKnowledgeSubject = async (
+  subjectId: string,
+  input: { name?: string; status?: "active" | "inactive" },
+) => (await requestJson<{ subject: KnowledgeSubject }>(`/api/knowledge/subjects/${subjectId}`, {
+  method: "PATCH",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(input),
+})).subject;
+
+export const createKnowledgeTag = async (name: string) =>
+  (await requestJson<{ tag: KnowledgeTag }>("/api/knowledge/tags", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  })).tag;
 
 export const archiveKnowledgeNode = async (nodeId: string) => {
   const response = await fetch(`/api/knowledge/nodes/${nodeId}`, {

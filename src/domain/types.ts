@@ -650,12 +650,15 @@ export interface ResourceChunk {
 
 export interface KnowledgeEntity {
   id: string;
+  code: string;
   name: string;
   type: KnowledgeEntityType;
   description: string;
   aliases: string[];
   subject: string;
   grade: string;
+  stageIds: string[];
+  tags: string[];
   primaryMotherId?: string;
   trainable: boolean;
   sortOrder: number;
@@ -665,6 +668,27 @@ export interface KnowledgeEntity {
   mergedIntoId?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface KnowledgeSubject {
+  id: string;
+  code: string;
+  name: string;
+  sortOrder: number;
+  status: 'active' | 'inactive';
+}
+
+export interface KnowledgeStage {
+  id: string;
+  name: string;
+  sortOrder: number;
+  status: 'active' | 'inactive';
+}
+
+export interface KnowledgeTag {
+  id: string;
+  name: string;
+  status: 'active' | 'inactive';
 }
 
 export interface KnowledgeRelation {
@@ -721,6 +745,9 @@ export interface KnowledgeGraphSnapshot {
   relations: KnowledgeRelation[];
   sourceLinks: KnowledgeSourceLink[];
   resources: LibraryResource[];
+  subjects: KnowledgeSubject[];
+  stages: KnowledgeStage[];
+  tags: KnowledgeTag[];
 }
 
 export interface KnowledgeTreeSnapshot {

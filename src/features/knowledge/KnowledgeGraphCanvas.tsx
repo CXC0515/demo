@@ -20,11 +20,14 @@ import {
   ChevronDown,
   ChevronRight,
   Focus,
+  Filter,
   Maximize2,
   Network,
   Rows3,
+  Search,
+  X,
 } from "lucide-react";
-import { KnowledgeEntity } from "../../domain/types";
+import { KnowledgeEntity, KnowledgeStage } from "../../domain/types";
 import { entityLabels } from "./knowledgeUi";
 
 const NODE_WIDTH = 210;
@@ -116,15 +119,24 @@ const layoutTree = (nodes: TreeNode[], edges: Edge[]) => {
 interface CanvasProps {
   subject: string;
   nodes: KnowledgeEntity[];
+  stages: KnowledgeStage[];
+  availableTags: string[];
   selectedId: string;
   onSelect: (nodeId: string) => void;
+  onShowDetails: () => void;
 }
 
-const KnowledgeTreeCanvasInner = ({ subject, nodes, selectedId, onSelect }: CanvasProps) => {
+const KnowledgeTreeCanvasInner = ({ subject, nodes, stages, availableTags, selectedId, onSelect, onShowDetails }: CanvasProps) => {
   const { fitView, setCenter } = useReactFlow<TreeNode, Edge>();
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [stageId, setStageId] = useState("");
+  const [tag, setTag] = useState("");
+  const [nodeType, setNodeType] = useState<"" | TreeEntity["type"]>("");
   const lastSelectedId = useRef(selectedId);
-  const structuralNodes = useMemo(
+  const allStructuralNodes = useMemo(
     () =>
       nodes.filter(
         (node): node is TreeEntity =>
@@ -132,6 +144,29 @@ const KnowledgeTreeCanvasInner = ({ subject, nodes, selectedId, onSelect }: Canv
       ),
     [nodes],
   );
+  const allNodeById = useMemo(() => new Map(allStructuralNodes.map((node) => [node.id, node])), [allStructuralNodes]);
+  const filterActive = Boolean(query.trim() || stageId || tag || nodeType);
+  const structuralNodes = useMemo(() => {
+    if (!filterActive) return allStructuralNodes;
+    const normalizedQuery = query.trim().toLowerCase();
+    const matches = allStructuralNodes.filter((node) =>
+      (!normalizedQuery || `${node.name}${node.description}${node.aliases.join("")}`.toLowerCase().includes(normalizedQuery)) &&
+      (!stageId || node.stageIds.includes(stageId)) &&
+      (!tag || node.tags.includes(tag)) &&
+      (!nodeType || node.type === nodeType),
+    );
+    const visible = new Set(matches.map((node) => node.id));
+    matches.forEach((node) => {
+      let cursor = node;
+      while (cursor.primaryMotherId) {
+        visible.add(cursor.primaryMotherId);
+        const mother = allNodeById.get(cursor.primaryMotherId);
+        if (!mother) break;
+        cursor = mother;
+      }
+    });
+    return allStructuralNodes.filter((node) => visible.has(node.id));
+  }, [allStructuralNodes, allNodeById, filterActive, nodeType, query, stageId, tag]);
   const nodeById = useMemo(
     () => new Map(structuralNodes.map((node) => [node.id, node])),
     [structuralNodes],
@@ -172,6 +207,15 @@ const KnowledgeTreeCanvasInner = ({ subject, nodes, selectedId, onSelect }: Canv
       return next;
     });
   }, []);
+
+  const clearFilters = () => {
+    setQuery("");
+    setStageId("");
+    setTag("");
+    setNodeType("");
+  };
+  const activeFilterCount = [stageId, tag, nodeType].filter(Boolean).length;
+  const allExpanded = collapsedIds.size === 0;
 
   useEffect(() => {
     if (!selectedId) return;
@@ -248,8 +292,8 @@ const KnowledgeTreeCanvasInner = ({ subject, nodes, selectedId, onSelect }: Canv
   }, [selectedId, renderNodes, setCenter]);
 
   return (
-    <div className="relative h-[590px] bg-slate-50/70 dark:bg-zinc-950/40">
-      <div className="absolute left-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] items-center gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
+    <div className="relative h-[clamp(560px,72dvh,840px)] bg-slate-50/70 dark:bg-zinc-950/40">
+      <div className="absolute left-3 right-3 top-3 z-20 flex items-center gap-1 rounded-lg border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
         <div className="flex min-w-0 items-center gap-2 pr-2">
           <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-emerald-700 text-white">
             <Network className="h-4 w-4" />
@@ -262,20 +306,45 @@ const KnowledgeTreeCanvasInner = ({ subject, nodes, selectedId, onSelect }: Canv
         <span className="h-6 w-px shrink-0 bg-slate-200 dark:bg-zinc-700" />
         <button
           type="button"
-          onClick={() => setCollapsedIds(new Set(structuralNodes.filter((node) => node.type === "domain").map((node) => node.id)))}
+          onClick={() => setCollapsedIds(allExpanded ? new Set(allStructuralNodes.filter((node) => node.type === "domain").map((node) => node.id)) : new Set())}
           className="flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10px] font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"
         >
           <Rows3 className="h-3.5 w-3.5" />
-          收起到板块
+          {allExpanded ? "收起到板块" : "展开全部"}
         </button>
         <button
           type="button"
-          onClick={() => setCollapsedIds(new Set())}
-          className="h-7 shrink-0 rounded-md px-2 text-[10px] font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"
+          title="筛选知识点"
+          aria-label="筛选知识点"
+          onClick={() => { setFilterOpen((open) => !open); setSearchOpen(false); }}
+          className={`relative grid h-7 w-7 shrink-0 place-items-center rounded-md ${filterOpen || activeFilterCount ? "bg-emerald-50 text-emerald-700" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"}`}
         >
-          展开全部
+          <Filter className="h-3.5 w-3.5" />
+          {activeFilterCount ? <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-emerald-700 px-1 text-[8px] font-black text-white">{activeFilterCount}</span> : null}
+        </button>
+        <button type="button" title="搜索知识点" aria-label="搜索知识点" onClick={() => { setSearchOpen((open) => !open); setFilterOpen(false); }} className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${searchOpen || query ? "bg-emerald-50 text-emerald-700" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"}`}>
+          <Search className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" disabled={!selectedId} onClick={onShowDetails} className="btn-primary ml-auto flex h-7 shrink-0 items-center gap-1.5 px-3 text-[10px] disabled:cursor-not-allowed disabled:opacity-40">
+          详情
+          <ChevronDown className="h-3.5 w-3.5" />
         </button>
       </div>
+      {searchOpen ? (
+        <div className="absolute left-3 top-[70px] z-20 flex w-[min(360px,calc(100%-1.5rem))] items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+          <Search className="h-4 w-4 shrink-0 text-slate-400" />
+          <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称或别名" className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
+          {query ? <button type="button" title="清除搜索" onClick={() => setQuery("")} className="grid h-7 w-7 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><X className="h-3.5 w-3.5" /></button> : null}
+        </div>
+      ) : null}
+      {filterOpen ? (
+        <div className="absolute left-3 top-[70px] z-20 grid w-[min(420px,calc(100%-1.5rem))] gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-lg sm:grid-cols-3 dark:border-zinc-700 dark:bg-zinc-900">
+          <label className="space-y-1"><span className="text-[10px] font-bold text-slate-400">学习阶段</span><select value={stageId} onChange={(event) => setStageId(event.target.value)} className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"><option value="">全部</option>{stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></label>
+          <label className="space-y-1"><span className="text-[10px] font-bold text-slate-400">节点类型</span><select value={nodeType} onChange={(event) => setNodeType(event.target.value as "" | TreeEntity["type"])} className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"><option value="">全部</option><option value="domain">板块</option><option value="topic">主题</option><option value="knowledge">知识点</option></select></label>
+          <label className="space-y-1"><span className="text-[10px] font-bold text-slate-400">标签</span><select value={tag} onChange={(event) => setTag(event.target.value)} className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"><option value="">全部</option>{availableTags.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+          {activeFilterCount ? <button type="button" onClick={clearFilters} className="text-left text-[10px] font-bold text-emerald-700 sm:col-span-3">清除筛选</button> : null}
+        </div>
+      ) : null}
       <ReactFlow<TreeNode, Edge>
         className="h-full"
         nodes={renderNodes}
@@ -327,7 +396,7 @@ const KnowledgeTreeCanvasInner = ({ subject, nodes, selectedId, onSelect }: Canv
         </div>
       </ReactFlow>
       <div className="pointer-events-none absolute bottom-3 right-3 z-10 rounded-md bg-white/90 px-2 py-1 text-[10px] font-bold text-slate-400 shadow-sm dark:bg-zinc-900/90">
-        {renderNodes.length} / {structuralNodes.length} 个主干节点
+        {renderNodes.length} / {allStructuralNodes.length} 个主干节点
       </div>
     </div>
   );

@@ -30,6 +30,9 @@ const emptyGraph: KnowledgeGraphSnapshot = {
   relations: [],
   sourceLinks: [],
   resources: [],
+  subjects: [],
+  stages: [],
+  tags: [],
 };
 
 export default function KnowledgeLibrary({
