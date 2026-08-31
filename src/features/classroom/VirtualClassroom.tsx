@@ -350,8 +350,6 @@ export default function VirtualClassroom({
             )}
 
             <div className="overflow-x-auto rounded-md border border-slate-200 bg-slate-50 p-3 sm:p-5 dark:border-zinc-800 dark:bg-zinc-950/40">
-              <div className="mx-auto mb-5 flex h-11 min-w-80 max-w-3xl items-center justify-center rounded-sm bg-slate-800 text-xs font-semibold text-white">黑板</div>
-              <div className="mx-auto mb-6 flex h-9 w-36 items-center justify-center rounded-sm border border-amber-200 bg-amber-50 text-xs font-semibold text-amber-900">讲台</div>
               <div
                 className="grid gap-2.5"
                 style={{
@@ -359,7 +357,10 @@ export default function VirtualClassroom({
                   minWidth: `${activeLayout.columnCount * 82}px`
                 }}
               >
-                {Array.from({ length: activeLayout.rowCount * activeLayout.columnCount }, (_, seatIndex) => {
+                {Array.from({ length: activeLayout.rowCount * activeLayout.columnCount }, (_, visualIndex) => {
+                  const visualRow = Math.floor(visualIndex / activeLayout.columnCount);
+                  const column = visualIndex % activeLayout.columnCount;
+                  const seatIndex = (activeLayout.rowCount - 1 - visualRow) * activeLayout.columnCount + column;
                   const assignment = activeLayout.seats.find(seat => seat.seatIndex === seatIndex);
                   const student = assignment ? studentById.get(assignment.studentId) : undefined;
                   const isPlacement = student?.id === placementStudentId;
@@ -394,6 +395,8 @@ export default function VirtualClassroom({
                   );
                 })}
               </div>
+              <div className="mx-auto mb-5 mt-6 flex h-9 w-36 items-center justify-center rounded-sm border border-amber-200 bg-amber-50 text-xs font-semibold text-amber-900">讲台</div>
+              <div className="mx-auto flex h-11 min-w-80 max-w-3xl items-center justify-center rounded-sm bg-slate-800 text-xs font-semibold text-white">黑板</div>
             </div>
 
             <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-500">
