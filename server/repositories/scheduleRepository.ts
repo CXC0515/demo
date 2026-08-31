@@ -34,6 +34,7 @@ export const listReminders = () => (database.prepare('SELECT * FROM timer_remind
 export const listSchedulePeriods = (): SchedulePeriod[] => (database.prepare('SELECT * FROM schedule_periods ORDER BY period').all() as PeriodRow[]).map(row => ({ period: row.period, label: row.label, startTime: row.start_time, endTime: row.end_time }));
 
 export const saveSchedulePeriods = (periods: SchedulePeriod[]) => database.transaction(() => {
+  database.prepare('DELETE FROM schedule_periods').run();
   const statement = database.prepare(`
     INSERT INTO schedule_periods (period, label, start_time, end_time, updated_at) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(period) DO UPDATE SET label=excluded.label, start_time=excluded.start_time, end_time=excluded.end_time, updated_at=excluded.updated_at

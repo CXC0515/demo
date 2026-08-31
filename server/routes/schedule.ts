@@ -33,8 +33,14 @@ router.get('/schedule', (_request, response) => response.json({ schedule: listSc
 router.put('/schedule/periods', (request, response) => {
   const parsed = z.object({ periods: z.array(periodSchema).min(1).max(12) }).superRefine((value, context) => {
     if (new Set(value.periods.map(item => item.period)).size !== value.periods.length) context.addIssue({ code: 'custom', message: 'DUPLICATE_PERIOD' });
+    if (value.periods.some((item, index) => item.period !== index + 1)) context.addIssue({ code: 'custom', message: 'PERIODS_MUST_BE_CONTIGUOUS' });
   }).safeParse(request.body);
   if (!parsed.success) { response.status(400).json({ code: 'INVALID_SCHEDULE_PERIODS', issues: parsed.error.issues }); return; }
+  const allowedPeriods = new Set(parsed.data.periods.map(item => item.period));
+  if (listScheduleItems().some(item => !allowedPeriods.has(item.period))) {
+    response.status(409).json({ code: 'SCHEDULE_PERIOD_IN_USE' });
+    return;
+  }
   response.json({ periods: saveSchedulePeriods(parsed.data.periods) });
 });
 router.post('/schedule/items', (request, response) => {

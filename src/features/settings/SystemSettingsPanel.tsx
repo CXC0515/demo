@@ -4,8 +4,8 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { BookOpen, Database, Palette, Save, Settings2, Sliders, UserRound } from 'lucide-react';
-import { SchedulePeriod, SchoolClass } from '../../domain/types';
+import { BookOpen, Database, Palette, Plus, Save, Settings2, Sliders, Trash2, UserRound } from 'lucide-react';
+import { ScheduleItem, SchedulePeriod, SchoolClass } from '../../domain/types';
 
 interface SystemSettingsPanelProps {
   lowConfidenceThreshold: number;
@@ -16,6 +16,7 @@ interface SystemSettingsPanelProps {
   showWeekends: boolean;
   onShowWeekendsChange: (value: boolean) => void;
   schedulePeriods: SchedulePeriod[];
+  schedule: ScheduleItem[];
   onSaveSchedulePeriods: (periods: SchedulePeriod[]) => Promise<void>;
   requestedSection: 'schedule-periods' | null;
   onRequestedSectionHandled: () => void;
@@ -42,6 +43,12 @@ const themeOptions = [
   ['warm-gray', '暖灰'],
   ['dark-graphite', '深色石墨']
 ];
+const periodLabels = ['第一节', '第二节', '第三节', '第四节', '第五节', '第六节', '第七节', '第八节', '第九节', '第十节', '第十一节', '第十二节'];
+const addMinutes = (time: string, minutes: number) => {
+  const [hour, minute] = time.split(':').map(Number);
+  const total = hour * 60 + minute + minutes;
+  return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+};
 
 export default function SystemSettingsPanel({
   lowConfidenceThreshold,
@@ -52,6 +59,7 @@ export default function SystemSettingsPanel({
   showWeekends,
   onShowWeekendsChange,
   schedulePeriods,
+  schedule,
   onSaveSchedulePeriods,
   requestedSection,
   onRequestedSectionHandled,
@@ -80,6 +88,8 @@ export default function SystemSettingsPanel({
   const [exportFormat, setExportFormat] = useState('PDF + Excel');
   const [theme, setTheme] = useState('morandi-green');
   const [localSchedulePeriods, setLocalSchedulePeriods] = useState(schedulePeriods);
+  const lastPeriod = localSchedulePeriods.at(-1);
+  const lastPeriodInUse = lastPeriod ? schedule.some(item => item.period === lastPeriod.period) : false;
 
   useEffect(() => setLocalSchedulePeriods(schedulePeriods), [schedulePeriods]);
 
@@ -121,9 +131,25 @@ export default function SystemSettingsPanel({
     try {
       await onSaveSchedulePeriods(localSchedulePeriods);
       onShowToast('系统设置已保存');
-    } catch {
-      onShowToast('学校作息保存失败，请稍后重试');
+    } catch (error) {
+      onShowToast(error instanceof Error && error.message === 'SCHEDULE_PERIOD_IN_USE' ? '被删除的课节仍有课程，请先调整课程' : '学校作息保存失败，请稍后重试');
     }
+  };
+
+  const addSchedulePeriod = () => {
+    if (localSchedulePeriods.length >= 12) return;
+    const period = localSchedulePeriods.length + 1;
+    const startTime = addMinutes(lastPeriod?.endTime ?? '07:50', 10);
+    setLocalSchedulePeriods(current => [...current, { period, label: periodLabels[period - 1], startTime, endTime: addMinutes(startTime, 45) }]);
+  };
+
+  const removeLastSchedulePeriod = () => {
+    if (localSchedulePeriods.length <= 1) return;
+    if (lastPeriodInUse) {
+      onShowToast(`${lastPeriod?.label ?? '最后一节'}仍有课程，请先调整课程`);
+      return;
+    }
+    setLocalSchedulePeriods(current => current.slice(0, -1));
   };
 
   return (
@@ -199,18 +225,24 @@ export default function SystemSettingsPanel({
               <input type="checkbox" checked={showWeekends} onChange={event => onShowWeekendsChange(event.target.checked)} className="h-4 w-4 accent-emerald-700" />
             </label>
             <section id="schedule-period-settings" className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:col-span-2 dark:border-zinc-800 dark:bg-zinc-900/60">
-              <div>
-                <strong className="block text-sm text-slate-700 dark:text-slate-200">学校作息时间</strong>
-                <span className="mt-1 block text-xs text-slate-400">统一用于个人课表、班级课表和手动排课。</span>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <strong className="block text-sm text-slate-700 dark:text-slate-200">学校作息时间</strong>
+                  <span className="mt-1 block text-xs text-slate-400">当前 {localSchedulePeriods.length} 节，统一用于个人课表、班级课表和手动排课。</span>
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={removeLastSchedulePeriod} disabled={localSchedulePeriods.length <= 1} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-500 disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-950"><Trash2 className="h-3.5 w-3.5"/>减少一节</button>
+                  <button type="button" onClick={addSchedulePeriod} disabled={localSchedulePeriods.length >= 12} className="inline-flex items-center gap-1 rounded-lg bg-emerald-700 px-2.5 py-1.5 text-xs font-bold text-white disabled:opacity-40"><Plus className="h-3.5 w-3.5"/>增加一节</button>
+                </div>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 {localSchedulePeriods.map((period, index) => (
-                  <div key={period.period} className="grid grid-cols-[76px_1fr_12px_1fr] items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 dark:border-zinc-700 dark:bg-zinc-950">
+                  <div key={period.period} className="grid grid-cols-[1fr_12px_1fr] items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 sm:grid-cols-[76px_1fr_12px_1fr] dark:border-zinc-700 dark:bg-zinc-950">
                     <input
                       value={period.label}
                       aria-label={`第${period.period}节名称`}
                       onChange={event => setLocalSchedulePeriods(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item))}
-                      className="min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs font-bold dark:border-zinc-700 dark:bg-zinc-900"
+                      className="col-span-3 min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs font-bold sm:col-span-1 dark:border-zinc-700 dark:bg-zinc-900"
                     />
                     <input type="time" value={period.startTime} aria-label={`${period.label}开始时间`} onChange={event => setLocalSchedulePeriods(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, startTime: event.target.value } : item))} className="min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900" />
                     <span className="text-center text-slate-400">—</span>

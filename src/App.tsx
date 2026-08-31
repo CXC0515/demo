@@ -671,6 +671,7 @@ export default function App() {
                 localStorage.setItem('schedule-show-weekends', String(value));
               }}
               schedulePeriods={schedulePeriods}
+              schedule={schedule}
               onSaveSchedulePeriods={async periods => {
                 const saved = await saveSchedulePeriods(periods);
                 setSchedulePeriods(saved);
