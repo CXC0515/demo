@@ -38,7 +38,7 @@ test('saves a real classroom layout and enforces class membership', () => {
 
   assert.deepEqual(classroom.getClassroomLayout('c5'), {
     classId: 'c5',
-    rowCount: 6,
+    rowCount: 8,
     columnCount: 7,
     seats: []
   });
