@@ -110,6 +110,44 @@ const migrations: Migration[] = [
         WHERE class_id = OLD.class_id AND student_id = OLD.student_id;
       END;
     `
+  },
+  {
+    version: 4,
+    sql: `
+      CREATE TABLE schedule_items (
+        id TEXT PRIMARY KEY,
+        day INTEGER NOT NULL CHECK (day BETWEEN 1 AND 7),
+        period INTEGER NOT NULL CHECK (period BETWEEN 1 AND 12),
+        title TEXT NOT NULL,
+        class_id TEXT REFERENCES classes(id) ON UPDATE CASCADE ON DELETE SET NULL,
+        class_name TEXT NOT NULL DEFAULT '',
+        item_type TEXT NOT NULL CHECK (item_type IN ('class', 'meeting', 'research', 'reminder', 'parent-comm', 'grading')),
+        time_text TEXT NOT NULL,
+        scope TEXT NOT NULL CHECK (scope IN ('teacher', 'class')),
+        teacher_name TEXT NOT NULL DEFAULT '',
+        confidence REAL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX schedule_items_scope_day_idx ON schedule_items (scope, day, period);
+      CREATE INDEX schedule_items_class_idx ON schedule_items (class_id, day, period);
+
+      CREATE TABLE timer_reminders (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        class_id TEXT REFERENCES classes(id) ON UPDATE CASCADE ON DELETE SET NULL,
+        class_name TEXT NOT NULL DEFAULT '',
+        time_text TEXT NOT NULL,
+        repeat_rule TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'inactive')),
+        important INTEGER NOT NULL DEFAULT 0 CHECK (important IN (0, 1)),
+        urgent INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1)),
+        due_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `
   }
 ];
 

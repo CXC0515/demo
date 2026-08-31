@@ -63,6 +63,7 @@ export default function VirtualClassroom({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [includeStudentNo, setIncludeStudentNo] = useState(() => localStorage.getItem('classroom-export-student-no') !== 'false');
   const [submittingObservation, setSubmittingObservation] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -228,7 +229,7 @@ export default function VirtualClassroom({
     setExporting(true);
     setMessage(null);
     try {
-      await exportClassroomLayout(selectedClassId, activeClass.name);
+      await exportClassroomLayout(selectedClassId, activeClass.name, includeStudentNo);
       setMessage({ type: 'success', text: '座位表已导出。' });
     } catch (error) {
       setMessage({ type: 'error', text: `导出失败：${error instanceof Error ? error.message : '未知错误'}` });
@@ -314,6 +315,18 @@ export default function VirtualClassroom({
             </>
           ) : (
             <>
+              <label className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={includeStudentNo}
+                  onChange={event => {
+                    setIncludeStudentNo(event.target.checked);
+                    localStorage.setItem('classroom-export-student-no', String(event.target.checked));
+                  }}
+                  className="accent-emerald-700"
+                />
+                导出学号
+              </label>
               <button
                 type="button"
                 onClick={() => void exportLayout()}

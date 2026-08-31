@@ -34,6 +34,7 @@ import ScheduleReminder from './features/schedule/ScheduleReminder';
 import SystemSettings from './features/settings/SystemSettingsPanel';
 import KnowledgeLibrary from './features/knowledge/KnowledgeLibrary';
 import { getKnowledgeGraph } from './services/resourceApi';
+import { getScheduleWorkspace, removeReminder, removeScheduleItem, saveReminder, saveScheduleBatch, saveScheduleItem } from './services/scheduleApi';
 import TagManagement from './features/tags/TagManagement';
 import LessonPlanWorkspace from './features/lesson-plan/LessonPlanWorkspace';
 import GradingWorkspace from './features/grading/GradingWorkspace';
@@ -86,6 +87,7 @@ export default function App() {
   const [tasks, setTasks] = useState<WorkbenchTask[]>([]);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [reminders, setReminders] = useState<TimerReminder[]>([]);
+  const [showWeekends, setShowWeekends] = useState(() => localStorage.getItem('schedule-show-weekends') === 'true');
   const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([]);
   const [workflowStates, setWorkflowStates] = useState<Record<string, WorkflowState>>({});
   const [knowledgeNodes, setKnowledgeNodes] = useState<KnowledgeNode[]>([]);
@@ -133,6 +135,10 @@ export default function App() {
       setTasks(loadedTasks);
       setWorkflowStates(Object.fromEntries(loadedTasks.map(task => [task.id, createInitialWorkflowState(task)])));
     }).catch(() => undefined);
+    void getScheduleWorkspace().then(workspace => {
+      setSchedule(workspace.schedule);
+      setReminders(workspace.reminders);
+    }).catch(() => undefined);
   }, [loadKnowledgeCatalog]);
 
   // Trigger Toast helper
@@ -152,35 +158,43 @@ export default function App() {
   };
 
   // 2. Schedule Item edit/addition
-  const handleAddScheduleItem = (item: ScheduleItem) => {
-    setSchedule([...schedule, item]);
-    triggerToast('成功添加排课计划/行事日程！');
+  const handleAddScheduleItem = async (item: ScheduleItem) => {
+    const saved = await saveScheduleItem(item);
+    setSchedule(current => [...current.filter(existing => existing.id !== saved.id), saved]);
+    triggerToast('课表已保存');
   };
 
-  const handleUpdateScheduleItem = (updated: ScheduleItem) => {
-    setSchedule(schedule.map(s => s.id === updated.id ? updated : s));
-    triggerToast('排课计划已成功更新！');
+  const handleUpdateScheduleItem = async (updated: ScheduleItem) => {
+    const saved = await saveScheduleItem(updated);
+    setSchedule(current => current.map(item => item.id === saved.id ? saved : item));
+    triggerToast('课表已更新');
   };
 
-  const handleDeleteScheduleItem = (itemId: string) => {
-    setSchedule(schedule.filter(s => s.id !== itemId));
-    triggerToast('已成功移除此日程事件。');
+  const handleDeleteScheduleItem = async (itemId: string) => {
+    await removeScheduleItem(itemId);
+    setSchedule(current => current.filter(item => item.id !== itemId));
+    triggerToast('课程已删除');
   };
 
   // 3. Reminders list toggles
-  const handleAddReminder = (reminder: TimerReminder) => {
-    setReminders([...reminders, reminder]);
-    triggerToast(`⏰ 定时作业提醒 [${reminder.name}] 已成功创建！`);
+  const handleAddReminder = async (reminder: TimerReminder) => {
+    const saved = await saveReminder(reminder);
+    setReminders(current => [...current.filter(item => item.id !== saved.id), saved]);
+    triggerToast(`提醒“${saved.name}”已保存`);
   };
 
-  const handleToggleReminderStatus = (reminderId: string) => {
-    setReminders(reminders.map(r => r.id === reminderId ? { ...r, status: r.status === 'active' ? 'inactive' : 'active' } : r));
-    triggerToast('定时提醒开关已切换！');
+  const handleToggleReminderStatus = async (reminderId: string) => {
+    const current = reminders.find(item => item.id === reminderId);
+    if (!current) return;
+    const saved = await saveReminder({ ...current, status: current.status === 'active' ? 'inactive' : 'active' });
+    setReminders(items => items.map(item => item.id === saved.id ? saved : item));
+    triggerToast('提醒状态已更新');
   };
 
-  const handleDeleteReminder = (reminderId: string) => {
-    setReminders(reminders.filter(r => r.id !== reminderId));
-    triggerToast('已删除此条定时提醒。');
+  const handleDeleteReminder = async (reminderId: string) => {
+    await removeReminder(reminderId);
+    setReminders(current => current.filter(item => item.id !== reminderId));
+    triggerToast('提醒已删除');
   };
 
   // 4. Class actions
@@ -541,9 +555,15 @@ export default function App() {
               schedule={schedule}
               reminders={reminders}
               classes={classes}
+              showWeekends={showWeekends}
               onAddScheduleItem={handleAddScheduleItem}
               onUpdateScheduleItem={handleUpdateScheduleItem}
               onDeleteScheduleItem={handleDeleteScheduleItem}
+              onImportSchedule={async items => {
+                const saved = await saveScheduleBatch(items);
+                setSchedule(current => [...current.filter(item => !saved.some(next => next.id === item.id)), ...saved]);
+                triggerToast(`已导入 ${saved.length} 项课程`);
+              }}
               onAddReminder={handleAddReminder}
               onToggleReminderStatus={handleToggleReminderStatus}
               onDeleteReminder={handleDeleteReminder}
@@ -636,6 +656,11 @@ export default function App() {
               onUpdateOcrThresholds={(humanReview, autoPass) => {
                 setOcrHumanReviewThreshold(humanReview);
                 setOcrAutoPassThreshold(autoPass);
+              }}
+              showWeekends={showWeekends}
+              onShowWeekendsChange={value => {
+                setShowWeekends(value);
+                localStorage.setItem('schedule-show-weekends', String(value));
               }}
               classes={classes}
               selectedClassId={selectedClassId}

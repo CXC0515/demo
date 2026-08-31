@@ -54,3 +54,12 @@ test('exports the teacher-view seat order and leaves empty seats blank', async (
   assert.equal(getExcelRowLabel(25), 'Z');
   assert.equal(getExcelRowLabel(26), 'AA');
 });
+
+test('can export names without student numbers', async () => {
+  const buffer = await buildClassroomWorkbook('五年级一班', {
+    classId: 'c5', rowCount: 1, columnCount: 1, seats: [{ seatIndex: 0, studentId: 'student' }]
+  }, [student('student', '只显示姓名', '5003')], false);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  assert.equal(workbook.getWorksheet('座位表')?.getCell('B3').value, '只显示姓名');
+});

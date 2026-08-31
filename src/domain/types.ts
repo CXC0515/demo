@@ -325,13 +325,16 @@ export interface AiReviewOpinion {
 
 export interface ScheduleItem {
   id: string;
-  day: number; // 1-5
+  day: number; // 1-7
   period: number; // 1-8
   title: string;
   classId: string;
   className: string;
   type: 'class' | 'meeting' | 'research' | 'reminder' | 'parent-comm' | 'grading';
   time: string;
+  scope?: 'teacher' | 'class';
+  teacherName?: string;
+  confidence?: number;
 }
 
 export interface TimerReminder {
@@ -342,6 +345,9 @@ export interface TimerReminder {
   time: string;
   repeatRule: string;
   status: 'active' | 'inactive';
+  important?: boolean;
+  urgent?: boolean;
+  dueAt?: string;
 }
 
 export interface DocumentAsset {

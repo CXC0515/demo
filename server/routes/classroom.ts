@@ -36,7 +36,8 @@ router.get('/classes/:classId/classroom-layout/export', async (request, response
     return;
   }
   try {
-    const workbook = await buildClassroomWorkbook(schoolClass.name, layout, listStudents(request.params.classId));
+    const includeStudentNo = request.query.includeStudentNo !== 'false';
+    const workbook = await buildClassroomWorkbook(schoolClass.name, layout, listStudents(request.params.classId), includeStudentNo);
     const filename = `${schoolClass.name.replace(/[\\/:*?"<>|]/g, '-')}-座位表.xlsx`;
     response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     response.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);

@@ -28,8 +28,8 @@ export const saveClassroomLayout = async (layout: ClassroomLayout) => {
   return body.layout;
 };
 
-export const exportClassroomLayout = async (classId: string, className: string) => {
-  const response = await fetch(`/api/classes/${encodeURIComponent(classId)}/classroom-layout/export`);
+export const exportClassroomLayout = async (classId: string, className: string, includeStudentNo: boolean) => {
+  const response = await fetch(`/api/classes/${encodeURIComponent(classId)}/classroom-layout/export?includeStudentNo=${includeStudentNo}`);
   if (!response.ok) throw new Error(await readErrorCode(response));
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);

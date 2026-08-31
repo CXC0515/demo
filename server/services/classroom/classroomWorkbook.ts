@@ -20,7 +20,8 @@ const excelRowLabel = (visualRow: number) => {
 export const buildClassroomWorkbook = async (
   className: string,
   layout: ClassroomLayout,
-  students: Student[]
+  students: Student[],
+  includeStudentNo = true
 ) => {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'AI 教师工作台';
@@ -53,7 +54,7 @@ export const buildClassroomWorkbook = async (
       const seatIndex = logicalRow * layout.columnCount + column;
       const student = studentById.get(assignmentBySeat.get(seatIndex) ?? '');
       worksheet.getCell(sheetRow, column + 2).value = student
-        ? `${student.name}（${student.studentNo}）`
+        ? includeStudentNo ? `${student.name}（${student.studentNo}）` : student.name
         : null;
     }
     worksheet.getRow(sheetRow).height = 34;

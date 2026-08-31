@@ -13,6 +13,8 @@ interface SystemSettingsPanelProps {
   ocrHumanReviewThreshold: number;
   ocrAutoPassThreshold: number;
   onUpdateOcrThresholds: (humanReview: number, autoPass: number) => void;
+  showWeekends: boolean;
+  onShowWeekendsChange: (value: boolean) => void;
   classes: SchoolClass[];
   selectedClassId: string;
   onSelectClass: (classId: string) => void;
@@ -43,6 +45,8 @@ export default function SystemSettingsPanel({
   ocrHumanReviewThreshold,
   ocrAutoPassThreshold,
   onUpdateOcrThresholds,
+  showWeekends,
+  onShowWeekendsChange,
   classes,
   selectedClassId,
   onSelectClass,
@@ -156,6 +160,13 @@ export default function SystemSettingsPanel({
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
+            </label>
+            <label className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:col-span-2 dark:border-zinc-800 dark:bg-zinc-900/60">
+              <span>
+                <strong className="block text-sm text-slate-700 dark:text-slate-200">课表显示周六、周日</strong>
+                <span className="mt-1 block text-xs text-slate-400">关闭时，课表始终完整显示周一至周五。</span>
+              </span>
+              <input type="checkbox" checked={showWeekends} onChange={event => onShowWeekendsChange(event.target.checked)} className="h-4 w-4 accent-emerald-700" />
             </label>
           </div>
         )}
