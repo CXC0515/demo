@@ -201,12 +201,50 @@ test("knowledge focus separates prerequisites, dependents, question types and me
     assert.ok(focus);
     assert.deepEqual(focus.motherChain.map((node) => node.id), [
       "kd_math_number_algebra",
-      "kt_math_equations",
+      "kt_math_quadratic_equations",
     ]);
     assert.ok(focus.prerequisites.some((node) => node.id === "kn_math_factorization"));
     assert.ok(focus.dependents.some((node) => node.id === "kn_math_quadratic_function"));
     assert.ok(focus.questionTypes.some((node) => node.id === "qt_math_solve_quadratic"));
     assert.ok(focus.methods.some((node) => node.id === "km_math_factoring"));
+    assert.ok(focus.methods.some((node) => node.id === "km_math_completing_square"));
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("middle school math backbone persists five domains and 23 visible topics idempotently", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "resource-math-backbone-"));
+  const database = createResourceDatabase(path.join(directory, "resources.sqlite"));
+  try {
+    const repository = new ResourceRepository(database);
+    repository.seedBaseKnowledge();
+    const firstTree = repository.listKnowledgeTree("数学");
+    assert.deepEqual(
+      firstTree.nodes.filter((node) => node.type === "domain").map((node) => node.name),
+      ["数与代数", "函数", "图形与几何", "统计与概率", "综合与实践"],
+    );
+    assert.equal(firstTree.nodes.filter((node) => node.type === "topic").length, 23);
+    assert.equal(firstTree.unclassified.length, 0);
+    assert.equal(
+      repository.getNode("kt_math_probability_basics")?.description,
+      "随机事件、概率的概念、列表法与树状图法求概率",
+    );
+    const firstNodeCount = repository.listNodes().length;
+    const firstRelationCount = repository.listRelations().length;
+    const firstRevisionCount = Number(
+      (database.prepare("SELECT COUNT(*) AS count FROM entity_revisions").get() as { count: number }).count,
+    );
+
+    repository.seedBaseKnowledge();
+
+    assert.equal(repository.listNodes().length, firstNodeCount);
+    assert.equal(repository.listRelations().length, firstRelationCount);
+    assert.equal(
+      Number((database.prepare("SELECT COUNT(*) AS count FROM entity_revisions").get() as { count: number }).count),
+      firstRevisionCount,
+    );
   } finally {
     database.close();
     rmSync(directory, { recursive: true, force: true });

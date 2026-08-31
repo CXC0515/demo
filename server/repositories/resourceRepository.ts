@@ -14,6 +14,11 @@ import {
   LibraryResource,
   ResourceChunk,
 } from "../../src/domain/types";
+import {
+  middleSchoolMathNodes,
+  middleSchoolMathRelations,
+  retiredMiddleSchoolMathNodeIds,
+} from "../data/knowledge/mathMiddleSchool";
 import { getResourceDatabase } from "../database/resourceDatabase";
 
 type JsonObject = Record<string, unknown>;
@@ -271,182 +276,6 @@ export class ResourceRepository {
         0,
         10,
       ],
-      [
-        "kd_math_number_algebra",
-        "数与代数",
-        "domain",
-        "研究数、式、方程和函数关系的数学知识板块",
-        "[]",
-        "数学",
-        null,
-        0,
-        10,
-      ],
-      [
-        "kt_math_algebra_foundations",
-        "代数基础",
-        "topic",
-        "支撑方程与函数学习的基本运算和变形",
-        "[]",
-        "数学",
-        "kd_math_number_algebra",
-        0,
-        10,
-      ],
-      [
-        "kt_math_equations",
-        "方程与不等式",
-        "topic",
-        "用代数关系描述并求解未知量",
-        "[]",
-        "数学",
-        "kd_math_number_algebra",
-        0,
-        20,
-      ],
-      [
-        "kt_math_functions",
-        "函数",
-        "topic",
-        "研究变量之间的对应关系及其图像",
-        "[]",
-        "数学",
-        "kd_math_number_algebra",
-        0,
-        30,
-      ],
-      [
-        "kn_math_polynomial_operations",
-        "整式运算",
-        "knowledge",
-        "进行整式的加减乘除与恒等变形",
-        "[]",
-        "数学",
-        "kt_math_algebra_foundations",
-        1,
-        10,
-      ],
-      [
-        "kn_math_factorization",
-        "因式分解",
-        "knowledge",
-        "把多项式化为若干整式乘积",
-        "[]",
-        "数学",
-        "kt_math_algebra_foundations",
-        1,
-        20,
-      ],
-      [
-        "kn_math_square_root",
-        "平方根",
-        "knowledge",
-        "理解平方根并进行相关运算",
-        "[]",
-        "数学",
-        "kt_math_algebra_foundations",
-        1,
-        30,
-      ],
-      [
-        "kn_math_linear_equation",
-        "一元一次方程",
-        "knowledge",
-        "理解并求解只含一个未知数的一次方程",
-        "[]",
-        "数学",
-        "kt_math_equations",
-        1,
-        10,
-      ],
-      [
-        "kn_math_quadratic_equation",
-        "一元二次方程",
-        "knowledge",
-        "理解一元二次方程并选择适当方法求解",
-        "[]",
-        "数学",
-        "kt_math_equations",
-        1,
-        20,
-      ],
-      [
-        "kn_math_discriminant",
-        "根的判别式",
-        "knowledge",
-        "利用判别式判断一元二次方程实数根的情况",
-        '["判别式"]',
-        "数学",
-        "kn_math_quadratic_equation",
-        1,
-        10,
-      ],
-      [
-        "kn_math_vieta",
-        "根与系数的关系",
-        "knowledge",
-        "利用一元二次方程根与系数的关系解决问题",
-        '["韦达定理"]',
-        "数学",
-        "kn_math_quadratic_equation",
-        1,
-        20,
-      ],
-      [
-        "kn_math_quadratic_function",
-        "二次函数",
-        "knowledge",
-        "理解二次函数的图像、性质及应用",
-        "[]",
-        "数学",
-        "kt_math_functions",
-        1,
-        10,
-      ],
-      [
-        "qt_math_solve_quadratic",
-        "解一元二次方程",
-        "question-type",
-        "选择适当方法求一元二次方程的根",
-        "[]",
-        "数学",
-        null,
-        0,
-        10,
-      ],
-      [
-        "qt_math_parameter_roots",
-        "根的情况与参数取值",
-        "question-type",
-        "根据根的情况确定参数范围或取值",
-        "[]",
-        "数学",
-        null,
-        0,
-        20,
-      ],
-      [
-        "km_math_factoring",
-        "因式分解法",
-        "method",
-        "把方程一边化为零，再利用因式分解求根",
-        "[]",
-        "数学",
-        null,
-        0,
-        10,
-      ],
-      [
-        "km_math_formula",
-        "公式法",
-        "method",
-        "利用求根公式求一元二次方程的根",
-        "[]",
-        "数学",
-        null,
-        0,
-        20,
-      ],
     ];
     const insertNode = this.database.prepare(`
       INSERT OR IGNORE INTO knowledge_nodes
@@ -483,70 +312,72 @@ export class ResourceRepository {
         "prerequisite",
         "景物描写分析是文学阅读的基础能力之一",
       ],
-      [
-        "kn_math_polynomial_operations",
-        "kn_math_quadratic_equation",
-        "prerequisite",
-        "整式运算是一元二次方程变形的基础",
-      ],
-      [
-        "kn_math_factorization",
-        "kn_math_quadratic_equation",
-        "prerequisite",
-        "因式分解支持一元二次方程求解",
-      ],
-      [
-        "kn_math_square_root",
-        "kn_math_quadratic_equation",
-        "prerequisite",
-        "平方根知识支持配方法和公式法",
-      ],
-      [
-        "kn_math_linear_equation",
-        "kn_math_quadratic_equation",
-        "prerequisite",
-        "一元一次方程是方程求解的先修知识",
-      ],
-      [
-        "kn_math_quadratic_equation",
-        "kn_math_quadratic_function",
-        "prerequisite",
-        "一元二次方程支持理解二次函数与横轴交点",
-      ],
-      [
-        "qt_math_solve_quadratic",
-        "kn_math_quadratic_equation",
-        "examines",
-        "该题型直接考查一元二次方程求解",
-      ],
-      [
-        "qt_math_parameter_roots",
-        "kn_math_discriminant",
-        "examines",
-        "该题型考查判别式与参数关系",
-      ],
-      [
-        "km_math_factoring",
-        "qt_math_solve_quadratic",
-        "applies-to",
-        "因式分解法适用于可分解的一元二次方程",
-      ],
-      [
-        "km_math_formula",
-        "qt_math_solve_quadratic",
-        "applies-to",
-        "公式法适用于一般一元二次方程",
-      ],
     ];
     const insertRelation = this.database.prepare(`
       INSERT OR IGNORE INTO knowledge_relations
       (id, source_node_id, target_node_id, type, description, source, version, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, 'base', 1, 'active', ?, ?)
     `);
+    const insertVersionedNode = this.database.prepare(`
+      INSERT OR IGNORE INTO knowledge_nodes
+      (id, name, type, description, aliases_json, subject, grade, primary_mother_id, trainable, sort_order, source, version, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'base', ?, 'active', ?, ?)
+    `);
+    const updateVersionedNode = this.database.prepare(`
+      UPDATE knowledge_nodes
+      SET name = ?, type = ?, description = ?, aliases_json = ?, subject = ?, grade = ?,
+          primary_mother_id = ?, trainable = ?, sort_order = ?, version = ?, status = 'active', updated_at = ?
+      WHERE id = ? AND source = 'base' AND version < ?
+    `);
     this.database.transaction(() => {
       nodes.forEach((node) => {
         insertNode.run(...node, now, now);
         updateStructure.run(node[6], node[7], node[8], node[0]);
+      });
+      middleSchoolMathNodes.forEach((node) => {
+        const inserted = insertVersionedNode.run(
+          node.id,
+          node.name,
+          node.type,
+          node.description,
+          JSON.stringify(node.aliases),
+          node.subject,
+          node.grade,
+          node.primaryMotherId ?? null,
+          node.trainable ? 1 : 0,
+          node.sortOrder,
+          node.version,
+          now,
+          now,
+        );
+        if (inserted.changes) {
+          this.recordRevision("node", node.id, node.version, "create", this.getNode(node.id)!);
+          return;
+        }
+        const updated = updateVersionedNode.run(
+          node.name,
+          node.type,
+          node.description,
+          JSON.stringify(node.aliases),
+          node.subject,
+          node.grade,
+          node.primaryMotherId ?? null,
+          node.trainable ? 1 : 0,
+          node.sortOrder,
+          node.version,
+          now,
+          node.id,
+          node.version,
+        );
+        if (updated.changes) {
+          this.recordRevision("node", node.id, node.version, "base-sync", this.getNode(node.id)!);
+        }
+      });
+      retiredMiddleSchoolMathNodeIds.forEach((nodeId) => {
+        const node = this.getNode(nodeId);
+        if (node?.status === "active" && node.source === "base") {
+          this.updateNode(nodeId, { status: "archived" });
+        }
       });
       relations.forEach(([source, target, type, description]) =>
         insertRelation.run(
@@ -555,6 +386,17 @@ export class ResourceRepository {
           target,
           type,
           description,
+          now,
+          now,
+        ),
+      );
+      middleSchoolMathRelations.forEach((relation) =>
+        insertRelation.run(
+          `kr_${relation.sourceNodeId}_${relation.type}_${relation.targetNodeId}`,
+          relation.sourceNodeId,
+          relation.targetNodeId,
+          relation.type,
+          relation.description,
           now,
           now,
         ),
