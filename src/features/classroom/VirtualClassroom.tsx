@@ -258,8 +258,8 @@ export default function VirtualClassroom({
   if (!activeClass) return null;
 
   return (
-    <div className="space-y-4 animate-fade-in" id="classroom-page">
-      <header className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
+    <div className="flex h-full min-h-0 flex-col gap-4 animate-fade-in" id="classroom-page">
+      <header className="flex shrink-0 flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100">
             <GraduationCap className="h-5 w-5 text-emerald-700" />
@@ -315,22 +315,22 @@ export default function VirtualClassroom({
       </header>
 
       {message && (
-        <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+        <div className={`flex shrink-0 items-center gap-2 rounded-md border px-3 py-2 text-sm ${message.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
           {message.type === 'error' ? <AlertCircle className="h-4 w-4 shrink-0" /> : <Check className="h-4 w-4 shrink-0" />}
           {message.text}
         </div>
       )}
 
       {loading || !activeLayout ? (
-        <div className="flex min-h-96 items-center justify-center text-sm text-slate-500">
+        <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-slate-500">
           <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />读取座位表
         </div>
       ) : (
-        <div className={`grid gap-5 ${editMode ? 'xl:grid-cols-[minmax(0,1fr)_340px]' : ''}`}>
+        <div className={`grid min-h-0 flex-1 gap-5 ${editMode ? 'overflow-y-auto xl:grid-cols-[minmax(0,1fr)_340px] xl:overflow-hidden' : 'overflow-hidden'}`}>
           {editMode && <div className="xl:hidden">{unassignedPanel}</div>}
-          <section className="min-w-0 space-y-4">
+          <section className="flex min-h-0 min-w-0 flex-col gap-3">
             {editMode && (
-              <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 pb-3">
+              <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-slate-200 pb-3">
                 <span className="text-xs font-semibold text-slate-500">行数</span>
                 <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
                   <button type="button" title="减少一行" onClick={() => resizeLayout(draft.rowCount - 1, draft.columnCount)} className="p-2 text-slate-600"><Minus className="h-4 w-4" /></button>
@@ -349,57 +349,60 @@ export default function VirtualClassroom({
               </div>
             )}
 
-            <div className="overflow-x-auto rounded-md border border-slate-200 bg-slate-50 p-3 sm:p-5 dark:border-zinc-800 dark:bg-zinc-950/40">
-              <div
-                className="grid gap-2.5"
-                style={{
-                  gridTemplateColumns: `repeat(${activeLayout.columnCount}, minmax(74px, 1fr))`,
-                  minWidth: `${activeLayout.columnCount * 82}px`
-                }}
-              >
-                {Array.from({ length: activeLayout.rowCount * activeLayout.columnCount }, (_, visualIndex) => {
-                  const visualRow = Math.floor(visualIndex / activeLayout.columnCount);
-                  const column = visualIndex % activeLayout.columnCount;
-                  const seatIndex = (activeLayout.rowCount - 1 - visualRow) * activeLayout.columnCount + column;
-                  const assignment = activeLayout.seats.find(seat => seat.seatIndex === seatIndex);
-                  const student = assignment ? studentById.get(assignment.studentId) : undefined;
-                  const isPlacement = student?.id === placementStudentId;
-                  return (
-                    <button
-                      type="button"
-                      key={seatIndex}
-                      onClick={() => handleSeatClick(seatIndex)}
-                      className={`relative flex aspect-[1.12] min-h-18 flex-col items-center justify-center rounded-md border p-1.5 text-center transition-colors ${
-                        student
-                          ? isPlacement
-                            ? 'border-amber-500 bg-amber-50 ring-2 ring-amber-200'
-                            : 'border-slate-200 bg-white hover:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900'
-                          : editMode
-                            ? 'border-dashed border-slate-300 bg-white/60 hover:border-emerald-400 hover:bg-emerald-50/50'
-                            : 'cursor-default border-dashed border-slate-200 bg-transparent'
-                      }`}
-                      aria-label={student ? `${student.name}，${student.studentNo}` : `空位 ${seatIndex + 1}`}
-                    >
-                      <span className="absolute left-1.5 top-1 text-[9px] text-slate-400">{seatIndex + 1}</span>
-                      {student ? (
-                        <>
-                          <span className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full ${statusMeta[student.status].dot}`} />
-                          <span className="max-w-full truncate text-xs font-bold text-slate-800 dark:text-slate-100">{student.name}</span>
-                          <span className="mt-0.5 text-[10px] text-slate-400">{student.studentNo}</span>
-                          {student.isRepresentative && <Award className="mt-1 h-3.5 w-3.5 text-amber-500" aria-label="课代表" />}
-                        </>
-                      ) : (
-                        <span className="text-[11px] text-slate-400">空位</span>
-                      )}
-                    </button>
-                  );
-                })}
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/40 sm:p-4">
+              <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden">
+                <div
+                  className="grid h-full gap-1.5 sm:gap-2"
+                  style={{
+                    gridTemplateColumns: `repeat(${activeLayout.columnCount}, minmax(74px, 1fr))`,
+                    gridTemplateRows: `repeat(${activeLayout.rowCount}, minmax(0, 1fr))`,
+                    minWidth: `${activeLayout.columnCount * 82}px`
+                  }}
+                >
+                  {Array.from({ length: activeLayout.rowCount * activeLayout.columnCount }, (_, visualIndex) => {
+                    const visualRow = Math.floor(visualIndex / activeLayout.columnCount);
+                    const column = visualIndex % activeLayout.columnCount;
+                    const seatIndex = (activeLayout.rowCount - 1 - visualRow) * activeLayout.columnCount + column;
+                    const assignment = activeLayout.seats.find(seat => seat.seatIndex === seatIndex);
+                    const student = assignment ? studentById.get(assignment.studentId) : undefined;
+                    const isPlacement = student?.id === placementStudentId;
+                    return (
+                      <button
+                        type="button"
+                        key={seatIndex}
+                        onClick={() => handleSeatClick(seatIndex)}
+                        className={`relative flex min-h-0 overflow-hidden rounded-md border p-1.5 text-center transition-colors ${
+                          student
+                            ? isPlacement
+                              ? 'border-amber-500 bg-amber-50 ring-2 ring-amber-200'
+                              : 'border-slate-200 bg-white hover:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900'
+                            : editMode
+                              ? 'border-dashed border-slate-300 bg-white/60 hover:border-emerald-400 hover:bg-emerald-50/50'
+                              : 'cursor-default border-dashed border-slate-200 bg-transparent'
+                        }`}
+                        aria-label={student ? `${student.name}，${student.studentNo}` : `空位 ${seatIndex + 1}`}
+                      >
+                        <span className="absolute left-1.5 top-1 text-[9px] text-slate-400">{seatIndex + 1}</span>
+                        {student ? (
+                          <span className="m-auto flex min-w-0 flex-col items-center justify-center leading-tight">
+                            <span className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full ${statusMeta[student.status].dot}`} />
+                            <span className="max-w-full truncate text-xs font-bold text-slate-800 dark:text-slate-100">{student.name}</span>
+                            <span className="mt-0.5 text-[10px] text-slate-400">{student.studentNo}</span>
+                            {student.isRepresentative && <Award className="absolute bottom-1 right-1.5 h-3.5 w-3.5 text-amber-500" aria-label="课代表" />}
+                          </span>
+                        ) : (
+                          <span className="m-auto text-[11px] text-slate-400">空位</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="mx-auto mb-5 mt-6 flex h-9 w-36 items-center justify-center rounded-sm border border-amber-200 bg-amber-50 text-xs font-semibold text-amber-900">讲台</div>
-              <div className="mx-auto flex h-11 min-w-80 max-w-3xl items-center justify-center rounded-sm bg-slate-800 text-xs font-semibold text-white">黑板</div>
+              <div className="mx-auto my-3 flex h-9 w-36 shrink-0 items-center justify-center rounded-sm border border-amber-200 bg-amber-50 text-xs font-semibold text-amber-900">讲台</div>
+              <div className="mx-auto flex h-11 min-w-80 max-w-3xl shrink-0 items-center justify-center rounded-sm bg-slate-800 text-xs font-semibold text-white">黑板</div>
             </div>
 
-            <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-500">
+            <div className="flex shrink-0 flex-wrap gap-x-5 gap-y-2 text-xs text-slate-500">
               {(Object.keys(statusMeta) as Student['status'][]).map(status => (
                 <span key={status} className="inline-flex items-center gap-1.5">
                   <span className={`h-2.5 w-2.5 rounded-full ${statusMeta[status].dot}`} />
