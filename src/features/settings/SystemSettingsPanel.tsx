@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { BookOpen, Database, Palette, Save, Settings2, Sliders, UserRound } from 'lucide-react';
-import { SchoolClass } from '../../domain/types';
+import { SchedulePeriod, SchoolClass } from '../../domain/types';
 
 interface SystemSettingsPanelProps {
   lowConfidenceThreshold: number;
@@ -15,6 +15,10 @@ interface SystemSettingsPanelProps {
   onUpdateOcrThresholds: (humanReview: number, autoPass: number) => void;
   showWeekends: boolean;
   onShowWeekendsChange: (value: boolean) => void;
+  schedulePeriods: SchedulePeriod[];
+  onSaveSchedulePeriods: (periods: SchedulePeriod[]) => Promise<void>;
+  requestedSection: 'schedule-periods' | null;
+  onRequestedSectionHandled: () => void;
   classes: SchoolClass[];
   selectedClassId: string;
   onSelectClass: (classId: string) => void;
@@ -47,6 +51,10 @@ export default function SystemSettingsPanel({
   onUpdateOcrThresholds,
   showWeekends,
   onShowWeekendsChange,
+  schedulePeriods,
+  onSaveSchedulePeriods,
+  requestedSection,
+  onRequestedSectionHandled,
   classes,
   selectedClassId,
   onSelectClass,
@@ -71,6 +79,19 @@ export default function SystemSettingsPanel({
   const [archivePolicy, setArchivePolicy] = useState('按学期归档');
   const [exportFormat, setExportFormat] = useState('PDF + Excel');
   const [theme, setTheme] = useState('morandi-green');
+  const [localSchedulePeriods, setLocalSchedulePeriods] = useState(schedulePeriods);
+
+  useEffect(() => setLocalSchedulePeriods(schedulePeriods), [schedulePeriods]);
+
+  useEffect(() => {
+    if (requestedSection !== 'schedule-periods') return;
+    setActiveTab('teaching');
+    const timeout = window.setTimeout(() => {
+      document.getElementById('schedule-period-settings')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      onRequestedSectionHandled();
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [onRequestedSectionHandled, requestedSection]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -90,10 +111,19 @@ export default function SystemSettingsPanel({
     }
   }, [theme]);
 
-  const handleSaveSettings = () => {
+  const handleSaveSettings = async () => {
+    if (localSchedulePeriods.some(period => !period.label.trim() || period.startTime >= period.endTime)) {
+      onShowToast('请检查学校作息：名称不能为空，结束时间须晚于开始时间');
+      return;
+    }
     onUpdateThreshold(localThreshold);
     onUpdateOcrThresholds(localOcrHumanThreshold, localOcrAutoThreshold);
-    onShowToast('系统设置已保存');
+    try {
+      await onSaveSchedulePeriods(localSchedulePeriods);
+      onShowToast('系统设置已保存');
+    } catch {
+      onShowToast('学校作息保存失败，请稍后重试');
+    }
   };
 
   return (
@@ -105,7 +135,7 @@ export default function SystemSettingsPanel({
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">配置教师信息、教学默认项、AI 参数、数据存储和外观偏好。</p>
         </div>
         <button
-          onClick={handleSaveSettings}
+          onClick={() => void handleSaveSettings()}
           className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-2xl text-sm font-bold flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-700/10 active:scale-95 transition-all"
         >
           <Save className="w-4 h-4" />
@@ -168,6 +198,27 @@ export default function SystemSettingsPanel({
               </span>
               <input type="checkbox" checked={showWeekends} onChange={event => onShowWeekendsChange(event.target.checked)} className="h-4 w-4 accent-emerald-700" />
             </label>
+            <section id="schedule-period-settings" className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:col-span-2 dark:border-zinc-800 dark:bg-zinc-900/60">
+              <div>
+                <strong className="block text-sm text-slate-700 dark:text-slate-200">学校作息时间</strong>
+                <span className="mt-1 block text-xs text-slate-400">统一用于个人课表、班级课表和手动排课。</span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {localSchedulePeriods.map((period, index) => (
+                  <div key={period.period} className="grid grid-cols-[76px_1fr_12px_1fr] items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 dark:border-zinc-700 dark:bg-zinc-950">
+                    <input
+                      value={period.label}
+                      aria-label={`第${period.period}节名称`}
+                      onChange={event => setLocalSchedulePeriods(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item))}
+                      className="min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs font-bold dark:border-zinc-700 dark:bg-zinc-900"
+                    />
+                    <input type="time" value={period.startTime} aria-label={`${period.label}开始时间`} onChange={event => setLocalSchedulePeriods(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, startTime: event.target.value } : item))} className="min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900" />
+                    <span className="text-center text-slate-400">—</span>
+                    <input type="time" value={period.endTime} aria-label={`${period.label}结束时间`} onChange={event => setLocalSchedulePeriods(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, endTime: event.target.value } : item))} className="min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900" />
+                  </div>
+                ))}
+              </div>
+            </section>
           </div>
         )}
 

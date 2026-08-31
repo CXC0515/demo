@@ -9,7 +9,7 @@ import { createNavGroups, PageId } from './app/navigation';
 
 // Import Types and Mock Data
 import {
-  Student, SchoolClass, WorkbenchTask, ScheduleItem,
+  Student, SchoolClass, WorkbenchTask, ScheduleItem, SchedulePeriod,
   TimerReminder, ReviewItem, WorkflowState, TeacherObservation, RosterStudent, KnowledgeNode
 } from './domain/types';
 import { createEmptyWorkflowState } from './domain/gradingTask';
@@ -34,7 +34,7 @@ import ScheduleReminder from './features/schedule/ScheduleReminder';
 import SystemSettings from './features/settings/SystemSettingsPanel';
 import KnowledgeLibrary from './features/knowledge/KnowledgeLibrary';
 import { getKnowledgeGraph } from './services/resourceApi';
-import { getScheduleWorkspace, removeReminder, removeScheduleItem, saveReminder, saveScheduleBatch, saveScheduleItem } from './services/scheduleApi';
+import { getScheduleWorkspace, removeReminder, removeScheduleItem, saveReminder, saveScheduleBatch, saveScheduleItem, saveSchedulePeriods } from './services/scheduleApi';
 import TagManagement from './features/tags/TagManagement';
 import LessonPlanWorkspace from './features/lesson-plan/LessonPlanWorkspace';
 import GradingWorkspace from './features/grading/GradingWorkspace';
@@ -87,7 +87,9 @@ export default function App() {
   const [tasks, setTasks] = useState<WorkbenchTask[]>([]);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [reminders, setReminders] = useState<TimerReminder[]>([]);
+  const [schedulePeriods, setSchedulePeriods] = useState<SchedulePeriod[]>([]);
   const [showWeekends, setShowWeekends] = useState(() => localStorage.getItem('schedule-show-weekends') === 'true');
+  const [settingsRequestedSection, setSettingsRequestedSection] = useState<'schedule-periods' | null>(null);
   const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([]);
   const [workflowStates, setWorkflowStates] = useState<Record<string, WorkflowState>>({});
   const [knowledgeNodes, setKnowledgeNodes] = useState<KnowledgeNode[]>([]);
@@ -138,6 +140,7 @@ export default function App() {
     void getScheduleWorkspace().then(workspace => {
       setSchedule(workspace.schedule);
       setReminders(workspace.reminders);
+      setSchedulePeriods(workspace.periods);
     }).catch(() => undefined);
   }, [loadKnowledgeCatalog]);
 
@@ -555,7 +558,12 @@ export default function App() {
               schedule={schedule}
               reminders={reminders}
               classes={classes}
+              periods={schedulePeriods}
               showWeekends={showWeekends}
+              onOpenPeriodSettings={() => {
+                setSettingsRequestedSection('schedule-periods');
+                setActivePage('settings');
+              }}
               onAddScheduleItem={handleAddScheduleItem}
               onUpdateScheduleItem={handleUpdateScheduleItem}
               onDeleteScheduleItem={handleDeleteScheduleItem}
@@ -662,6 +670,13 @@ export default function App() {
                 setShowWeekends(value);
                 localStorage.setItem('schedule-show-weekends', String(value));
               }}
+              schedulePeriods={schedulePeriods}
+              onSaveSchedulePeriods={async periods => {
+                const saved = await saveSchedulePeriods(periods);
+                setSchedulePeriods(saved);
+              }}
+              requestedSection={settingsRequestedSection}
+              onRequestedSectionHandled={() => setSettingsRequestedSection(null)}
               classes={classes}
               selectedClassId={selectedClassId}
               onSelectClass={setSelectedClassId}

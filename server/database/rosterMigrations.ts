@@ -148,6 +148,28 @@ const migrations: Migration[] = [
         updated_at TEXT NOT NULL
       );
     `
+  },
+  {
+    version: 5,
+    sql: `
+      CREATE TABLE schedule_periods (
+        period INTEGER PRIMARY KEY CHECK (period BETWEEN 1 AND 12),
+        label TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT INTO schedule_periods (period, label, start_time, end_time, updated_at) VALUES
+        (1, '第一节', '08:00', '08:45', CURRENT_TIMESTAMP),
+        (2, '第二节', '08:55', '09:40', CURRENT_TIMESTAMP),
+        (3, '第三节', '10:00', '10:45', CURRENT_TIMESTAMP),
+        (4, '第四节', '10:55', '11:40', CURRENT_TIMESTAMP),
+        (5, '第五节', '13:30', '14:15', CURRENT_TIMESTAMP),
+        (6, '第六节', '14:25', '15:10', CURRENT_TIMESTAMP),
+        (7, '第七节', '15:20', '16:05', CURRENT_TIMESTAMP),
+        (8, '第八节', '16:15', '17:00', CURRENT_TIMESTAMP);
+    `
   }
 ];
 

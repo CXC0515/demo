@@ -9,7 +9,7 @@ import path from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
-import { deleteReminder, deleteScheduleItem, listReminders, listScheduleItems, saveReminder, saveScheduleItem, saveScheduleItems } from '../repositories/scheduleRepository';
+import { deleteReminder, deleteScheduleItem, listReminders, listScheduleItems, listSchedulePeriods, saveReminder, saveScheduleItem, saveScheduleItems, saveSchedulePeriods } from '../repositories/scheduleRepository';
 import { importScheduleDocument } from '../services/schedule/scheduleImportService';
 
 const router = Router();
@@ -24,8 +24,19 @@ const reminderSchema = z.object({
   time: z.string().trim().min(1).max(100), repeatRule: z.string().trim().min(1).max(80), status: z.enum(['active', 'inactive']),
   important: z.boolean().default(false), urgent: z.boolean().default(false), dueAt: z.string().max(40).optional()
 });
+const periodSchema = z.object({
+  period: z.number().int().min(1).max(12), label: z.string().trim().min(1).max(30),
+  startTime: z.string().regex(/^\d{2}:\d{2}$/), endTime: z.string().regex(/^\d{2}:\d{2}$/)
+}).refine(item => item.startTime < item.endTime, { message: 'PERIOD_END_MUST_FOLLOW_START' });
 
-router.get('/schedule', (_request, response) => response.json({ schedule: listScheduleItems(), reminders: listReminders() }));
+router.get('/schedule', (_request, response) => response.json({ schedule: listScheduleItems(), reminders: listReminders(), periods: listSchedulePeriods() }));
+router.put('/schedule/periods', (request, response) => {
+  const parsed = z.object({ periods: z.array(periodSchema).min(1).max(12) }).superRefine((value, context) => {
+    if (new Set(value.periods.map(item => item.period)).size !== value.periods.length) context.addIssue({ code: 'custom', message: 'DUPLICATE_PERIOD' });
+  }).safeParse(request.body);
+  if (!parsed.success) { response.status(400).json({ code: 'INVALID_SCHEDULE_PERIODS', issues: parsed.error.issues }); return; }
+  response.json({ periods: saveSchedulePeriods(parsed.data.periods) });
+});
 router.post('/schedule/items', (request, response) => {
   const parsed = scheduleSchema.safeParse(request.body);
   if (!parsed.success) { response.status(400).json({ code: 'INVALID_SCHEDULE_ITEM', issues: parsed.error.issues }); return; }

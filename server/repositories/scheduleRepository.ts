@@ -4,7 +4,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { ScheduleItem, TimerReminder } from '../../src/domain/types';
+import { ScheduleItem, SchedulePeriod, TimerReminder } from '../../src/domain/types';
 import { getRosterDatabase } from '../database/rosterDatabase';
 
 const database = getRosterDatabase();
@@ -18,6 +18,7 @@ interface ReminderRow {
   id: string; name: string; class_id: string | null; class_name: string; time_text: string; repeat_rule: string;
   status: TimerReminder['status']; important: number; urgent: number; due_at: string | null;
 }
+interface PeriodRow { period: number; label: string; start_time: string; end_time: string; }
 
 const toSchedule = (row: ScheduleRow): ScheduleItem => ({
   id: row.id, day: row.day, period: row.period, title: row.title, classId: row.class_id ?? '', className: row.class_name,
@@ -30,6 +31,17 @@ const toReminder = (row: ReminderRow): TimerReminder => ({
 
 export const listScheduleItems = () => (database.prepare('SELECT * FROM schedule_items ORDER BY day, period, created_at').all() as ScheduleRow[]).map(toSchedule);
 export const listReminders = () => (database.prepare('SELECT * FROM timer_reminders ORDER BY status, COALESCE(due_at, updated_at), created_at').all() as ReminderRow[]).map(toReminder);
+export const listSchedulePeriods = (): SchedulePeriod[] => (database.prepare('SELECT * FROM schedule_periods ORDER BY period').all() as PeriodRow[]).map(row => ({ period: row.period, label: row.label, startTime: row.start_time, endTime: row.end_time }));
+
+export const saveSchedulePeriods = (periods: SchedulePeriod[]) => database.transaction(() => {
+  const statement = database.prepare(`
+    INSERT INTO schedule_periods (period, label, start_time, end_time, updated_at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(period) DO UPDATE SET label=excluded.label, start_time=excluded.start_time, end_time=excluded.end_time, updated_at=excluded.updated_at
+  `);
+  const timestamp = now();
+  periods.forEach(item => statement.run(item.period, item.label, item.startTime, item.endTime, timestamp));
+  return listSchedulePeriods();
+})();
 
 export const saveScheduleItem = (input: ScheduleItem): ScheduleItem => {
   const id = input.id || randomUUID();

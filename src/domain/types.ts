@@ -337,6 +337,13 @@ export interface ScheduleItem {
   confidence?: number;
 }
 
+export interface SchedulePeriod {
+  period: number;
+  label: string;
+  startTime: string;
+  endTime: string;
+}
+
 export interface TimerReminder {
   id: string;
   name: string;

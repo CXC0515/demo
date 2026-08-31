@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { ScheduleItem, TimerReminder } from '../domain/types';
+import { ScheduleItem, SchedulePeriod, TimerReminder } from '../domain/types';
 
 const readError = async (response: Response) => ((await response.json().catch(() => ({}))) as { code?: string }).code ?? `HTTP_${response.status}`;
 const jsonRequest = async <T>(url: string, init?: RequestInit) => {
@@ -12,7 +12,8 @@ const jsonRequest = async <T>(url: string, init?: RequestInit) => {
   return response.status === 204 ? undefined as T : await response.json() as T;
 };
 
-export const getScheduleWorkspace = () => jsonRequest<{ schedule: ScheduleItem[]; reminders: TimerReminder[] }>('/api/schedule');
+export const getScheduleWorkspace = () => jsonRequest<{ schedule: ScheduleItem[]; reminders: TimerReminder[]; periods: SchedulePeriod[] }>('/api/schedule');
+export const saveSchedulePeriods = (periods: SchedulePeriod[]) => jsonRequest<{ periods: SchedulePeriod[] }>('/api/schedule/periods', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ periods }) }).then(body => body.periods);
 export const saveScheduleItem = (item: ScheduleItem) => jsonRequest<{ item: ScheduleItem }>('/api/schedule/items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) }).then(body => body.item);
 export const saveScheduleBatch = (items: ScheduleItem[]) => jsonRequest<{ items: ScheduleItem[] }>('/api/schedule/items/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(body => body.items);
 export const removeScheduleItem = (id: string) => jsonRequest<void>(`/api/schedule/items/${encodeURIComponent(id)}`, { method: 'DELETE' });

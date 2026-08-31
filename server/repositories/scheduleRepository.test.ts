@@ -22,3 +22,9 @@ test('persists schedules and reminder quadrant fields', () => {
   assert.equal(repository.listReminders()[0].important, true);
   assert.equal(repository.listReminders()[0].urgent, false);
 });
+
+test('persists the school-wide period timetable', () => {
+  assert.equal(repository.listSchedulePeriods()[0].startTime, '08:00');
+  const saved = repository.saveSchedulePeriods([{ period: 1, label: '早读', startTime: '07:40', endTime: '08:20' }]);
+  assert.deepEqual(saved[0], { period: 1, label: '早读', startTime: '07:40', endTime: '08:20' });
+});
