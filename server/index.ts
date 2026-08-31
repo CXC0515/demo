@@ -11,6 +11,7 @@ import gradingTasksRouter from './routes/gradingTasks';
 import rosterRouter from './routes/roster';
 import classroomRouter from './routes/classroom';
 import gradingTaskManagementRouter from './routes/gradingTaskManagement';
+import resourcesRouter from './routes/resources';
 import { getModelConfig, isModelConfigured } from './config/modelConfig';
 
 const app = express();
@@ -25,6 +26,7 @@ app.use('/api', rosterRouter);
 app.use('/api', classroomRouter);
 app.use('/api', gradingTaskManagementRouter);
 app.use('/api/grading-tasks', gradingTasksRouter);
+app.use('/api', resourcesRouter);
 
 app.listen(port, () => {
   console.log(`API server listening on http://localhost:${port}`);
