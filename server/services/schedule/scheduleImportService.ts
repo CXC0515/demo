@@ -27,6 +27,28 @@ const resultSchema = z.object({
   warnings: z.array(z.string().max(300)).max(30).default([])
 });
 
+const chineseDigits: Record<string, number> = { '零': 0, '〇': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
+const parseChineseNumber = (value: string) => {
+  if (/^\d+$/.test(value)) return Number(value);
+  if (value === '十') return 10;
+  const [tens, ones = ''] = value.split('十');
+  if (value.includes('十')) return (tens ? chineseDigits[tens] ?? 0 : 1) * 10 + (ones ? chineseDigits[ones] ?? 0 : 0);
+  return chineseDigits[value];
+};
+const classIdentity = (value: string) => {
+  const compact = value.normalize('NFKC').replace(/[\s()（）\-_—]/g, '');
+  const juniorMatch = compact.match(/初(?:中)?([一二三123])/);
+  const gradeMatch = compact.match(/([零〇一二两三四五六七八九十\d]+)年级/);
+  const withoutGrade = compact
+    .replace(/初(?:中)?[一二三123]/, '')
+    .replace(/[零〇一二两三四五六七八九十\d]+年级/, '');
+  const classMatch = withoutGrade.match(/([零〇一二两三四五六七八九十\d]+)班/);
+  const juniorGrade = juniorMatch ? parseChineseNumber(juniorMatch[1]) : undefined;
+  const grade = juniorGrade ? juniorGrade + 6 : gradeMatch ? parseChineseNumber(gradeMatch[1]) : undefined;
+  const classNumber = classMatch ? parseChineseNumber(classMatch[1]) : undefined;
+  return grade && classNumber ? `${grade}:${classNumber}` : compact.toLocaleLowerCase();
+};
+
 export interface ScheduleImportInput {
   assetId: string;
   fileName: string;
@@ -51,8 +73,17 @@ export const structureScheduleText = async (
     input.scope === 'teacher'
       ? '这是教师个人课表：title 填课程名称，className 填上课班级，teacherName 可留空。'
       : `这是班级课表：班级固定为 ${requestedClass?.name ?? '待确认'}，title 填课程名称，teacherName 填任课教师。`,
+    [
+      '班级匹配规则：',
+      '1. 将 OCR 中的班级名称与“已知班级”做语义匹配。',
+      '2. 匹配时允许年级别称、中文与阿拉伯数字、括号、空格及常见 OCR 误差；“七年级”与“初一”表示同一年级，“十班”“10班”“（10）班”表示同一班级编号。',
+      '3. 例如：“七年级十班”可以匹配“初一（10）班”。这只是匹配规则示例，不得把其他结果固定为该班级。',
+      '4. 能唯一匹配时，className 必须返回“已知班级”中的完整标准名称，不得保留 OCR 的非标准写法。',
+      '5. 有多个合理候选或无法可靠匹配时，不要猜测，className 返回空字符串，并在 warnings 中说明待确认内容。',
+      '6. 不得创造“已知班级”列表中不存在的班级。'
+    ].join('\n'),
     'time 尽量使用原图时间；无法确认写“待确认”。confidence 为该项识别置信度。',
-    '只返回 JSON：{"items":[{"day":1,"period":1,"title":"语文","time":"08:00 - 08:45","className":"七年级 5 班","teacherName":"王老师","confidence":0.9}],"warnings":[]}',
+    '只返回 JSON：{"items":[{"day":1,"period":1,"title":"语文","time":"08:00 - 08:45","className":"<已知班级中唯一匹配的标准名称>","teacherName":"王老师","confidence":0.9}],"warnings":[]}',
     `已知班级：${classes.map(item => item.name).join('、')}`,
     `OCR 文本：\n${text.slice(0, 30000)}`
   ].join('\n\n');
@@ -71,22 +102,30 @@ export const structureScheduleText = async (
   const content = payload.choices?.[0]?.message?.content;
   if (!content) throw new Error('MODEL_EMPTY_RESPONSE');
   const parsed = resultSchema.parse(extractJson(content));
-  const classIdByName = new Map(classes.map(item => [item.name, item.id]));
+  const classesByIdentity = new Map<string, typeof classes>();
+  classes.forEach(item => {
+    const identity = classIdentity(item.name);
+    classesByIdentity.set(identity, [...(classesByIdentity.get(identity) ?? []), item]);
+  });
   return {
     warnings: parsed.warnings,
-    items: parsed.items.map(item => ({
-      id: randomUUID(),
-      day: item.day,
-      period: item.period,
-      title: item.title,
-      classId: input.scope === 'class' ? input.classId : classIdByName.get(item.className) ?? '',
-      className: input.scope === 'class' ? requestedClass?.name ?? item.className : item.className,
-      type: 'class' as const,
-      time: item.time || '待确认',
-      scope: input.scope,
-      teacherName: item.teacherName,
-      confidence: item.confidence
-    } satisfies ScheduleItem)).sort((left, right) => left.day - right.day || left.period - right.period)
+    items: parsed.items.map(item => {
+      const matches = item.className ? classesByIdentity.get(classIdentity(item.className)) ?? [] : [];
+      const matchedClass = matches.length === 1 ? matches[0] : undefined;
+      return {
+        id: randomUUID(),
+        day: item.day,
+        period: item.period,
+        title: item.title,
+        classId: input.scope === 'class' ? input.classId : matchedClass?.id ?? '',
+        className: input.scope === 'class' ? requestedClass?.name ?? item.className : matchedClass?.name ?? item.className,
+        type: 'class' as const,
+        time: item.time || '待确认',
+        scope: input.scope,
+        teacherName: item.teacherName,
+        confidence: item.confidence
+      } satisfies ScheduleItem;
+    }).sort((left, right) => left.day - right.day || left.period - right.period)
   };
 };
 

@@ -37,12 +37,30 @@ const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
 ];
 
 const themeOptions = [
-  { value: 'morandi-green', label: '莫兰迪绿', swatches: ['#5a7e64', '#4f7890', '#a27d43', '#a45e68', '#76618b'] },
-  { value: 'fog-blue', label: '雾蓝', swatches: ['#3e7197', '#42818b', '#5c70a5', '#438071', '#786ba0'] },
-  { value: 'dusty-pink', label: '豆沙粉', swatches: ['#a85160', '#a8654d', '#9a5b85', '#84669a', '#96762d'] },
-  { value: 'warm-gray', label: '暖灰', swatches: ['#796444', '#686d49', '#8f614f', '#526c5b', '#596d79'] },
-  { value: 'dark-graphite', label: '深色石墨', swatches: ['#8dc4a0', '#8bc2d9', '#d1b66f', '#d68f9a', '#b5a1ce'] }
+  { value: 'song-porcelain-green', label: '宋瓷青绿', swatches: ['#2E6A67', '#5E8C87', '#A9C8BE', '#D7E6DB', '#F1F0E8'] },
+  { value: 'bianjing-twilight', label: '汴京暮色', swatches: ['#4F6072', '#B56A58', '#D9B07C', '#8DB8A7', '#F1EADF'] },
+  { value: 'rouge-warm-gray', label: '燕脂暖灰', swatches: ['#A45668', '#D59BA8', '#C7C1B5', '#E7DDD3', '#F5F0EA'] },
+  { value: 'green-tile-bamboo', label: '青瓦竹影', swatches: ['#4A6460', '#7A9387', '#BFD0B8', '#DDE6D6', '#F3F1E6'] },
+  { value: 'tea-smoke-beige', label: '茶烟米褐', swatches: ['#7E6554', '#A78A73', '#D4B79D', '#E9D6BE', '#F5EEE4'] },
+  { value: 'sophora-yellow-stone-green', label: '槐黄石绿', swatches: ['#6C7F4F', '#C6A348', '#D9C89A', '#C6D0B0', '#F0EADB'] },
+  { value: 'ink-red-gold-sand', label: '墨红金砂', swatches: ['#8C2F2D', '#3E3A39', '#9B8778', '#D1BB93', '#F0E8DC'] },
+  { value: 'mist-blue-silver-gray', label: '雾蓝银灰', swatches: ['#607E95', '#A8C3D6', '#B8AEA6', '#E2D0BC', '#F3EEE8'] }
 ];
+const defaultTheme = 'song-porcelain-green';
+const themeValues = new Set(themeOptions.map(option => option.value));
+const readStoredTheme = () => {
+  if (typeof window === 'undefined') return defaultTheme;
+  const storedTheme = localStorage.getItem('app-theme');
+  return storedTheme && themeValues.has(storedTheme) ? storedTheme : defaultTheme;
+};
+const applyTheme = (theme: string) => {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  root.setAttribute('data-theme', theme);
+  root.setAttribute('data-theme-forced', 'true');
+  root.classList.remove('dark-theme-active');
+};
+applyTheme(readStoredTheme());
 const periodLabels = ['第一节', '第二节', '第三节', '第四节', '第五节', '第六节', '第七节', '第八节', '第九节', '第十节', '第十一节', '第十二节'];
 const addMinutes = (time: string, minutes: number) => {
   const [hour, minute] = time.split(':').map(Number);
@@ -86,7 +104,7 @@ export default function SystemSettingsPanel({
   const [imageSavePolicy, setImageSavePolicy] = useState('保存原图与裁剪图');
   const [archivePolicy, setArchivePolicy] = useState('按学期归档');
   const [exportFormat, setExportFormat] = useState('PDF + Excel');
-  const [theme, setTheme] = useState(() => localStorage.getItem('app-theme') || 'morandi-green');
+  const [theme, setTheme] = useState(readStoredTheme);
   const [localSchedulePeriods, setLocalSchedulePeriods] = useState(schedulePeriods);
   const [isScheduleSaving, setIsScheduleSaving] = useState(false);
   const [scheduleSaveError, setScheduleSaveError] = useState('');
@@ -107,22 +125,8 @@ export default function SystemSettingsPanel({
   }, [onRequestedSectionHandled, requestedSection]);
 
   useEffect(() => {
-    const root = document.documentElement;
     localStorage.setItem('app-theme', theme);
-    if (theme === 'morandi-green') {
-      root.removeAttribute('data-theme');
-      root.removeAttribute('data-theme-forced');
-      root.classList.remove('dark-theme-active');
-      return;
-    }
-
-    root.setAttribute('data-theme', theme);
-    root.setAttribute('data-theme-forced', 'true');
-    if (theme === 'dark-graphite') {
-      root.classList.add('dark-theme-active');
-    } else {
-      root.classList.remove('dark-theme-active');
-    }
+    applyTheme(theme);
   }, [theme]);
 
   const saveSchedulePeriodSettings = async (announce = true) => {
@@ -342,20 +346,24 @@ export default function SystemSettingsPanel({
           <div className="space-y-4">
             <div>
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">主题色</label>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {themeOptions.map(option => (
                   <button
                     key={option.value}
                     onClick={() => setTheme(option.value)}
+                    style={theme === option.value ? { borderColor: option.swatches[0], boxShadow: `0 0 0 2px ${option.swatches[0]}20` } : undefined}
                     className={`rounded-xl border p-3 text-left text-xs font-bold transition-all active:scale-95 ${
                       theme === option.value
-                        ? 'border-emerald-700 bg-white ring-2 ring-emerald-700/15 dark:bg-zinc-900'
+                        ? 'bg-white dark:bg-zinc-900'
                         : 'bg-slate-50 dark:bg-zinc-900/60 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-zinc-800'
                     }`}
                   >
-                    <span className="block">{option.label}</span>
-                    <span className="mt-2 flex gap-1" aria-label={`${option.label}课表色卡`}>
-                      {option.swatches.map(color => <span key={color} className="h-4 flex-1 rounded-sm" style={{ backgroundColor: color }} />)}
+                    <span className="flex items-center justify-between gap-2">
+                      <span>{option.label}</span>
+                      {theme === option.value ? <span className="text-[10px] font-medium" style={{ color: option.swatches[0] }}>已选择</span> : null}
+                    </span>
+                    <span className="mt-3 grid grid-cols-5 overflow-hidden rounded-lg border border-black/5" aria-label={`${option.label}课表色卡`}>
+                      {option.swatches.map(color => <span key={color} className="h-7" style={{ backgroundColor: color }} />)}
                     </span>
                   </button>
                 ))}
@@ -364,7 +372,7 @@ export default function SystemSettingsPanel({
             <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 flex items-start gap-3">
               <Settings2 className="w-5 h-5 text-slate-400 mt-0.5" />
               <p className="text-sm text-slate-500 leading-relaxed">
-                深色模式默认跟随系统。选择“深色石墨”会强制切换为深色主题。
+                页面主色、背景和课表配色会随所选色卡统一切换，并保存在当前设备。
               </p>
             </div>
           </div>
