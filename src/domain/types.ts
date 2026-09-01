@@ -351,13 +351,30 @@ export interface TimerReminder {
   className: string;
   time: string;
   repeatRule: string;
-  status: 'active' | 'inactive';
+  status: 'active' | 'completed' | 'inactive';
   important?: boolean;
   urgent?: boolean;
   dueAt?: string;
   timeKind?: 'none' | 'point' | 'range';
   startAt?: string;
   endAt?: string;
+  completedAt?: string;
+  sortOrder?: number;
+  assumptionWarning?: string;
+  seriesId?: string;
+  occurrenceNumber?: number;
+  generatedFromId?: string;
+  recurrence?: ReminderRecurrence;
+}
+
+export interface ReminderRecurrence {
+  enabled: boolean;
+  unit: 'day' | 'week' | 'month' | 'year';
+  interval: number;
+  weekdays?: number[];
+  monthDays?: number[];
+  endDate?: string;
+  maxOccurrences?: number;
 }
 
 export interface ReminderImportDraft extends TimerReminder {

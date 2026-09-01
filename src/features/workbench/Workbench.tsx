@@ -308,7 +308,7 @@ export default function Workbench({
                     <p className={`pt-2 text-[11px] font-mono font-black ${reminderIsOverdue(rem)?'text-red-700 dark:text-red-400':'text-amber-700 dark:text-amber-400'}`}>{rem.timeKind==='none'?'待定':rem.startAt?.slice(11,16)||rem.time}</p>
                     <div className={`rounded-2xl border border-l-4 p-3 ${reminderIsOverdue(rem)?'border-red-200 border-l-red-500 bg-red-50/70 dark:border-red-900/40 dark:bg-red-950/15':'border-amber-200/70 border-l-amber-500 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/15'}`}>
                       <h5 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{rem.name}</h5>
-                      <p className="text-[10px] text-slate-400 mt-0.5">{reminderIsOverdue(rem)?'已过期':'提醒'}{rem.className?` · ${rem.className}`:''}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">{reminderIsOverdue(rem)?'已过期':'日程'}{rem.className?` · ${rem.className}`:''}</p>
                     </div>
                   </div>
                 ))}

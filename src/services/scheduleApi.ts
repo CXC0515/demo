@@ -22,7 +22,7 @@ export const saveReminderBatch = (reminders: TimerReminder[]) => jsonRequest<{ r
 export const createReminderImportDraft = (text: string) => jsonRequest<{ drafts: ReminderImportDraft[]; warnings: string[] }>('/api/schedule/reminders/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
 export const removeReminder = (id: string) => jsonRequest<void>(`/api/schedule/reminders/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
-export interface ScheduleImportDraft { items: ScheduleItem[]; warnings: string[]; sourceText: string; }
+export interface ScheduleImportDraft { items: ScheduleItem[]; warnings: string[]; sourceText: string; timings?: { enhanceMs: number; paddleMs: number; aiMs: number; totalMs: number }; }
 export const importSchedule = async (file: File, scope: 'teacher' | 'class', classId: string) => {
   const data = new FormData();
   data.append('file', file);

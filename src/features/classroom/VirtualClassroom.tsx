@@ -67,14 +67,16 @@ export default function VirtualClassroom({
   const [submittingObservation, setSubmittingObservation] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const activeClass = classes.find(schoolClass => schoolClass.id === selectedClassId && schoolClass.status === 'active')
+    ?? classes.find(schoolClass => schoolClass.status === 'active');
+  const effectiveClassId = activeClass?.id ?? '';
   const classStudents = useMemo(
     () => students
-      .filter(student => student.classId === selectedClassId)
+      .filter(student => student.classId === effectiveClassId)
       .sort((left, right) => left.studentNo.localeCompare(right.studentNo, 'zh-CN', { numeric: true })),
-    [selectedClassId, students]
+    [effectiveClassId, students]
   );
   const studentById = useMemo(() => new Map(classStudents.map(student => [student.id, student])), [classStudents]);
-  const activeClass = classes.find(schoolClass => schoolClass.id === selectedClassId) ?? classes[0];
   const activeLayout = draft ?? layout;
   const editMode = Boolean(draft);
   const seatedStudentIds = useMemo(
@@ -92,7 +94,11 @@ export default function VirtualClassroom({
     setSelectedStudentId(null);
     setPlacementStudentId(null);
     setMessage(null);
-    getClassroomLayout(selectedClassId)
+    if (!effectiveClassId) {
+      setLoading(false);
+      return;
+    }
+    getClassroomLayout(effectiveClassId)
       .then(nextLayout => {
         if (active) setLayout(nextLayout);
       })
@@ -103,7 +109,7 @@ export default function VirtualClassroom({
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, [selectedClassId]);
+  }, [effectiveClassId]);
 
   useEffect(() => {
     if (!selectedStudent || editMode) return;
@@ -229,7 +235,7 @@ export default function VirtualClassroom({
     setExporting(true);
     setMessage(null);
     try {
-      await exportClassroomLayout(selectedClassId, activeClass.name, includeStudentNo);
+      await exportClassroomLayout(effectiveClassId, activeClass.name, includeStudentNo);
       setMessage({ type: 'success', text: '座位表已导出。' });
     } catch (error) {
       setMessage({ type: 'error', text: `导出失败：${error instanceof Error ? error.message : '未知错误'}` });
@@ -285,7 +291,7 @@ export default function VirtualClassroom({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select
-            value={selectedClassId}
+            value={effectiveClassId}
             onChange={event => onSelectClass(event.target.value)}
             className="h-9 min-w-32 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-200"
             aria-label="切换班级"

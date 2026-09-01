@@ -34,6 +34,16 @@ test('saves reminder batches transactionally', () => {
   assert.equal(saved[1].timeKind, 'range');
 });
 
+test('completing a recurring event creates the next occurrence and reopening removes it', () => {
+  const original = repository.saveReminder({ id: 'recurring-1', name: '周会', classId: '', className: '', time: '2026-09-07 14:00 - 15:00', repeatRule: '每 周', status: 'active', timeKind: 'range', startAt: '2026-09-07T14:00', endAt: '2026-09-07T15:00', recurrence: { enabled: true, unit: 'week', interval: 1, weekdays: [1], maxOccurrences: 3 } });
+  repository.saveReminder({ ...original, status: 'completed' });
+  const generated = repository.listReminders().find(item => item.generatedFromId === original.id);
+  assert.equal(generated?.startAt, '2026-09-14T14:00');
+  assert.equal(generated?.occurrenceNumber, 2);
+  repository.saveReminder({ ...original, status: 'active' });
+  assert.equal(repository.listReminders().some(item => item.generatedFromId === original.id), false);
+});
+
 test('persists the school-wide period timetable', () => {
   assert.equal(repository.listSchedulePeriods()[0].startTime, '08:00');
   repository.saveSchedulePeriods([

@@ -18,8 +18,8 @@
   --theme-primary-light: color-mix(in srgb, var(--palette-1) 11%, transparent);
   --theme-primary-border: color-mix(in srgb, var(--palette-1) 24%, transparent);
   --theme-accent: var(--palette-4);
-  --bg-app: var(--palette-5);
-  --bg-card: color-mix(in srgb, var(--palette-5) 58%, white);
+  --bg-app: #ffffff;
+  --bg-card: #ffffff;
   --border-color: color-mix(in srgb, var(--palette-1) 14%, transparent);
   --text-main: color-mix(in srgb, var(--palette-1) 68%, black);
   --text-secondary: color-mix(in srgb, var(--palette-1) 78%, #6f6f6f);

@@ -64,7 +64,7 @@ const createInitialWorkflowState = (task: WorkbenchTask) => {
 export default function App() {
   // Navigation & View State
   const [activePage, setActivePage] = useState<PageId>('workbench');
-  const [selectedClassId, setSelectedClassId] = useState<string>('c5');
+  const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [studentManagementTargetId, setStudentManagementTargetId] = useState<string | null>(null);
   const [diagnosisRequestedTab, setDiagnosisRequestedTab] = useState<DiagnosisTab | null>(null);
@@ -119,8 +119,7 @@ export default function App() {
       const snapshot = await getRoster();
       setClasses(snapshot.classes);
       setStudents(snapshot.students);
-      const preferredClass = snapshot.classes.find(item => item.id === 'c5' && item.status === 'active')
-        ?? snapshot.classes.find(item => item.status === 'active');
+      const preferredClass = snapshot.classes.find(item => item.status === 'active');
       if (preferredClass) setSelectedClassId(preferredClass.id);
       if (snapshot.students.length) setSelectedStudentId(snapshot.students[0].id);
     } catch (error) {
@@ -183,27 +182,28 @@ export default function App() {
   const handleAddReminder = async (reminder: TimerReminder) => {
     const saved = await saveReminder(reminder);
     setReminders(current => [...current.filter(item => item.id !== saved.id), saved]);
-    triggerToast(`提醒“${saved.name}”已保存`);
+    triggerToast(`日程“${saved.name}”已保存`);
   };
 
   const handleAddReminderBatch = async (items: TimerReminder[]) => {
     const saved = await saveReminderBatch(items);
     setReminders(current => [...current.filter(item => !saved.some(next => next.id === item.id)), ...saved]);
-    triggerToast(`已批量新建 ${saved.length} 条提醒`);
+    triggerToast(`已批量新建 ${saved.length} 条日程`);
   };
 
   const handleToggleReminderStatus = async (reminderId: string) => {
     const current = reminders.find(item => item.id === reminderId);
     if (!current) return;
-    const saved = await saveReminder({ ...current, status: current.status === 'active' ? 'inactive' : 'active' });
-    setReminders(items => items.map(item => item.id === saved.id ? saved : item));
-    triggerToast('提醒状态已更新');
+    await saveReminder({ ...current, status: current.status === 'completed' ? 'active' : current.status === 'inactive' ? 'active' : 'completed' });
+    const workspace = await getScheduleWorkspace();
+    setReminders(workspace.reminders);
+    triggerToast(current.status === 'active' ? '日程已完成' : '日程已恢复');
   };
 
   const handleDeleteReminder = async (reminderId: string) => {
     await removeReminder(reminderId);
     setReminders(current => current.filter(item => item.id !== reminderId));
-    triggerToast('提醒已删除');
+    triggerToast('日程已删除');
   };
 
   // 4. Class actions
@@ -233,6 +233,10 @@ export default function App() {
     try {
       const saved = await toggleRosterClassArchive(classId);
       setClasses(current => current.map(item => item.id === saved.id ? saved : item));
+      if (saved.status === 'archived' && selectedClassId === saved.id) {
+        const fallback = classes.find(item => item.id !== saved.id && item.status === 'active');
+        setSelectedClassId(fallback?.id ?? '');
+      }
       triggerToast(saved.status === 'archived' ? '该班级已归档。' : '该班级已取消归档。');
     } catch (error) {
       triggerToast(`班级状态更新失败：${error instanceof Error ? error.message : '未知错误'}`);
@@ -293,6 +297,7 @@ export default function App() {
     const snapshot = await getRoster();
     setClasses(snapshot.classes);
     setStudents(snapshot.students);
+    if (snapshot.classes.some(item => item.id === classId && item.status === 'active')) setSelectedClassId(classId);
     return result;
   };
 
@@ -454,7 +459,9 @@ export default function App() {
     );
   }
 
-  const selectedClass = classes.find(c => c.id === selectedClassId) ?? classes[0];
+  const selectedClass = classes.find(c => c.id === selectedClassId && c.status === 'active')
+    ?? classes.find(c => c.status === 'active')
+    ?? classes[0];
   const pendingReviewCount = reviewQueue.filter(r => r.status === 'pending').length
     + Object.keys(workflowStates).flatMap(taskId => workflowStates[taskId].questionGradingStates ?? []).flatMap(state => state.calibrationSamples).filter(sample => sample.status !== 'confirmed' && (sample.needsTeacherReview || sample.recognitionConflict || sample.gradingConfidence < lowConfidenceThreshold)).length;
   const activeGradingTaskCount = tasks.filter(task => task.status !== 'completed').length;

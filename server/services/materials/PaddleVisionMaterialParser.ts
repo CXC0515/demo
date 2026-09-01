@@ -54,7 +54,7 @@ export class PaddleVisionMaterialParser implements MaterialParser {
           useOcrForImageBlock: true,
           mergeLayoutBlocks: false,
           layoutShapeMode: 'rect',
-          prettifyMarkdown: true,
+          prettifyMarkdown: !scheduleProfile,
           showFormulaNumber: !scheduleProfile,
           returnMarkdownImages: !scheduleProfile
         }

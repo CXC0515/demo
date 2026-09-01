@@ -22,9 +22,16 @@ const scheduleSchema = z.object({
 });
 const reminderSchema = z.object({
   id: z.string().default(''), name: z.string().trim().min(1).max(160), classId: z.string().default(''), className: z.string().default(''),
-  time: z.string().trim().min(1).max(100), repeatRule: z.string().trim().min(1).max(80), status: z.enum(['active', 'inactive']),
+  time: z.string().trim().min(1).max(100), repeatRule: z.string().trim().min(1).max(80), status: z.enum(['active', 'completed', 'inactive']),
   important: z.boolean().default(false), urgent: z.boolean().default(false), dueAt: z.string().max(40).optional(),
-  timeKind: z.enum(['none', 'point', 'range']).default('none'), startAt: z.string().max(40).optional(), endAt: z.string().max(40).optional()
+  timeKind: z.enum(['none', 'point', 'range']).default('none'), startAt: z.string().max(40).optional(), endAt: z.string().max(40).optional(),
+  completedAt: z.string().max(40).optional(), sortOrder: z.number().int().min(0).default(0), assumptionWarning: z.string().max(200).optional(),
+  seriesId: z.string().max(80).optional(), occurrenceNumber: z.number().int().min(1).default(1), generatedFromId: z.string().max(80).optional(),
+  recurrence: z.object({
+    enabled: z.boolean(), unit: z.enum(['day', 'week', 'month', 'year']), interval: z.number().int().min(1).max(365),
+    weekdays: z.array(z.number().int().min(1).max(7)).max(7).optional(), monthDays: z.array(z.number().int().min(0).max(31)).max(32).optional(),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), maxOccurrences: z.number().int().min(1).max(999).optional()
+  }).optional()
 }).superRefine((item, context) => {
   if (item.timeKind === 'point' && !item.startAt) context.addIssue({ code: 'custom', message: 'REMINDER_POINT_REQUIRES_START' });
   if (item.timeKind === 'range' && (!item.startAt || !item.endAt || item.endAt <= item.startAt)) context.addIssue({ code: 'custom', message: 'REMINDER_RANGE_INVALID' });

@@ -186,6 +186,47 @@ const migrations: Migration[] = [
       CREATE INDEX timer_reminders_time_idx
         ON timer_reminders (status, time_kind, start_at, end_at);
     `
+  },
+  {
+    version: 7,
+    sql: `
+      PRAGMA foreign_keys = OFF;
+      CREATE TABLE timer_reminders_next (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        class_id TEXT REFERENCES classes(id) ON UPDATE CASCADE ON DELETE SET NULL,
+        class_name TEXT NOT NULL DEFAULT '',
+        time_text TEXT NOT NULL,
+        repeat_rule TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'inactive')),
+        important INTEGER NOT NULL DEFAULT 0 CHECK (important IN (0, 1)),
+        urgent INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1)),
+        due_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        time_kind TEXT NOT NULL DEFAULT 'none' CHECK (time_kind IN ('none', 'point', 'range')),
+        start_at TEXT,
+        end_at TEXT,
+        completed_at TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        assumption_warning TEXT NOT NULL DEFAULT '',
+        recurrence_json TEXT,
+        series_id TEXT,
+        occurrence_number INTEGER NOT NULL DEFAULT 1,
+        generated_from_id TEXT
+      );
+      INSERT INTO timer_reminders_next (
+        id, name, class_id, class_name, time_text, repeat_rule, status, important, urgent, due_at,
+        created_at, updated_at, time_kind, start_at, end_at
+      ) SELECT id, name, class_id, class_name, time_text, repeat_rule, status, important, urgent, due_at,
+        created_at, updated_at, time_kind, start_at, end_at FROM timer_reminders;
+      DROP TABLE timer_reminders;
+      ALTER TABLE timer_reminders_next RENAME TO timer_reminders;
+      CREATE INDEX timer_reminders_time_idx ON timer_reminders (status, time_kind, start_at, end_at);
+      CREATE INDEX timer_reminders_quadrant_idx ON timer_reminders (important, urgent, sort_order);
+      CREATE UNIQUE INDEX timer_reminders_generated_from_idx ON timer_reminders (generated_from_id) WHERE generated_from_id IS NOT NULL;
+      PRAGMA foreign_keys = ON;
+    `
   }
 ];
 

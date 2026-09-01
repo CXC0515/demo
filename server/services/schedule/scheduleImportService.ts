@@ -130,19 +130,30 @@ export const structureScheduleText = async (
 };
 
 export const importScheduleDocument = async (input: ScheduleImportInput) => {
+  const startedAt = performance.now();
+  let enhancedAt = startedAt;
   if (input.mimeType.startsWith('image/')) {
     try {
-      await enhanceRecognitionPage(input.filePath);
+      await enhanceRecognitionPage(input.filePath, { maxDimension: 2400, jpegQuality: 89 });
+      enhancedAt = performance.now();
     } catch (error) {
       throw new MaterialParserError('SCHEDULE_IMAGE_ENHANCEMENT_FAILED', { cause: error });
     }
   }
   const parser = new PaddleVisionMaterialParser(getDocumentParserConfig(), { profile: 'schedule' });
   const document = await parser.parse(input);
+  const parsedAt = performance.now();
   const structured = await structureScheduleText(document.markdown || document.blocks.map(block => block.text).join('\n'), input);
+  const structuredAt = performance.now();
   return {
     ...structured,
     warnings: [...document.warnings.map(warning => warning.message), ...structured.warnings],
-    sourceText: document.markdown.slice(0, 12000)
+    sourceText: document.markdown.slice(0, 12000),
+    timings: {
+      enhanceMs: Math.round(enhancedAt - startedAt),
+      paddleMs: Math.round(parsedAt - enhancedAt),
+      aiMs: Math.round(structuredAt - parsedAt),
+      totalMs: Math.round(structuredAt - startedAt)
+    }
   };
 };
