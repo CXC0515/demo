@@ -17,6 +17,7 @@ interface ScheduleRow {
 interface ReminderRow {
   id: string; name: string; class_id: string | null; class_name: string; time_text: string; repeat_rule: string;
   status: TimerReminder['status']; important: number; urgent: number; due_at: string | null;
+  time_kind: NonNullable<TimerReminder['timeKind']>; start_at: string | null; end_at: string | null;
 }
 interface PeriodRow { period: number; label: string; start_time: string; end_time: string; }
 
@@ -26,7 +27,8 @@ const toSchedule = (row: ScheduleRow): ScheduleItem => ({
 });
 const toReminder = (row: ReminderRow): TimerReminder => ({
   id: row.id, name: row.name, classId: row.class_id ?? '', className: row.class_name, time: row.time_text,
-  repeatRule: row.repeat_rule, status: row.status, important: Boolean(row.important), urgent: Boolean(row.urgent), dueAt: row.due_at ?? undefined
+  repeatRule: row.repeat_rule, status: row.status, important: Boolean(row.important), urgent: Boolean(row.urgent),
+  dueAt: row.due_at ?? undefined, timeKind: row.time_kind, startAt: row.start_at ?? undefined, endAt: row.end_at ?? undefined
 });
 
 export const listScheduleItems = () => (database.prepare('SELECT * FROM schedule_items ORDER BY day, period, created_at').all() as ScheduleRow[]).map(toSchedule);
@@ -65,14 +67,18 @@ export const saveReminder = (input: TimerReminder): TimerReminder => {
   const id = input.id || randomUUID();
   const timestamp = now();
   database.prepare(`
-    INSERT INTO timer_reminders (id, name, class_id, class_name, time_text, repeat_rule, status, important, urgent, due_at, created_at, updated_at)
-    VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
+    INSERT INTO timer_reminders (id, name, class_id, class_name, time_text, repeat_rule, status, important, urgent, due_at, time_kind, start_at, end_at, created_at, updated_at)
+    VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?)
     ON CONFLICT(id) DO UPDATE SET name=excluded.name, class_id=excluded.class_id, class_name=excluded.class_name,
       time_text=excluded.time_text, repeat_rule=excluded.repeat_rule, status=excluded.status, important=excluded.important,
-      urgent=excluded.urgent, due_at=excluded.due_at, updated_at=excluded.updated_at
+      urgent=excluded.urgent, due_at=excluded.due_at, time_kind=excluded.time_kind, start_at=excluded.start_at,
+      end_at=excluded.end_at, updated_at=excluded.updated_at
   `).run(id, input.name, input.classId, input.className, input.time, input.repeatRule, input.status,
-    input.important ? 1 : 0, input.urgent ? 1 : 0, input.dueAt ?? '', timestamp, timestamp);
+    input.important ? 1 : 0, input.urgent ? 1 : 0, input.dueAt ?? input.startAt ?? '', input.timeKind ?? (input.startAt || input.dueAt ? 'point' : 'none'),
+    input.startAt ?? input.dueAt ?? '', input.endAt ?? '', timestamp, timestamp);
   return toReminder(database.prepare('SELECT * FROM timer_reminders WHERE id = ?').get(id) as ReminderRow);
 };
+
+export const saveReminders = (items: TimerReminder[]) => database.transaction(() => items.map(saveReminder))();
 
 export const deleteReminder = (id: string) => database.prepare('DELETE FROM timer_reminders WHERE id = ?').run(id).changes > 0;

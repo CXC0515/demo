@@ -355,6 +355,16 @@ export interface TimerReminder {
   important?: boolean;
   urgent?: boolean;
   dueAt?: string;
+  timeKind?: 'none' | 'point' | 'range';
+  startAt?: string;
+  endAt?: string;
+}
+
+export interface ReminderImportDraft extends TimerReminder {
+  selected: boolean;
+  sourceExcerpt: string;
+  confidence: number;
+  warnings: string[];
 }
 
 export interface DocumentAsset {

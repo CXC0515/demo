@@ -170,6 +170,22 @@ const migrations: Migration[] = [
         (7, '第七节', '15:20', '16:05', CURRENT_TIMESTAMP),
         (8, '第八节', '16:15', '17:00', CURRENT_TIMESTAMP);
     `
+  },
+  {
+    version: 6,
+    sql: `
+      ALTER TABLE timer_reminders ADD COLUMN time_kind TEXT NOT NULL DEFAULT 'none'
+        CHECK (time_kind IN ('none', 'point', 'range'));
+      ALTER TABLE timer_reminders ADD COLUMN start_at TEXT;
+      ALTER TABLE timer_reminders ADD COLUMN end_at TEXT;
+
+      UPDATE timer_reminders
+      SET time_kind = 'point', start_at = due_at
+      WHERE due_at IS NOT NULL AND due_at <> '';
+
+      CREATE INDEX timer_reminders_time_idx
+        ON timer_reminders (status, time_kind, start_at, end_at);
+    `
   }
 ];
 

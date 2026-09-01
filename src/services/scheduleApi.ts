@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { ScheduleItem, SchedulePeriod, TimerReminder } from '../domain/types';
+import { ReminderImportDraft, ScheduleItem, SchedulePeriod, TimerReminder } from '../domain/types';
 
 const readError = async (response: Response) => ((await response.json().catch(() => ({}))) as { code?: string }).code ?? `HTTP_${response.status}`;
 const jsonRequest = async <T>(url: string, init?: RequestInit) => {
@@ -18,6 +18,8 @@ export const saveScheduleItem = (item: ScheduleItem) => jsonRequest<{ item: Sche
 export const saveScheduleBatch = (items: ScheduleItem[]) => jsonRequest<{ items: ScheduleItem[] }>('/api/schedule/items/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }).then(body => body.items);
 export const removeScheduleItem = (id: string) => jsonRequest<void>(`/api/schedule/items/${encodeURIComponent(id)}`, { method: 'DELETE' });
 export const saveReminder = (reminder: TimerReminder) => jsonRequest<{ reminder: TimerReminder }>('/api/schedule/reminders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reminder) }).then(body => body.reminder);
+export const saveReminderBatch = (reminders: TimerReminder[]) => jsonRequest<{ reminders: TimerReminder[] }>('/api/schedule/reminders/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reminders }) }).then(body => body.reminders);
+export const createReminderImportDraft = (text: string) => jsonRequest<{ drafts: ReminderImportDraft[]; warnings: string[] }>('/api/schedule/reminders/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
 export const removeReminder = (id: string) => jsonRequest<void>(`/api/schedule/reminders/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
 export interface ScheduleImportDraft { items: ScheduleItem[]; warnings: string[]; sourceText: string; }

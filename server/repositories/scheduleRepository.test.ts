@@ -17,10 +17,21 @@ after(() => { closeRosterDatabase(); rmSync(directory, { recursive: true, force:
 
 test('persists schedules and reminder quadrant fields', () => {
   repository.saveScheduleItem({ id: 'schedule-1', day: 6, period: 1, title: '周末社团', classId: 'c5', className: '七年级 5 班', type: 'class', time: '08:00', scope: 'class', teacherName: '王老师' });
-  repository.saveReminder({ id: 'reminder-1', name: '提交教案', classId: 'c5', className: '七年级 5 班', time: '周五 17:00', repeatRule: '一次性', status: 'active', important: true, urgent: false, dueAt: '2026-09-04T17:00' });
+  repository.saveReminder({ id: 'reminder-1', name: '提交教案', classId: 'c5', className: '七年级 5 班', time: '周五 17:00', repeatRule: '一次性', status: 'active', important: true, urgent: false, timeKind: 'point', startAt: '2026-09-04T17:00' });
   assert.equal(repository.listScheduleItems()[0].day, 6);
   assert.equal(repository.listReminders()[0].important, true);
   assert.equal(repository.listReminders()[0].urgent, false);
+  assert.equal(repository.listReminders()[0].timeKind, 'point');
+  assert.equal(repository.listReminders()[0].startAt, '2026-09-04T17:00');
+});
+
+test('saves reminder batches transactionally', () => {
+  const saved = repository.saveReminders([
+    { id: 'reminder-2', name: '无时间事项', classId: '', className: '', time: '时间待定', repeatRule: '一次性', status: 'active', timeKind: 'none' },
+    { id: 'reminder-3', name: '家长会', classId: 'c5', className: '七年级 5 班', time: '09:00 - 10:00', repeatRule: '一次性', status: 'active', timeKind: 'range', startAt: '2026-09-05T09:00', endAt: '2026-09-05T10:00' }
+  ]);
+  assert.equal(saved.length, 2);
+  assert.equal(saved[1].timeKind, 'range');
 });
 
 test('persists the school-wide period timetable', () => {

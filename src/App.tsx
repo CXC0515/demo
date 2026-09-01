@@ -34,7 +34,7 @@ import ScheduleReminder from './features/schedule/ScheduleReminder';
 import SystemSettings from './features/settings/SystemSettingsPanel';
 import KnowledgeLibrary from './features/knowledge/KnowledgeLibrary';
 import { getKnowledgeGraph } from './services/resourceApi';
-import { getScheduleWorkspace, removeReminder, removeScheduleItem, saveReminder, saveScheduleBatch, saveScheduleItem, saveSchedulePeriods } from './services/scheduleApi';
+import { getScheduleWorkspace, removeReminder, removeScheduleItem, saveReminder, saveReminderBatch, saveScheduleBatch, saveScheduleItem, saveSchedulePeriods } from './services/scheduleApi';
 import TagManagement from './features/tags/TagManagement';
 import LessonPlanWorkspace from './features/lesson-plan/LessonPlanWorkspace';
 import GradingWorkspace from './features/grading/GradingWorkspace';
@@ -184,6 +184,12 @@ export default function App() {
     const saved = await saveReminder(reminder);
     setReminders(current => [...current.filter(item => item.id !== saved.id), saved]);
     triggerToast(`提醒“${saved.name}”已保存`);
+  };
+
+  const handleAddReminderBatch = async (items: TimerReminder[]) => {
+    const saved = await saveReminderBatch(items);
+    setReminders(current => [...current.filter(item => !saved.some(next => next.id === item.id)), ...saved]);
+    triggerToast(`已批量新建 ${saved.length} 条提醒`);
   };
 
   const handleToggleReminderStatus = async (reminderId: string) => {
@@ -573,6 +579,7 @@ export default function App() {
                 triggerToast(`已导入 ${saved.length} 项课程`);
               }}
               onAddReminder={handleAddReminder}
+              onAddReminderBatch={handleAddReminderBatch}
               onToggleReminderStatus={handleToggleReminderStatus}
               onDeleteReminder={handleDeleteReminder}
             />
