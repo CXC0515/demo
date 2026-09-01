@@ -22,6 +22,8 @@ test('prompt treats pasted text as data and defines three time modes', () => {
   assert.match(prompt, /Asia\/Shanghai/);
   assert.match(prompt, /下午两点到四点开会/);
   assert.match(prompt, /assumed_today/);
+  assert.match(prompt, /recurrence/);
+  assert.match(prompt, /每周三去新镇下午两点开会/);
 });
 
 test('keeps a time range when the date is assumed to be today', async () => {
@@ -32,6 +34,16 @@ test('keeps a time range when the date is assumed to be today', async () => {
   assert.equal(result.drafts[0].timeKind, 'range');
   assert.equal(result.drafts[0].startAt, '2026-09-02T14:00');
   assert.equal(result.drafts[0].assumptionWarning, '日期按今天补全');
+});
+
+test('preserves an AI-recognized weekly recurrence in the editable draft', async () => {
+  const fetcher = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+    reminders: [{ name: '去新镇开会', className: '', timeKind: 'point', startAt: '2026-09-02T14:00', endAt: null, dateSource: 'recurrence', recurrence: { enabled: true, unit: 'week', interval: 1, weekdays: [3], monthDays: null, endDate: null, maxOccurrences: null }, important: false, urgent: false, sourceExcerpt: '每周三去新镇下午两点开会', confidence: 0.95, warnings: [] }], warnings: []
+  }) } }] }), { status: 200 }) as unknown as ReturnType<typeof fetch>;
+  const result = await createReminderDrafts('每周三去新镇下午两点开会', { apiKey: 'test', baseUrl: 'https://example.test/v1', visionModel: '', reminderModel: 'gpt-5.6-luna' }, fetcher, new Date('2026-09-02T02:00:00Z'));
+  assert.deepEqual(result.drafts[0].recurrence, { enabled: true, unit: 'week', interval: 1, weekdays: [3], monthDays: undefined, endDate: undefined, maxOccurrences: undefined });
+  assert.equal(result.drafts[0].repeatRule, '每周三');
+  assert.equal(result.drafts[0].assumptionWarning, undefined);
 });
 
 test('creates editable drafts and leaves overdue drafts unchecked', async () => {

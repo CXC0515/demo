@@ -27,6 +27,16 @@ const resultSchema = z.object({
   warnings: z.array(z.string().max(300)).max(30).default([])
 });
 
+export const normalizeScheduleCellText = (value: string) => value
+  .normalize('NFKC')
+  .replace(/\$\s*\^\s*\{\s*(?:\\\*|\\ast|\\star|\*)\s*\}\s*\$/gi, '*')
+  .replace(/\$\s*(?:\\\*|\\ast|\\star|\*)\s*\$/gi, '*')
+  .replace(/\^\s*\{\s*(?:\\\*|\\ast|\\star|\*)\s*\}/gi, '*')
+  .replace(/\\(?:ast|star)\b/gi, '*')
+  .replace(/\\([*#])/g, '$1')
+  .replace(/\s+/g, ' ')
+  .trim();
+
 const chineseDigits: Record<string, number> = { '零': 0, '〇': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
 const parseChineseNumber = (value: string) => {
   if (/^\d+$/.test(value)) return Number(value);
@@ -83,6 +93,7 @@ export const structureScheduleText = async (
       '6. 不得创造“已知班级”列表中不存在的班级。'
     ].join('\n'),
     'time 尽量使用原图时间；无法确认写“待确认”。confidence 为该项识别置信度。',
+    'title、teacherName 只返回可直接显示的纯文本；把 Markdown/LaTeX 装饰符号还原为普通字符，例如“$ ^{\\*} $”应返回“*”。空字段必须返回空字符串，不得填写“待补充”“待确认”等占位词。',
     '只返回 JSON：{"items":[{"day":1,"period":1,"title":"语文","time":"08:00 - 08:45","className":"<已知班级中唯一匹配的标准名称>","teacherName":"王老师","confidence":0.9}],"warnings":[]}',
     `已知班级：${classes.map(item => item.name).join('、')}`,
     `OCR 文本：\n${text.slice(0, 30000)}`
@@ -116,13 +127,13 @@ export const structureScheduleText = async (
         id: randomUUID(),
         day: item.day,
         period: item.period,
-        title: item.title,
+        title: normalizeScheduleCellText(item.title),
         classId: input.scope === 'class' ? input.classId : matchedClass?.id ?? '',
         className: input.scope === 'class' ? requestedClass?.name ?? item.className : matchedClass?.name ?? item.className,
         type: 'class' as const,
         time: item.time || '待确认',
         scope: input.scope,
-        teacherName: item.teacherName,
+        teacherName: normalizeScheduleCellText(item.teacherName),
         confidence: item.confidence
       } satisfies ScheduleItem;
     }).sort((left, right) => left.day - right.day || left.period - right.period)

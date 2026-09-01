@@ -11,7 +11,7 @@ import test, { after } from 'node:test';
 
 const directory = mkdtempSync(path.join(tmpdir(), 'demo-schedule-import-'));
 process.env.ROSTER_DB_PATH = path.join(directory, 'roster.sqlite');
-const { structureScheduleText } = await import('./scheduleImportService');
+const { normalizeScheduleCellText, structureScheduleText } = await import('./scheduleImportService');
 const { closeRosterDatabase } = await import('../../database/rosterDatabase');
 const { updateClass } = await import('../../repositories/rosterRepository');
 after(() => { closeRosterDatabase(); rmSync(directory, { recursive: true, force: true }); });
@@ -40,4 +40,10 @@ test('turns AI timetable JSON into an editable teacher draft', async () => {
   assert.deepEqual(result.warnings, ['第三节模糊']);
   assert.match(requestBody, /这只是匹配规则示例/);
   assert.match(requestBody, /className 必须返回/);
+});
+
+test('normalizes OCR decoration markers without stripping real formulas', () => {
+  assert.equal(normalizeScheduleCellText('体综 $ ^{\\*} $'), '体综 *');
+  assert.equal(normalizeScheduleCellText('体综 $\\ast$'), '体综 *');
+  assert.equal(normalizeScheduleCellText('数学 $x^2$'), '数学 $x^2$');
 });
