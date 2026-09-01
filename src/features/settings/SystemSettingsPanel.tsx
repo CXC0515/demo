@@ -88,8 +88,11 @@ export default function SystemSettingsPanel({
   const [exportFormat, setExportFormat] = useState('PDF + Excel');
   const [theme, setTheme] = useState('morandi-green');
   const [localSchedulePeriods, setLocalSchedulePeriods] = useState(schedulePeriods);
+  const [isScheduleSaving, setIsScheduleSaving] = useState(false);
+  const [scheduleSaveError, setScheduleSaveError] = useState('');
   const lastPeriod = localSchedulePeriods.at(-1);
   const lastPeriodInUse = lastPeriod ? schedule.some(item => item.period === lastPeriod.period) : false;
+  const hasUnsavedScheduleChanges = JSON.stringify(localSchedulePeriods) !== JSON.stringify(schedulePeriods);
 
   useEffect(() => setLocalSchedulePeriods(schedulePeriods), [schedulePeriods]);
 
@@ -121,25 +124,46 @@ export default function SystemSettingsPanel({
     }
   }, [theme]);
 
-  const handleSaveSettings = async () => {
+  const saveSchedulePeriodSettings = async (announce = true) => {
+    if (!hasUnsavedScheduleChanges) return true;
     if (localSchedulePeriods.some(period => !period.label.trim() || period.startTime >= period.endTime)) {
-      onShowToast('请检查学校作息：名称不能为空，结束时间须晚于开始时间');
-      return;
+      const message = '请检查学校作息：名称不能为空，结束时间须晚于开始时间';
+      setScheduleSaveError(message);
+      onShowToast(message);
+      return false;
     }
-    onUpdateThreshold(localThreshold);
-    onUpdateOcrThresholds(localOcrHumanThreshold, localOcrAutoThreshold);
+    setIsScheduleSaving(true);
+    setScheduleSaveError('');
     try {
       await onSaveSchedulePeriods(localSchedulePeriods);
-      onShowToast('系统设置已保存');
+      if (announce) onShowToast('学校作息已保存并同步到课表');
+      return true;
     } catch (error) {
-      onShowToast(error instanceof Error && error.message === 'SCHEDULE_PERIOD_IN_USE' ? '被删除的课节仍有课程，请先调整课程' : '学校作息保存失败，请稍后重试');
+      const message = error instanceof Error && error.message === 'SCHEDULE_PERIOD_IN_USE' ? '被删除的课节仍有课程，请先调整课程' : '学校作息保存失败，请稍后重试';
+      setScheduleSaveError(message);
+      onShowToast(message);
+      return false;
+    } finally {
+      setIsScheduleSaving(false);
     }
+  };
+
+  const handleSaveSettings = async () => {
+    onUpdateThreshold(localThreshold);
+    onUpdateOcrThresholds(localOcrHumanThreshold, localOcrAutoThreshold);
+    if (await saveSchedulePeriodSettings(false)) onShowToast('系统设置已保存');
+  };
+
+  const updateSchedulePeriod = (index: number, patch: Partial<SchedulePeriod>) => {
+    setScheduleSaveError('');
+    setLocalSchedulePeriods(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
   };
 
   const addSchedulePeriod = () => {
     if (localSchedulePeriods.length >= 12) return;
     const period = localSchedulePeriods.length + 1;
     const startTime = addMinutes(lastPeriod?.endTime ?? '07:50', 10);
+    setScheduleSaveError('');
     setLocalSchedulePeriods(current => [...current, { period, label: periodLabels[period - 1], startTime, endTime: addMinutes(startTime, 45) }]);
   };
 
@@ -149,6 +173,7 @@ export default function SystemSettingsPanel({
       onShowToast(`${lastPeriod?.label ?? '最后一节'}仍有课程，请先调整课程`);
       return;
     }
+    setScheduleSaveError('');
     setLocalSchedulePeriods(current => current.slice(0, -1));
   };
 
@@ -228,25 +253,28 @@ export default function SystemSettingsPanel({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <strong className="block text-sm text-slate-700 dark:text-slate-200">学校作息时间</strong>
-                  <span className="mt-1 block text-xs text-slate-400">当前 {localSchedulePeriods.length} 节，统一用于个人课表、班级课表和手动排课。</span>
+                  <span className="mt-1 block text-xs text-slate-400">当前 {localSchedulePeriods.length} 节，统一用于个人课表、班级课表、手动排课和扫描导入。</span>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {hasUnsavedScheduleChanges && <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400">有未保存修改</span>}
                   <button type="button" onClick={removeLastSchedulePeriod} disabled={localSchedulePeriods.length <= 1} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-500 disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-950"><Trash2 className="h-3.5 w-3.5"/>减少一节</button>
-                  <button type="button" onClick={addSchedulePeriod} disabled={localSchedulePeriods.length >= 12} className="inline-flex items-center gap-1 rounded-lg bg-emerald-700 px-2.5 py-1.5 text-xs font-bold text-white disabled:opacity-40"><Plus className="h-3.5 w-3.5"/>增加一节</button>
+                  <button type="button" onClick={addSchedulePeriod} disabled={localSchedulePeriods.length >= 12} className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs font-bold text-emerald-700 disabled:opacity-40 dark:border-emerald-900 dark:bg-zinc-950 dark:text-emerald-300"><Plus className="h-3.5 w-3.5"/>增加一节</button>
+                  <button type="button" onClick={() => void saveSchedulePeriodSettings()} disabled={!hasUnsavedScheduleChanges || isScheduleSaving} className="inline-flex min-w-[78px] items-center justify-center rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white disabled:bg-slate-300 dark:disabled:bg-zinc-700">{isScheduleSaving ? '保存中…' : hasUnsavedScheduleChanges ? '保存作息' : '已同步'}</button>
                 </div>
               </div>
+              {scheduleSaveError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">{scheduleSaveError}</p>}
               <div className="grid gap-2 sm:grid-cols-2">
                 {localSchedulePeriods.map((period, index) => (
                   <div key={period.period} className="grid grid-cols-[1fr_12px_1fr] items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 sm:grid-cols-[76px_1fr_12px_1fr] dark:border-zinc-700 dark:bg-zinc-950">
                     <input
                       value={period.label}
                       aria-label={`第${period.period}节名称`}
-                      onChange={event => setLocalSchedulePeriods(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item))}
+                      onChange={event => updateSchedulePeriod(index, { label: event.target.value })}
                       className="col-span-3 min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs font-bold sm:col-span-1 dark:border-zinc-700 dark:bg-zinc-900"
                     />
-                    <input type="time" value={period.startTime} aria-label={`${period.label}开始时间`} onChange={event => setLocalSchedulePeriods(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, startTime: event.target.value } : item))} className="min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900" />
+                    <input type="time" value={period.startTime} aria-label={`${period.label}开始时间`} onChange={event => updateSchedulePeriod(index, { startTime: event.target.value })} className="min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900" />
                     <span className="text-center text-slate-400">—</span>
-                    <input type="time" value={period.endTime} aria-label={`${period.label}结束时间`} onChange={event => setLocalSchedulePeriods(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, endTime: event.target.value } : item))} className="min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900" />
+                    <input type="time" value={period.endTime} aria-label={`${period.label}结束时间`} onChange={event => updateSchedulePeriod(index, { endTime: event.target.value })} className="min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900" />
                   </div>
                 ))}
               </div>
