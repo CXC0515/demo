@@ -37,11 +37,11 @@ const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
 ];
 
 const themeOptions = [
-  ['morandi-green', '莫兰迪绿'],
-  ['fog-blue', '雾蓝'],
-  ['dusty-pink', '豆沙粉'],
-  ['warm-gray', '暖灰'],
-  ['dark-graphite', '深色石墨']
+  { value: 'morandi-green', label: '莫兰迪绿', swatches: ['#5a7e64', '#4f7890', '#a27d43', '#a45e68', '#76618b'] },
+  { value: 'fog-blue', label: '雾蓝', swatches: ['#3e7197', '#42818b', '#5c70a5', '#438071', '#786ba0'] },
+  { value: 'dusty-pink', label: '豆沙粉', swatches: ['#a85160', '#a8654d', '#9a5b85', '#84669a', '#96762d'] },
+  { value: 'warm-gray', label: '暖灰', swatches: ['#796444', '#686d49', '#8f614f', '#526c5b', '#596d79'] },
+  { value: 'dark-graphite', label: '深色石墨', swatches: ['#8dc4a0', '#8bc2d9', '#d1b66f', '#d68f9a', '#b5a1ce'] }
 ];
 const periodLabels = ['第一节', '第二节', '第三节', '第四节', '第五节', '第六节', '第七节', '第八节', '第九节', '第十节', '第十一节', '第十二节'];
 const addMinutes = (time: string, minutes: number) => {
@@ -86,7 +86,7 @@ export default function SystemSettingsPanel({
   const [imageSavePolicy, setImageSavePolicy] = useState('保存原图与裁剪图');
   const [archivePolicy, setArchivePolicy] = useState('按学期归档');
   const [exportFormat, setExportFormat] = useState('PDF + Excel');
-  const [theme, setTheme] = useState('morandi-green');
+  const [theme, setTheme] = useState(() => localStorage.getItem('app-theme') || 'morandi-green');
   const [localSchedulePeriods, setLocalSchedulePeriods] = useState(schedulePeriods);
   const [isScheduleSaving, setIsScheduleSaving] = useState(false);
   const [scheduleSaveError, setScheduleSaveError] = useState('');
@@ -108,6 +108,7 @@ export default function SystemSettingsPanel({
 
   useEffect(() => {
     const root = document.documentElement;
+    localStorage.setItem('app-theme', theme);
     if (theme === 'morandi-green') {
       root.removeAttribute('data-theme');
       root.removeAttribute('data-theme-forced');
@@ -341,18 +342,21 @@ export default function SystemSettingsPanel({
           <div className="space-y-4">
             <div>
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">主题色</label>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                {themeOptions.map(([value, label]) => (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                {themeOptions.map(option => (
                   <button
-                    key={value}
-                    onClick={() => setTheme(value)}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
-                      theme === value
-                        ? 'bg-emerald-700 text-white border-emerald-700'
+                    key={option.value}
+                    onClick={() => setTheme(option.value)}
+                    className={`rounded-xl border p-3 text-left text-xs font-bold transition-all active:scale-95 ${
+                      theme === option.value
+                        ? 'border-emerald-700 bg-white ring-2 ring-emerald-700/15 dark:bg-zinc-900'
                         : 'bg-slate-50 dark:bg-zinc-900/60 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-zinc-800'
                     }`}
                   >
-                    {label}
+                    <span className="block">{option.label}</span>
+                    <span className="mt-2 flex gap-1" aria-label={`${option.label}课表色卡`}>
+                      {option.swatches.map(color => <span key={color} className="h-4 flex-1 rounded-sm" style={{ backgroundColor: color }} />)}
+                    </span>
                   </button>
                 ))}
               </div>

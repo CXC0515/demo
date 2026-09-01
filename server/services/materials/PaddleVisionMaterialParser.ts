@@ -20,8 +20,12 @@ import { saveParserArtifact } from '../../repositories/parserArtifactRepository'
 import { MaterialParser, MaterialParserError, MaterialParserInput } from './MaterialParser';
 import { enhanceRecognitionPage } from './recognitionImagePreprocessor';
 
+export interface PaddleVisionParserOptions {
+  profile?: 'full' | 'schedule';
+}
+
 export class PaddleVisionMaterialParser implements MaterialParser {
-  constructor(private readonly config: DocumentParserConfig) {}
+  constructor(private readonly config: DocumentParserConfig, private readonly parserOptions: PaddleVisionParserOptions = {}) {}
 
   supports(input: MaterialParserInput) {
     return input.mimeType === 'application/pdf' || input.mimeType.startsWith('image/');
@@ -29,6 +33,7 @@ export class PaddleVisionMaterialParser implements MaterialParser {
 
   async parse(input: MaterialParserInput) {
     if (!this.config.paddleAccessToken) throw new MaterialParserError('PADDLEOCR_NOT_CONFIGURED');
+    const scheduleProfile = this.parserOptions.profile === 'schedule';
     const client = new PaddleOCRClient({
       token: this.config.paddleAccessToken,
       baseUrl: this.config.paddleBaseUrl,
@@ -45,16 +50,16 @@ export class PaddleVisionMaterialParser implements MaterialParser {
           useDocOrientationClassify: false,
           useDocUnwarping: false,
           useLayoutDetection: true,
-          useChartRecognition: true,
+          useChartRecognition: !scheduleProfile,
           useOcrForImageBlock: true,
           mergeLayoutBlocks: false,
           layoutShapeMode: 'rect',
           prettifyMarkdown: true,
-          showFormulaNumber: true,
-          returnMarkdownImages: true
+          showFormulaNumber: !scheduleProfile,
+          returnMarkdownImages: !scheduleProfile
         }
       });
-      saveParserArtifact(input.assetId, {
+      if (!scheduleProfile) saveParserArtifact(input.assetId, {
         model: this.config.paddleModel || Model.PaddleOCRVL16,
         jobId: result.jobId,
         dataInfo: result.dataInfo,
@@ -69,7 +74,7 @@ export class PaddleVisionMaterialParser implements MaterialParser {
       });
       const resourceDirectory = path.resolve('var/uploads/parsed', input.assetId, 'resources');
       await mkdir(resourceDirectory, { recursive: true });
-      const resourcePlans = result.pages.flatMap((page, pageIndex) => [
+      const resourcePlans = scheduleProfile ? [] : result.pages.flatMap((page, pageIndex) => [
         ...(page.inputImageUrl ? [{
           fileName: `page-${pageIndex + 1}-source.jpg`,
           resourceUrl: page.inputImageUrl,
@@ -96,7 +101,7 @@ export class PaddleVisionMaterialParser implements MaterialParser {
           filename: plan.fileName
         })
       })));
-      await Promise.all(savedResources
+      if (!scheduleProfile) await Promise.all(savedResources
         .filter(resource => resource.role === 'source-page')
         .map(resource => enhanceRecognitionPage(resource.resourcePath)));
       const warnings = result.pages.flatMap((page, index) => page.markdownText.trim() ? [] : [{

@@ -10,6 +10,8 @@ import { getDocumentParserConfig } from '../../config/documentParserConfig';
 import { getModelConfig, isModelConfigured, ModelConfig } from '../../config/modelConfig';
 import { listClasses } from '../../repositories/rosterRepository';
 import { PaddleVisionMaterialParser } from '../materials/PaddleVisionMaterialParser';
+import { MaterialParserError } from '../materials/MaterialParser';
+import { enhanceRecognitionPage } from '../materials/recognitionImagePreprocessor';
 import { extractJson } from '../model/extractJson';
 
 const resultSchema = z.object({
@@ -84,12 +86,19 @@ export const structureScheduleText = async (
       scope: input.scope,
       teacherName: item.teacherName,
       confidence: item.confidence
-    } satisfies ScheduleItem))
+    } satisfies ScheduleItem)).sort((left, right) => left.day - right.day || left.period - right.period)
   };
 };
 
 export const importScheduleDocument = async (input: ScheduleImportInput) => {
-  const parser = new PaddleVisionMaterialParser(getDocumentParserConfig());
+  if (input.mimeType.startsWith('image/')) {
+    try {
+      await enhanceRecognitionPage(input.filePath);
+    } catch (error) {
+      throw new MaterialParserError('SCHEDULE_IMAGE_ENHANCEMENT_FAILED', { cause: error });
+    }
+  }
+  const parser = new PaddleVisionMaterialParser(getDocumentParserConfig(), { profile: 'schedule' });
   const document = await parser.parse(input);
   const structured = await structureScheduleText(document.markdown || document.blocks.map(block => block.text).join('\n'), input);
   return {

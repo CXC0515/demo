@@ -17,7 +17,10 @@ after(() => { closeRosterDatabase(); rmSync(directory, { recursive: true, force:
 
 test('turns AI timetable JSON into an editable teacher draft', async () => {
   const fakeFetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
-    items: [{ day: 1, period: 2, title: '语文', time: '08:55 - 09:40', className: '七年级 5 班', teacherName: '', confidence: 0.91 }],
+    items: [
+      { day: 2, period: 1, title: '阅读', time: '08:00 - 08:45', className: '七年级 5 班', teacherName: '', confidence: 0.88 },
+      { day: 1, period: 2, title: '语文', time: '08:55 - 09:40', className: '七年级 5 班', teacherName: '', confidence: 0.91 }
+    ],
     warnings: ['第三节模糊']
   }) } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   const result = await structureScheduleText('周一 第二节 语文 七年级5班', { scope: 'teacher', classId: 'c5' }, {
@@ -26,5 +29,6 @@ test('turns AI timetable JSON into an editable teacher draft', async () => {
   assert.equal(result.items[0].scope, 'teacher');
   assert.equal(result.items[0].classId, 'c5');
   assert.equal(result.items[0].confidence, 0.91);
+  assert.deepEqual(result.items.map(item => [item.day, item.period]), [[1, 2], [2, 1]]);
   assert.deepEqual(result.warnings, ['第三节模糊']);
 });
