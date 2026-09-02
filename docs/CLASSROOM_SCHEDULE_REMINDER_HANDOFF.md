@@ -8,6 +8,7 @@
 
 - 本分支从 `origin/main@5fad4d3525858720f2c5cdf24e68edc3aae543bb` 开始开发。
 - 起始提交是合并资源库功能的 `5fad4d3 Merge pull request #4 from CXC0515/codex/resource-library`。
+- 本分支通过 GitHub PR #5 合并；后续任务应以包含 PR #5 的 `origin/main` 为最低基线。
 - 本次功能合并后，后续任务必须先执行 `git fetch origin`，再从包含本次 PR 的最新 `origin/main` 创建独立的 `codex/<功能名>` 分支和 worktree。
 - 不得直接复用本分支，也不得假设 `/Users/cxc/Projects/DEMO` 当前检出的分支就是 `main`。
 
