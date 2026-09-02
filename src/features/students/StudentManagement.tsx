@@ -361,6 +361,7 @@ export default function StudentManagement({
                   />
                 </th>
                 <th className="px-3 py-3 whitespace-nowrap">学生</th>
+                <th className="px-3 py-3 whitespace-nowrap">学号</th>
                 <th className="px-3 py-3 whitespace-nowrap">班级</th>
                 <th className="px-3 py-3 whitespace-nowrap">性别</th>
                 <th className="px-3 py-3 whitespace-nowrap">在班状态</th>
@@ -394,8 +395,8 @@ export default function StudentManagement({
                           <span className="shrink-0 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-semibold rounded">课代表</span>
                         )}
                       </div>
-                      <span className="block mt-0.5 font-mono text-[11px] text-slate-400 whitespace-nowrap">{student.studentNo}</span>
                     </td>
+                    <td className="px-3 py-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">{student.studentNo}</td>
                     <td className="px-3 py-3 whitespace-nowrap">{student.className}</td>
                     <td className="px-3 py-3 whitespace-nowrap">{student.gender === 'male' ? '男' : '女'}</td>
                     <td className="px-3 py-3 whitespace-nowrap">
@@ -416,7 +417,7 @@ export default function StudentManagement({
                 );
               })}
               {filteredStudents.length === 0 && (
-                <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-400">未找到符合筛选条件的学生。</td></tr>
+                <tr><td colSpan={8} className="px-6 py-12 text-center text-slate-400">未找到符合筛选条件的学生。</td></tr>
               )}
             </tbody>
           </table>

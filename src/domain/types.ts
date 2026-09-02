@@ -325,13 +325,23 @@ export interface AiReviewOpinion {
 
 export interface ScheduleItem {
   id: string;
-  day: number; // 1-5
+  day: number; // 1-7
   period: number; // 1-8
   title: string;
   classId: string;
   className: string;
   type: 'class' | 'meeting' | 'research' | 'reminder' | 'parent-comm' | 'grading';
   time: string;
+  scope?: 'teacher' | 'class';
+  teacherName?: string;
+  confidence?: number;
+}
+
+export interface SchedulePeriod {
+  period: number;
+  label: string;
+  startTime: string;
+  endTime: string;
 }
 
 export interface TimerReminder {
@@ -341,7 +351,37 @@ export interface TimerReminder {
   className: string;
   time: string;
   repeatRule: string;
-  status: 'active' | 'inactive';
+  status: 'active' | 'completed' | 'inactive';
+  important?: boolean;
+  urgent?: boolean;
+  dueAt?: string;
+  timeKind?: 'none' | 'point' | 'range';
+  startAt?: string;
+  endAt?: string;
+  completedAt?: string;
+  sortOrder?: number;
+  assumptionWarning?: string;
+  seriesId?: string;
+  occurrenceNumber?: number;
+  generatedFromId?: string;
+  recurrence?: ReminderRecurrence;
+}
+
+export interface ReminderRecurrence {
+  enabled: boolean;
+  unit: 'day' | 'week' | 'month' | 'year';
+  interval: number;
+  weekdays?: number[];
+  monthDays?: number[];
+  endDate?: string;
+  maxOccurrences?: number;
+}
+
+export interface ReminderImportDraft extends TimerReminder {
+  selected: boolean;
+  sourceExcerpt: string;
+  confidence: number;
+  warnings: string[];
 }
 
 export interface DocumentAsset {

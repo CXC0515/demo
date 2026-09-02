@@ -7,19 +7,35 @@
 }
 
 :root {
-  /* Default Morandi Green */
-  --theme-primary: #5A7E64;
-  --theme-primary-hover: #486550;
-  --theme-primary-light: rgba(90, 126, 100, 0.1);
-  --theme-primary-border: rgba(90, 126, 100, 0.2);
-  --theme-accent: #E2ECE5;
-
-  --bg-app: #F5F7F6;
-  --bg-card: rgba(255, 255, 255, 0.85);
-  --border-color: rgba(0, 0, 0, 0.08);
-  --text-main: #2C3531;
-  --text-secondary: #5D6864;
-  --text-muted: #8E9995;
+  /* Default palette: 宋瓷青绿 */
+  --palette-1: #2E6A67;
+  --palette-2: #5E8C87;
+  --palette-3: #A9C8BE;
+  --palette-4: #D7E6DB;
+  --palette-5: #F1F0E8;
+  --theme-primary: var(--palette-1);
+  --theme-primary-hover: color-mix(in srgb, var(--palette-1) 84%, black);
+  --theme-primary-light: color-mix(in srgb, var(--palette-1) 11%, transparent);
+  --theme-primary-border: color-mix(in srgb, var(--palette-1) 24%, transparent);
+  --theme-accent: var(--palette-4);
+  --bg-app: #ffffff;
+  --bg-card: #ffffff;
+  --border-color: color-mix(in srgb, var(--palette-1) 14%, transparent);
+  --text-main: color-mix(in srgb, var(--palette-1) 68%, black);
+  --text-secondary: color-mix(in srgb, var(--palette-1) 78%, #6f6f6f);
+  --text-muted: color-mix(in srgb, var(--palette-2) 55%, #7a7a7a);
+  --schedule-hue-1: 177 39% 30%;
+  --schedule-hue-2: 173 25% 40%;
+  --schedule-hue-3: 161 28% 44%;
+  --schedule-hue-4: 136 26% 40%;
+  --schedule-hue-5: 53 30% 42%;
+  --schedule-hue-6: 185 30% 38%;
+  --schedule-hue-7: 150 24% 37%;
+  --schedule-hue-8: 115 24% 39%;
+  --schedule-hue-9: 70 25% 40%;
+  --schedule-hue-10: 195 20% 40%;
+  --schedule-hue-11: 165 18% 35%;
+  --schedule-hue-12: 40 24% 42%;
 
   /* Status colors - Morandi styled */
   --status-good-bg: #E2ECE5;
@@ -32,61 +48,58 @@
   --status-outstanding-text: #2A5A88;
 }
 
-/* Color Themes */
-[data-theme="fog-blue"] {
-  --theme-primary: #4C6E8D;
-  --theme-primary-hover: #39546E;
-  --theme-primary-light: rgba(76, 110, 141, 0.1);
-  --theme-primary-border: rgba(76, 110, 141, 0.2);
-  --theme-accent: #EBF1F6;
-  --bg-app: #EFF3F6;
-  --bg-card: rgba(255, 255, 255, 0.85);
-  --border-color: rgba(0, 0, 0, 0.08);
-  --text-main: #222C37;
-  --text-secondary: #515E6C;
-  --text-muted: #82909E;
+/* Song-inspired color themes supplied by the user. */
+[data-theme="song-porcelain-green"] {
+  --palette-1: #2E6A67; --palette-2: #5E8C87; --palette-3: #A9C8BE; --palette-4: #D7E6DB; --palette-5: #F1F0E8;
 }
 
-[data-theme="dusty-pink"] {
-  --theme-primary: #B26B74;
-  --theme-primary-hover: #96545C;
-  --theme-primary-light: rgba(178, 107, 116, 0.1);
-  --theme-primary-border: rgba(178, 107, 116, 0.2);
-  --theme-accent: #FAF0F1;
-  --bg-app: #FAF4F4;
-  --bg-card: rgba(255, 255, 255, 0.85);
-  --border-color: rgba(0, 0, 0, 0.08);
-  --text-main: #3F2023;
-  --text-secondary: #704E52;
-  --text-muted: #A38185;
+[data-theme="bianjing-twilight"] {
+  --palette-1: #4F6072; --palette-2: #B56A58; --palette-3: #D9B07C; --palette-4: #8DB8A7; --palette-5: #F1EADF;
+  --schedule-hue-1: 211 18% 38%; --schedule-hue-2: 12 39% 47%; --schedule-hue-3: 34 44% 48%; --schedule-hue-4: 156 23% 42%;
+  --schedule-hue-5: 220 22% 44%; --schedule-hue-6: 4 35% 43%; --schedule-hue-7: 44 43% 45%; --schedule-hue-8: 166 22% 39%;
+  --schedule-hue-9: 202 26% 43%; --schedule-hue-10: 20 28% 40%; --schedule-hue-11: 32 32% 42%; --schedule-hue-12: 145 18% 38%;
 }
 
-[data-theme="warm-gray"] {
-  --theme-primary: #7A7265;
-  --theme-primary-hover: #615A4F;
-  --theme-primary-light: rgba(122, 114, 101, 0.1);
-  --theme-primary-border: rgba(122, 114, 101, 0.2);
-  --theme-accent: #F4F1EC;
-  --bg-app: #F4F2EE;
-  --bg-card: rgba(255, 255, 255, 0.85);
-  --border-color: rgba(0, 0, 0, 0.08);
-  --text-main: #36322C;
-  --text-secondary: #6B6357;
-  --text-muted: #9C9488;
+[data-theme="rouge-warm-gray"] {
+  --palette-1: #A45668; --palette-2: #D59BA8; --palette-3: #C7C1B5; --palette-4: #E7DDD3; --palette-5: #F5F0EA;
+  --schedule-hue-1: 346 31% 45%; --schedule-hue-2: 347 32% 54%; --schedule-hue-3: 40 14% 42%; --schedule-hue-4: 30 24% 45%;
+  --schedule-hue-5: 330 25% 45%; --schedule-hue-6: 5 25% 46%; --schedule-hue-7: 20 18% 40%; --schedule-hue-8: 355 22% 40%;
+  --schedule-hue-9: 45 18% 43%; --schedule-hue-10: 315 17% 43%; --schedule-hue-11: 12 20% 42%; --schedule-hue-12: 335 28% 48%;
 }
 
-[data-theme="dark-graphite"] {
-  --theme-primary: #526356;
-  --theme-primary-hover: #677A6C;
-  --theme-primary-light: rgba(82, 99, 86, 0.2);
-  --theme-primary-border: rgba(82, 99, 86, 0.3);
-  --theme-accent: #242926;
-  --bg-app: #121614;
-  --bg-card: rgba(24, 28, 26, 0.85);
-  --border-color: rgba(255, 255, 255, 0.08);
-  --text-main: #E2ECE5;
-  --text-secondary: #90A097;
-  --text-muted: #6B7B71;
+[data-theme="green-tile-bamboo"] {
+  --palette-1: #4A6460; --palette-2: #7A9387; --palette-3: #BFD0B8; --palette-4: #DDE6D6; --palette-5: #F3F1E6;
+  --schedule-hue-1: 171 15% 34%; --schedule-hue-2: 151 18% 40%; --schedule-hue-3: 103 20% 40%; --schedule-hue-4: 94 20% 36%;
+  --schedule-hue-5: 185 16% 39%; --schedule-hue-6: 135 18% 37%; --schedule-hue-7: 75 20% 39%; --schedule-hue-8: 160 14% 45%;
+  --schedule-hue-9: 120 16% 43%; --schedule-hue-10: 195 14% 40%; --schedule-hue-11: 145 22% 34%; --schedule-hue-12: 90 15% 45%;
+}
+
+[data-theme="tea-smoke-beige"] {
+  --palette-1: #7E6554; --palette-2: #A78A73; --palette-3: #D4B79D; --palette-4: #E9D6BE; --palette-5: #F5EEE4;
+  --schedule-hue-1: 24 20% 38%; --schedule-hue-2: 27 23% 45%; --schedule-hue-3: 28 30% 48%; --schedule-hue-4: 33 30% 45%;
+  --schedule-hue-5: 15 22% 42%; --schedule-hue-6: 38 30% 43%; --schedule-hue-7: 24 28% 48%; --schedule-hue-8: 45 25% 40%;
+  --schedule-hue-9: 10 18% 42%; --schedule-hue-10: 32 20% 36%; --schedule-hue-11: 20 24% 45%; --schedule-hue-12: 40 35% 48%;
+}
+
+[data-theme="sophora-yellow-stone-green"] {
+  --palette-1: #6C7F4F; --palette-2: #C6A348; --palette-3: #D9C89A; --palette-4: #C6D0B0; --palette-5: #F0EADB;
+  --schedule-hue-1: 84 23% 38%; --schedule-hue-2: 43 45% 45%; --schedule-hue-3: 44 38% 48%; --schedule-hue-4: 79 25% 42%;
+  --schedule-hue-5: 65 30% 39%; --schedule-hue-6: 34 38% 42%; --schedule-hue-7: 92 25% 35%; --schedule-hue-8: 50 34% 38%;
+  --schedule-hue-9: 75 20% 45%; --schedule-hue-10: 25 30% 40%; --schedule-hue-11: 105 18% 39%; --schedule-hue-12: 42 50% 50%;
+}
+
+[data-theme="ink-red-gold-sand"] {
+  --palette-1: #8C2F2D; --palette-2: #3E3A39; --palette-3: #9B8778; --palette-4: #D1BB93; --palette-5: #F0E8DC;
+  --schedule-hue-1: 1 51% 36%; --schedule-hue-2: 12 4% 23%; --schedule-hue-3: 26 15% 44%; --schedule-hue-4: 39 35% 45%;
+  --schedule-hue-5: 350 38% 38%; --schedule-hue-6: 18 20% 35%; --schedule-hue-7: 45 28% 40%; --schedule-hue-8: 5 30% 45%;
+  --schedule-hue-9: 28 12% 35%; --schedule-hue-10: 355 45% 30%; --schedule-hue-11: 35 30% 48%; --schedule-hue-12: 15 12% 42%;
+}
+
+[data-theme="mist-blue-silver-gray"] {
+  --palette-1: #607E95; --palette-2: #A8C3D6; --palette-3: #B8AEA6; --palette-4: #E2D0BC; --palette-5: #F3EEE8;
+  --schedule-hue-1: 206 22% 45%; --schedule-hue-2: 205 30% 52%; --schedule-hue-3: 27 11% 45%; --schedule-hue-4: 32 28% 48%;
+  --schedule-hue-5: 216 22% 42%; --schedule-hue-6: 195 24% 45%; --schedule-hue-7: 18 15% 42%; --schedule-hue-8: 38 25% 44%;
+  --schedule-hue-9: 225 20% 47%; --schedule-hue-10: 185 18% 40%; --schedule-hue-11: 10 12% 43%; --schedule-hue-12: 30 20% 40%;
 }
 
 /* Dark Mode support based on system preference */

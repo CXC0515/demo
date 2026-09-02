@@ -110,6 +110,123 @@ const migrations: Migration[] = [
         WHERE class_id = OLD.class_id AND student_id = OLD.student_id;
       END;
     `
+  },
+  {
+    version: 4,
+    sql: `
+      CREATE TABLE schedule_items (
+        id TEXT PRIMARY KEY,
+        day INTEGER NOT NULL CHECK (day BETWEEN 1 AND 7),
+        period INTEGER NOT NULL CHECK (period BETWEEN 1 AND 12),
+        title TEXT NOT NULL,
+        class_id TEXT REFERENCES classes(id) ON UPDATE CASCADE ON DELETE SET NULL,
+        class_name TEXT NOT NULL DEFAULT '',
+        item_type TEXT NOT NULL CHECK (item_type IN ('class', 'meeting', 'research', 'reminder', 'parent-comm', 'grading')),
+        time_text TEXT NOT NULL,
+        scope TEXT NOT NULL CHECK (scope IN ('teacher', 'class')),
+        teacher_name TEXT NOT NULL DEFAULT '',
+        confidence REAL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX schedule_items_scope_day_idx ON schedule_items (scope, day, period);
+      CREATE INDEX schedule_items_class_idx ON schedule_items (class_id, day, period);
+
+      CREATE TABLE timer_reminders (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        class_id TEXT REFERENCES classes(id) ON UPDATE CASCADE ON DELETE SET NULL,
+        class_name TEXT NOT NULL DEFAULT '',
+        time_text TEXT NOT NULL,
+        repeat_rule TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'inactive')),
+        important INTEGER NOT NULL DEFAULT 0 CHECK (important IN (0, 1)),
+        urgent INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1)),
+        due_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `
+  },
+  {
+    version: 5,
+    sql: `
+      CREATE TABLE schedule_periods (
+        period INTEGER PRIMARY KEY CHECK (period BETWEEN 1 AND 12),
+        label TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT INTO schedule_periods (period, label, start_time, end_time, updated_at) VALUES
+        (1, '第一节', '08:00', '08:45', CURRENT_TIMESTAMP),
+        (2, '第二节', '08:55', '09:40', CURRENT_TIMESTAMP),
+        (3, '第三节', '10:00', '10:45', CURRENT_TIMESTAMP),
+        (4, '第四节', '10:55', '11:40', CURRENT_TIMESTAMP),
+        (5, '第五节', '13:30', '14:15', CURRENT_TIMESTAMP),
+        (6, '第六节', '14:25', '15:10', CURRENT_TIMESTAMP),
+        (7, '第七节', '15:20', '16:05', CURRENT_TIMESTAMP),
+        (8, '第八节', '16:15', '17:00', CURRENT_TIMESTAMP);
+    `
+  },
+  {
+    version: 6,
+    sql: `
+      ALTER TABLE timer_reminders ADD COLUMN time_kind TEXT NOT NULL DEFAULT 'none'
+        CHECK (time_kind IN ('none', 'point', 'range'));
+      ALTER TABLE timer_reminders ADD COLUMN start_at TEXT;
+      ALTER TABLE timer_reminders ADD COLUMN end_at TEXT;
+
+      UPDATE timer_reminders
+      SET time_kind = 'point', start_at = due_at
+      WHERE due_at IS NOT NULL AND due_at <> '';
+
+      CREATE INDEX timer_reminders_time_idx
+        ON timer_reminders (status, time_kind, start_at, end_at);
+    `
+  },
+  {
+    version: 7,
+    sql: `
+      PRAGMA foreign_keys = OFF;
+      CREATE TABLE timer_reminders_next (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        class_id TEXT REFERENCES classes(id) ON UPDATE CASCADE ON DELETE SET NULL,
+        class_name TEXT NOT NULL DEFAULT '',
+        time_text TEXT NOT NULL,
+        repeat_rule TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'inactive')),
+        important INTEGER NOT NULL DEFAULT 0 CHECK (important IN (0, 1)),
+        urgent INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1)),
+        due_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        time_kind TEXT NOT NULL DEFAULT 'none' CHECK (time_kind IN ('none', 'point', 'range')),
+        start_at TEXT,
+        end_at TEXT,
+        completed_at TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        assumption_warning TEXT NOT NULL DEFAULT '',
+        recurrence_json TEXT,
+        series_id TEXT,
+        occurrence_number INTEGER NOT NULL DEFAULT 1,
+        generated_from_id TEXT
+      );
+      INSERT INTO timer_reminders_next (
+        id, name, class_id, class_name, time_text, repeat_rule, status, important, urgent, due_at,
+        created_at, updated_at, time_kind, start_at, end_at
+      ) SELECT id, name, class_id, class_name, time_text, repeat_rule, status, important, urgent, due_at,
+        created_at, updated_at, time_kind, start_at, end_at FROM timer_reminders;
+      DROP TABLE timer_reminders;
+      ALTER TABLE timer_reminders_next RENAME TO timer_reminders;
+      CREATE INDEX timer_reminders_time_idx ON timer_reminders (status, time_kind, start_at, end_at);
+      CREATE INDEX timer_reminders_quadrant_idx ON timer_reminders (important, urgent, sort_order);
+      CREATE UNIQUE INDEX timer_reminders_generated_from_idx ON timer_reminders (generated_from_id) WHERE generated_from_id IS NOT NULL;
+      PRAGMA foreign_keys = ON;
+    `
   }
 ];
 

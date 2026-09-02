@@ -44,11 +44,19 @@ export default function Workbench({
   const warningStudents = students.filter(s => s.status === 'warning');
   const outstandingStudents = students.filter(s => s.status === 'outstanding');
 
-  // Today is Wednesday (day = 3) for mock purposes
-  const todaySchedule = schedule.filter(s => s.day === 3);
-
-  // Active reminders
-  const activeReminders = reminders.filter(r => r.status === 'active');
+  const today = new Date();
+  const weekday = today.getDay() === 0 ? 7 : today.getDay();
+  const localDateKey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  const todayLabel = new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'short'}).format(today).replace('星期','周');
+  const todaySchedule = schedule.filter(item => item.day === weekday && (item.scope ?? 'teacher') === 'teacher');
+  const reminderTimestamp = (item:TimerReminder) => item.endAt || item.startAt || item.dueAt || '';
+  const reminderIsOverdue = (item:TimerReminder) => Boolean(reminderTimestamp(item)) && new Date(reminderTimestamp(item)).getTime() < today.getTime();
+  const activeReminders = reminders.filter(item => {
+    if (item.status !== 'active') return false;
+    const timestamp = reminderTimestamp(item);
+    if (!item.timeKind && !item.startAt) return true;
+    return item.timeKind === 'none' || reminderIsOverdue(item) || timestamp.slice(0,10) === localDateKey;
+  }).sort((left,right) => Number(reminderIsOverdue(right))-Number(reminderIsOverdue(left)) || reminderTimestamp(left).localeCompare(reminderTimestamp(right)));
 
   const getNodeIcon = (node: string) => {
     switch (node) {
@@ -264,7 +272,7 @@ export default function Workbench({
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <p className="text-[11px] font-black text-slate-400 uppercase tracking-wider">Today</p>
-                  <h4 className="text-sm font-black text-slate-900 dark:text-slate-50">7月3日 周五</h4>
+                  <h4 className="text-sm font-black text-slate-900 dark:text-slate-50">{todayLabel}</h4>
                 </div>
                 <span className="px-2 py-1 rounded-full bg-slate-100/80 dark:bg-zinc-800/80 text-[11px] font-bold text-slate-500 dark:text-slate-300">
                   {todaySchedule.length + activeReminders.length} 项
@@ -297,10 +305,10 @@ export default function Workbench({
 
                 {activeReminders.slice(0, 2).map(rem => (
                   <div key={rem.id} className="grid grid-cols-[64px_1fr] gap-3 items-start">
-                    <p className="pt-2 text-[11px] font-mono font-black text-amber-700 dark:text-amber-400">{rem.time}</p>
-                    <div className="rounded-2xl bg-amber-50/70 dark:bg-amber-950/15 border border-amber-200/70 dark:border-amber-900/40 border-l-4 border-l-amber-500 p-3">
+                    <p className={`pt-2 text-[11px] font-mono font-black ${reminderIsOverdue(rem)?'text-red-700 dark:text-red-400':'text-amber-700 dark:text-amber-400'}`}>{rem.timeKind==='none'?'待定':rem.startAt?.slice(11,16)||rem.time}</p>
+                    <div className={`rounded-2xl border border-l-4 p-3 ${reminderIsOverdue(rem)?'border-red-200 border-l-red-500 bg-red-50/70 dark:border-red-900/40 dark:bg-red-950/15':'border-amber-200/70 border-l-amber-500 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/15'}`}>
                       <h5 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{rem.name}</h5>
-                      <p className="text-[10px] text-slate-400 mt-0.5">收作业提醒 · {rem.className}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">{reminderIsOverdue(rem)?'已过期':'日程'}{rem.className?` · ${rem.className}`:''}</p>
                     </div>
                   </div>
                 ))}

@@ -1,523 +1,206 @@
-﻿/**
+/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { 
-  Calendar, Clock, Plus, Bell, X, Trash2, Edit, AlertCircle, Check 
-} from 'lucide-react';
-import { ScheduleItem, TimerReminder, SchoolClass } from '../../domain/types';
+import React, { useMemo, useState } from 'react';
+import { AlertCircle, Bell, CalendarDays, Check, Circle, FileScan, GripVertical, LayoutGrid, ListTodo, LoaderCircle, Pencil, Plus, Repeat2, Settings2, Sparkles, Trash2, X } from 'lucide-react';
+import { ReminderImportDraft, ScheduleItem, SchedulePeriod, SchoolClass, TimerReminder } from '../../domain/types';
+import { createReminderImportDraft, importSchedule, ScheduleImportDraft } from '../../services/scheduleApi';
 
-interface ScheduleReminderProps {
-  schedule: ScheduleItem[];
-  reminders: TimerReminder[];
-  classes: SchoolClass[];
-  onAddScheduleItem: (item: ScheduleItem) => void;
-  onUpdateScheduleItem: (item: ScheduleItem) => void;
-  onDeleteScheduleItem: (itemId: string) => void;
-  onAddReminder: (reminder: TimerReminder) => void;
-  onToggleReminderStatus: (reminderId: string) => void;
-  onDeleteReminder: (reminderId: string) => void;
+interface Props {
+  schedule: ScheduleItem[]; reminders: TimerReminder[]; classes: SchoolClass[]; periods: SchedulePeriod[]; showWeekends: boolean;
+  onOpenPeriodSettings: () => void;
+  onAddScheduleItem: (item: ScheduleItem) => void | Promise<void>;
+  onUpdateScheduleItem: (item: ScheduleItem) => void | Promise<void>;
+  onDeleteScheduleItem: (id: string) => void | Promise<void>;
+  onImportSchedule: (items: ScheduleItem[]) => Promise<void>;
+  onAddReminder: (item: TimerReminder) => void | Promise<void>;
+  onAddReminderBatch: (items: TimerReminder[]) => Promise<void>;
+  onToggleReminderStatus: (id: string) => void | Promise<void>;
+  onDeleteReminder: (id: string) => void | Promise<void>;
+}
+const defaultPeriods: SchedulePeriod[] = [
+  ['第一节','08:00','08:45'],['第二节','08:55','09:40'],['第三节','10:00','10:45'],['第四节','10:55','11:40'],
+  ['第五节','13:30','14:15'],['第六节','14:25','15:10'],['第七节','15:20','16:05'],['第八节','16:15','17:00']
+].map(([label,startTime,endTime], index) => ({ period:index+1,label,startTime,endTime }));
+const dayNames = ['周一','周二','周三','周四','周五','周六','周日'];
+const fieldClass = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-emerald-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-slate-100';
+const periodTime = (period: SchedulePeriod | undefined) => period ? `${period.startTime} - ${period.endTime}` : '待确认';
+const emptySchedule = (scope: 'teacher'|'class', classId: string, className: string, day: number, period: number, periods: SchedulePeriod[]): ScheduleItem => ({ id:'', day, period, title:'', classId:scope==='class'?classId:'', className:scope==='class'?className:'', type:'class', time:periodTime(periods[period-1]), scope, teacherName:'' });
+const emptyReminder = (): TimerReminder => ({ id:'', name:'', classId:'', className:'', time:'时间待定', repeatRule:'一次性', status:'active', important:false, urgent:false, timeKind:'none', startAt:'', endAt:'', dueAt:'' });
+const formatReminderTime = (item: Pick<TimerReminder, 'timeKind' | 'startAt' | 'endAt'>) => item.timeKind === 'none' || !item.startAt
+  ? '时间待定'
+  : item.timeKind === 'range' && item.endAt
+    ? `${item.startAt.replace('T',' ')} - ${item.endAt.replace('T',' ')}`
+    : item.startAt.replace('T',' ');
+const isReminderOverdue = (item: TimerReminder, now = new Date()) => item.status === 'active' && Boolean(item.endAt || item.startAt) && new Date(item.endAt || item.startAt || '').getTime() < now.getTime();
+const isUntimedReminder = (item: TimerReminder) => (item.timeKind ?? (item.startAt ? 'point' : 'none')) === 'none';
+const sortRemindersByTime = (left: TimerReminder, right: TimerReminder) => {
+  const leftUntimed = isUntimedReminder(left);
+  const rightUntimed = isUntimedReminder(right);
+  if (leftUntimed !== rightUntimed) return leftUntimed ? -1 : 1;
+  const leftTime = left.startAt ? new Date(left.startAt).getTime() : Number.NEGATIVE_INFINITY;
+  const rightTime = right.startAt ? new Date(right.startAt).getTime() : Number.NEGATIVE_INFINITY;
+  return leftTime - rightTime || left.name.localeCompare(right.name, 'zh-CN');
+};
+const reminderQuadrantTone = (item: TimerReminder) => item.important && item.urgent
+  ? 'border-l-rose-500'
+  : item.important
+    ? 'border-l-amber-500'
+    : item.urgent
+      ? 'border-l-blue-500'
+      : 'border-l-slate-300';
+const stableHash = (value: string) => Array.from(value).reduce((hash, character) => ((hash << 5) - hash + character.charCodeAt(0)) | 0, 0);
+const createScheduleColorSlots = (keys: string[]) => {
+  const slots = new Map<string, number>();
+  const used = new Set<number>();
+  [...new Set(keys.filter(Boolean))].sort().forEach(key => {
+    let slot = Math.abs(stableHash(key)) % 12 + 1;
+    while (used.has(slot) && used.size < 12) slot = slot % 12 + 1;
+    used.add(slot);
+    slots.set(key, slot);
+  });
+  return slots;
+};
+
+export default function ScheduleReminder(props: Props) {
+  const activeClasses = props.classes.filter(item => item.status === 'active');
+  const [section,setSection] = useState<'schedule'|'reminders'>('schedule');
+  const [scope,setScope] = useState<'teacher'|'class'>('teacher');
+  const [classId,setClassId] = useState(activeClasses[0]?.id??'');
+  const [reminderView,setReminderView] = useState<'list'|'quadrant'>('quadrant');
+  const [editingSchedule,setEditingSchedule] = useState<ScheduleItem|null>(null);
+  const [editingReminder,setEditingReminder] = useState<TimerReminder|null>(null);
+  const [showImport,setShowImport] = useState(false);
+  const [showReminderImport,setShowReminderImport] = useState(false);
+  const effectiveClassId = classId || activeClasses[0]?.id || '';
+  const selectedClass = activeClasses.find(item=>item.id===effectiveClassId);
+  const periods = props.periods.length ? props.periods : defaultPeriods;
+  const visibleDays = props.showWeekends ? 7 : 5;
+  const filtered = useMemo(()=>props.schedule.filter(item=>scope==='teacher' ? (item.scope??'teacher')==='teacher' : item.scope==='class'&&item.classId===effectiveClassId),[props.schedule,scope,effectiveClassId]);
+  const itemMap = useMemo(()=>new Map(filtered.map(item=>[`${item.day}-${item.period}`,item])),[filtered]);
+  const colorSlots = useMemo(() => createScheduleColorSlots(filtered.map(item => scope === 'teacher' ? item.classId || item.className : item.title.trim().toLocaleLowerCase())), [filtered, scope]);
+
+  const saveCourse = async () => {
+    if (!editingSchedule) return;
+    const selected = activeClasses.find(item=>item.id===editingSchedule.classId);
+    const defaultTitle = periods.find(period => period.period === editingSchedule.period)?.label ?? `第${editingSchedule.period}节`;
+    const item = {...editingSchedule,title:editingSchedule.title.trim()||defaultTitle,className:selected?.name??editingSchedule.className,id:editingSchedule.id||crypto.randomUUID()};
+    await (editingSchedule.id ? props.onUpdateScheduleItem(item) : props.onAddScheduleItem(item));
+    setEditingSchedule(null);
+  };
+  const saveReminderItem = async () => {
+    if (!editingReminder?.name.trim()) return;
+    const selected = activeClasses.find(item=>item.id===editingReminder.classId);
+    await props.onAddReminder({...editingReminder,className:selected?.name??'',id:editingReminder.id||crypto.randomUUID()});
+    setEditingReminder(null);
+  };
+  return <div className="flex h-full min-h-0 flex-col gap-4 animate-fade-in" id="schedule-page">
+    <header className="flex shrink-0 border-b border-slate-200 pb-4 dark:border-zinc-800">
+      <nav className="inline-flex w-fit rounded-xl bg-slate-100 p-1 dark:bg-zinc-900" aria-label="课表与日程子页面"><Tab active={section==='schedule'} onClick={()=>setSection('schedule')} icon={CalendarDays}>课表</Tab><Tab active={section==='reminders'} onClick={()=>setSection('reminders')} icon={Bell}>日程</Tab></nav>
+    </header>
+    {section==='schedule' ? <section className="flex min-h-0 flex-1 flex-col gap-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2.5 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="inline-flex rounded-lg bg-slate-100 p-1 dark:bg-zinc-800"><button onClick={()=>setScope('teacher')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${scope==='teacher'?'bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-300':'text-slate-500'}`}>我的课表</button><button onClick={()=>setScope('class')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${scope==='class'?'bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-300':'text-slate-500'}`}>班级课表</button></div>
+        {scope==='class'&&<select value={effectiveClassId} onChange={e=>setClassId(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold dark:border-zinc-700 dark:bg-zinc-950">{activeClasses.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>}
+        <span className="text-xs text-slate-400">{props.showWeekends?'显示周一至周日':'显示周一至周五'}</span>
+        <div className="ml-auto flex items-center gap-2"><button onClick={props.onOpenPeriodSettings} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-slate-300"><Settings2 className="h-4 w-4"/>设置课节时间</button><button onClick={()=>setShowImport(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-bold text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"><FileScan className="h-4 w-4"/>扫描导入</button></div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"><div style={{minWidth:`${150+visibleDays*142}px`}}>
+        <div className="sticky top-0 z-20 grid border-b border-slate-200 bg-slate-50 text-center text-xs font-bold text-slate-500 dark:border-zinc-800 dark:bg-zinc-950" style={{gridTemplateColumns:`150px repeat(${visibleDays},minmax(142px,1fr))`}}><div className="sticky left-0 z-30 bg-slate-50 px-4 py-3 text-left dark:bg-zinc-950">课节 / 时段</div>{dayNames.slice(0,visibleDays).map(day=><div key={day} className="border-l border-slate-200 px-3 py-3 dark:border-zinc-800">{day}</div>)}</div>
+        {periods.map(period=><div key={period.period} className="grid min-h-[70px] border-b border-slate-100 last:border-b-0 dark:border-zinc-800" style={{gridTemplateColumns:`150px repeat(${visibleDays},minmax(142px,1fr))`}}><div className="sticky left-0 z-10 flex flex-col justify-center bg-slate-50/95 px-4 dark:bg-zinc-950/95"><strong className="text-xs">{period.label}</strong><span className="mt-1 font-mono text-[10px] text-slate-400">{periodTime(period)}</span></div>{Array.from({length:visibleDays},(_,di)=>{const item=itemMap.get(`${di+1}-${period.period}`);const colorKey=item?(scope==='teacher'?item.classId||item.className:item.title.trim().toLocaleLowerCase()):'';return <ScheduleCell key={di} item={item} scope={scope} colorSlot={colorSlots.get(colorKey)} onClick={()=>setEditingSchedule(item??emptySchedule(scope,effectiveClassId,selectedClass?.name??'',di+1,period.period,periods))}/>})}</div>)}
+      </div></div>
+    </section>:(
+      <ReminderWorkspace reminders={props.reminders} view={reminderView} onView={setReminderView} onAdd={()=>setEditingReminder(emptyReminder())} onBatch={()=>setShowReminderImport(true)} onEdit={setEditingReminder} onSave={props.onAddReminder} onToggle={props.onToggleReminderStatus} onDelete={props.onDeleteReminder}/>
+    )}
+    {editingSchedule&&<ScheduleEditor item={editingSchedule} periods={periods} classes={activeClasses} onChange={setEditingSchedule} onClose={()=>setEditingSchedule(null)} onSave={()=>void saveCourse()} onDelete={editingSchedule.id?async()=>{await props.onDeleteScheduleItem(editingSchedule.id);setEditingSchedule(null)}:undefined}/>}
+    {editingReminder&&<ReminderEditor item={editingReminder} classes={activeClasses} onChange={setEditingReminder} onClose={()=>setEditingReminder(null)} onSave={()=>void saveReminderItem()}/>}
+    {showImport&&<ImportDialog scope={scope} classId={effectiveClassId} classes={activeClasses} periods={periods} onClose={()=>setShowImport(false)} onApply={items=>props.onImportSchedule(items.map(item=>({...item,time:periodTime(periods.find(period=>period.period===item.period))})))} />}
+    {showReminderImport&&<ReminderImportDialog classes={activeClasses} onClose={()=>setShowReminderImport(false)} onApply={props.onAddReminderBatch}/>}
+  </div>;
 }
 
-export default function ScheduleReminder({
-  schedule,
-  reminders,
-  classes,
-  onAddScheduleItem,
-  onUpdateScheduleItem,
-  onDeleteScheduleItem,
-  onAddReminder,
-  onToggleReminderStatus,
-  onDeleteReminder
-}: ScheduleReminderProps) {
-  const [selectedClassId, setSelectedClassId] = useState<string>('all');
-  const [showScheduleModal, setShowScheduleModal] = useState(false);
-  const [showReminderModal, setShowReminderModal] = useState(false);
-  const [selectedCell, setSelectedCell] = useState<{ day: number; period: number } | null>(null);
-  const [editingItem, setEditingItem] = useState<ScheduleItem | null>(null);
+function Tab({active,onClick,icon:Icon,children}:{active:boolean;onClick:()=>void;icon:React.ElementType;children:React.ReactNode}) { return <button onClick={onClick} className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-bold ${active?'bg-white text-slate-900 shadow-sm dark:bg-zinc-800 dark:text-white':'text-slate-500'}`}><Icon className="h-4 w-4"/>{children}</button>; }
+function Modal({title,onClose,children,footer,wide=false}:{title:string;onClose:()=>void;children:React.ReactNode;footer:React.ReactNode;wide?:boolean}) { return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"><div className={`max-h-[90vh] w-full overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl dark:bg-zinc-900 ${wide?'max-w-5xl':'max-w-2xl'}`}><div className="mb-4 flex items-center justify-between"><h3 className="font-black">{title}</h3><button onClick={onClose} aria-label="关闭"><X className="h-5 w-5 text-slate-400"/></button></div>{children}<div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4 dark:border-zinc-800">{footer}</div></div></div>; }
 
-  // Forms states
-  const [scheduleForm, setScheduleForm] = useState<Partial<ScheduleItem>>({
-    title: '',
-    classId: 'c1',
-    type: 'class',
-    time: '08:00 - 08:45'
-  });
-
-  const [reminderForm, setReminderForm] = useState<Partial<TimerReminder>>({
-    name: '',
-    classId: 'c1',
-    time: '每周一 08:00',
-    repeatRule: '每周一',
-    status: 'active'
-  });
-
-  const weekdays = ['周一', '周二', '周三', '周四', '周五'];
-  const periods = [
-    { num: 1, name: '第一节', time: '08:00 - 08:45' },
-    { num: 2, name: '第二节', time: '08:55 - 09:40' },
-    { num: 3, name: '第三节', time: '10:00 - 10:45' },
-    { num: 4, name: '第四节', time: '10:55 - 11:40' },
-    { num: 5, name: '第五节', time: '13:30 - 14:15' },
-    { num: 6, name: '第六节', time: '14:25 - 15:10' },
-    { num: 7, name: '第七节', time: '15:20 - 16:05' },
-    { num: 8, name: '第八节', time: '16:15 - 17:00' }
-  ];
-
-  // Filter schedule by class
-  const filteredSchedule = schedule.filter(item => {
-    return selectedClassId === 'all' || item.classId === selectedClassId || item.classId === '';
-  });
-
-  // Get item in a cell
-  const getItemInCell = (day: number, period: number) => {
-    return filteredSchedule.find(item => item.day === day && item.period === period);
-  };
-
-  const handleCellClick = (day: number, period: number) => {
-    const existing = getItemInCell(day, period);
-    setSelectedCell({ day, period });
-
-    if (existing) {
-      setEditingItem(existing);
-      setScheduleForm({ ...existing });
-    } else {
-      setEditingItem(null);
-      const periodTime = periods.find(p => p.num === period)?.time || '08:00 - 08:45';
-      setScheduleForm({
-        title: '',
-        classId: selectedClassId === 'all' ? 'c1' : selectedClassId,
-        type: 'class',
-        time: periodTime
-      });
-    }
-    setShowScheduleModal(true);
-  };
-
-  const handleSaveScheduleItem = () => {
-    if (!scheduleForm.title) {
-      alert('请填写活动内容名称！');
-      return;
-    }
-
-    const selectedClass = classes.find(c => c.id === scheduleForm.classId);
-    const itemData = {
-      ...scheduleForm,
-      className: selectedClass ? selectedClass.name : (scheduleForm.classId === '' ? '全体教师' : ''),
-      day: selectedCell?.day || 1,
-      period: selectedCell?.period || 1
-    } as ScheduleItem;
-
-    if (editingItem) {
-      onUpdateScheduleItem(itemData);
-    } else {
-      onAddScheduleItem({
-        ...itemData,
-        id: 'sch_gen_' + Date.now()
-      });
-    }
-    setShowScheduleModal(false);
-  };
-
-  const handleDeleteScheduleItem = () => {
-    if (editingItem) {
-      onDeleteScheduleItem(editingItem.id);
-      setShowScheduleModal(false);
-    }
-  };
-
-  const handleCreateReminder = () => {
-    if (!reminderForm.name) {
-      alert('请填写提醒名称！');
-      return;
-    }
-    const selectedClass = classes.find(c => c.id === reminderForm.classId);
-    onAddReminder({
-      ...reminderForm,
-      id: 'rem_gen_' + Date.now(),
-      className: selectedClass ? selectedClass.name : '',
-      status: 'active'
-    } as TimerReminder);
-
-    setShowReminderModal(false);
-    // Reset
-    setReminderForm({
-      name: '',
-      classId: 'c1',
-      time: '每周一 08:00',
-      repeatRule: '每周一',
-      status: 'active'
-    });
-  };
-
-  const getTypeStyle = (type: string) => {
-    switch (type) {
-      case 'class':
-        return 'bg-emerald-500/10 hover:bg-emerald-500/15 text-emerald-800 dark:text-emerald-400 border-emerald-500/20';
-      case 'meeting':
-        return 'bg-rose-500/10 hover:bg-rose-500/15 text-rose-800 dark:text-rose-400 border-rose-500/20';
-      case 'research':
-        return 'bg-blue-500/10 hover:bg-blue-500/15 text-blue-800 dark:text-blue-400 border-blue-500/20';
-      case 'reminder':
-        return 'bg-amber-500/10 hover:bg-amber-500/15 text-amber-800 dark:text-amber-400 border-amber-500/20';
-      case 'parent-comm':
-        return 'bg-purple-500/10 hover:bg-purple-500/15 text-purple-800 dark:text-purple-400 border-purple-500/20';
-      case 'grading':
-        return 'bg-indigo-500/10 hover:bg-indigo-500/15 text-indigo-800 dark:text-indigo-400 border-indigo-500/20';
-      default:
-        return 'bg-slate-500/10 hover:bg-slate-500/15 text-slate-800 dark:text-slate-400 border-slate-500/20';
-    }
-  };
-
-  const getTypeName = (type: string) => {
-    switch (type) {
-      case 'class': return '语文课';
-      case 'meeting': return '校内会议';
-      case 'research': return '语文教研';
-      case 'reminder': return '收作业提醒';
-      case 'parent-comm': return '家校沟通';
-      case 'grading': return 'AI 批改任务';
-      default: return '普通事件';
-    }
-  };
-
-  return (
-    <div className="flex flex-col xl:flex-row gap-6 h-full animate-fade-in" id="schedule-page">
-      
-      {/* Week Schedule Grid */}
-      <div className="flex-1 flex flex-col space-y-4 min-w-0">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 glass-panel rounded-2xl p-4">
-          <div>
-            <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-emerald-700 dark:text-emerald-400" />
-              课表日程
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              点击空白单元格即可手动录入课程、研讨会或学生预约；支持直接修改。
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <select
-              id="schedule-class-filter"
-              value={selectedClassId}
-              onChange={(e) => setSelectedClassId(e.target.value)}
-              className="px-3 py-1.5 bg-slate-50 dark:bg-zinc-850 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs text-slate-600 dark:text-slate-300 font-medium cursor-pointer"
-            >
-              <option value="all">全课程与教研</option>
-              {classes.filter(c => c.status === 'active').map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Calendar Grid Container */}
-        <div className="glass-panel rounded-3xl overflow-hidden shadow-inner">
-          <div className="overflow-x-auto">
-            <div className="min-w-[800px]">
-              
-              {/* Header: Days */}
-              <div className="grid grid-cols-6 bg-slate-50 dark:bg-zinc-800/40 border-b border-slate-100 dark:border-zinc-800 font-bold text-center text-[11px] text-slate-400 uppercase tracking-wider py-3">
-                <div className="text-left pl-4">课节 / 时段</div>
-                {weekdays.map((day, idx) => (
-                  <div key={idx} className="border-l border-slate-100 dark:border-zinc-800">{day}</div>
-                ))}
-              </div>
-
-              {/* Grid Rows: 8 Periods */}
-              <div className="divide-y divide-slate-100 dark:divide-zinc-800/40">
-                {periods.map(p => (
-                  <div key={p.num} className="grid grid-cols-6 items-stretch min-h-[64px]">
-                    
-                    {/* Time cell */}
-                    <div className="p-3 bg-slate-50/40 dark:bg-zinc-850/10 flex flex-col justify-center">
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{p.name}</span>
-                      <span className="text-[10px] text-slate-400 font-mono mt-0.5">{p.time}</span>
-                    </div>
-
-                    {/* Weekdays cell */}
-                    {[1, 2, 3, 4, 5].map(day => {
-                      const item = getItemInCell(day, p.num);
-                      return (
-                        <div
-                          key={day}
-                          id={`sch-cell-${day}-${p.num}`}
-                          onClick={() => handleCellClick(day, p.num)}
-                          className={`p-1.5 border-l border-slate-100 dark:border-zinc-850 cursor-pointer transition-all flex flex-col justify-center min-h-[64px] ${
-                            item 
-                              ? 'bg-transparent' 
-                              : 'hover:bg-slate-50/60 dark:hover:bg-zinc-800/10'
-                          }`}
-                        >
-                          {item ? (
-                            <div className={`h-full p-2 rounded-xl border text-[11px] flex flex-col justify-between font-medium ${getTypeStyle(item.type)}`}>
-                              <div className="space-y-0.5">
-                                <span className="text-[9px] opacity-75 block font-semibold">{getTypeName(item.type)}</span>
-                                <span className="font-bold leading-tight block">{item.title}</span>
-                              </div>
-                              <span className="text-[9px] opacity-60 self-end truncate max-w-full">{item.className}</span>
-                            </div>
-                          ) : (
-                            <span className="text-[9px] text-slate-300 hover:text-emerald-500 text-center opacity-0 hover:opacity-100">
-                              + 安排
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-
-                  </div>
-                ))}
-              </div>
-
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Right Reminders List */}
-      <div className="w-full xl:w-[320px] flex-shrink-0 flex flex-col space-y-4">
-        <div className="flex items-center justify-between glass-panel rounded-2xl p-4">
-          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-            <Bell className="w-4.5 h-4.5 text-emerald-600 dark:text-emerald-400" />
-            定时提醒与闹钟
-          </h3>
-          <button
-            onClick={() => setShowReminderModal(true)}
-            className="px-2.5 py-1 bg-emerald-700/10 hover:bg-emerald-700 hover:text-white dark:bg-emerald-500/10 dark:hover:bg-emerald-500 text-emerald-800 dark:text-emerald-300 rounded-lg text-xs font-semibold cursor-pointer"
-          >
-            添加提醒
-          </button>
-        </div>
-
-        {/* Reminders layout */}
-        <div className="glass-panel rounded-3xl p-5 flex-1 space-y-4">
-          <div className="space-y-3">
-            {reminders.map(rem => (
-              <div 
-                key={rem.id}
-                id={`rem-card-${rem.id}`}
-                className={`p-3.5 rounded-2xl border transition-all ${
-                  rem.status === 'active' 
-                    ? 'bg-slate-50 dark:bg-zinc-800/40 border-slate-200 dark:border-zinc-800' 
-                    : 'bg-slate-100/30 dark:bg-zinc-900/10 border-slate-100 dark:border-zinc-900 opacity-50'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-mono font-bold text-slate-400 block tracking-wider uppercase">
-                      {rem.repeatRule} · {rem.className}
-                    </span>
-                    <h5 className="text-xs font-semibold text-slate-700 dark:text-slate-200">{rem.name}</h5>
-                    <p className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold font-mono flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      触发时间：{rem.time}
-                    </p>
-                  </div>
-
-                  {/* Toggle switch */}
-                  <div 
-                    onClick={() => onToggleReminderStatus(rem.id)}
-                    className={`w-9 h-5 rounded-full p-0.5 cursor-pointer transition-colors flex items-center ${
-                      rem.status === 'active' ? 'bg-emerald-600 justify-end' : 'bg-slate-300 justify-start'
-                    }`}
-                  >
-                    <span className="w-4 h-4 rounded-full bg-white shadow-sm"></span>
-                  </div>
-                </div>
-
-                {/* Delete button on hover/footer */}
-                <div className="flex justify-end mt-2 pt-2 border-t border-dashed border-slate-200/60 dark:border-zinc-800/60">
-                  <button
-                    onClick={() => onDeleteReminder(rem.id)}
-                    className="p-1 text-slate-400 hover:text-red-500 rounded cursor-pointer transition-all"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
-
-            {reminders.length === 0 && (
-              <span className="text-xs text-slate-400 italic block text-center pt-8">暂无配置收发作业等定时闹钟。</span>
-            )}
-          </div>
-        </div>
-
-      </div>
-
-      {/* Schedule Item Add/Edit Modal */}
-      {showScheduleModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl border">
-            <div className="flex justify-between items-center border-b pb-2">
-              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                {editingItem ? '修改日程' : '安排时段事件'}
-              </h3>
-              <button onClick={() => setShowScheduleModal(false)}>
-                <X className="w-4 h-4 text-slate-400" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 block uppercase">时段与单元格</label>
-                <div className="px-3 py-2 bg-slate-50 dark:bg-zinc-800 rounded-lg font-mono">
-                  周{selectedCell?.day} · 第{selectedCell?.period}节课 ({scheduleForm.time})
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 block uppercase">事项内容/名称</label>
-                <input
-                  type="text"
-                  value={scheduleForm.title || ''}
-                  onChange={(e) => setScheduleForm({ ...scheduleForm, title: e.target.value })}
-                  placeholder="如：初中语文 - 3 班"
-                  className="w-full px-3 py-1.5 border rounded-lg focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 block uppercase">类型</label>
-                  <select
-                    value={scheduleForm.type || 'class'}
-                    onChange={(e) => setScheduleForm({ ...scheduleForm, type: e.target.value as any })}
-                    className="w-full px-2.5 py-1.5 border rounded-lg"
-                  >
-                    <option value="class">语文课</option>
-                    <option value="meeting">校内会议</option>
-                    <option value="research">语文教研</option>
-                    <option value="reminder">收作业提醒</option>
-                    <option value="parent-comm">家校沟通</option>
-                    <option value="grading">AI 批改任务</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 block uppercase">关联班级</label>
-                  <select
-                    value={scheduleForm.classId || ''}
-                    onChange={(e) => setScheduleForm({ ...scheduleForm, classId: e.target.value })}
-                    className="w-full px-2.5 py-1.5 border rounded-lg"
-                  >
-                    <option value="">无 / 全体教师</option>
-                    {classes.filter(c => c.status === 'active').map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-between gap-2 pt-2 border-t text-xs">
-              <div>
-                {editingItem && (
-                  <button 
-                    onClick={handleDeleteScheduleItem}
-                    className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500 hover:text-white text-red-700 rounded-lg cursor-pointer"
-                  >
-                    删除
-                  </button>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => setShowScheduleModal(false)} className="px-3 py-1.5 bg-slate-100 rounded-lg">
-                  取消
-                </button>
-                <button onClick={handleSaveScheduleItem} className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg">
-                  保存事项
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Reminder Add Modal */}
-      {showReminderModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl border">
-            <div className="flex justify-between items-center border-b pb-2">
-              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                新建定时收作业提醒
-              </h3>
-              <button onClick={() => setShowReminderModal(false)}>
-                <X className="w-4 h-4 text-slate-400" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 block uppercase">提醒事宜</label>
-                <input
-                  type="text"
-                  value={reminderForm.name || ''}
-                  onChange={(e) => setReminderForm({ ...reminderForm, name: e.target.value })}
-                  placeholder="例如：周二下午收取现代文随堂小练"
-                  className="w-full px-3 py-1.5 border rounded-lg focus:outline-none"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 block uppercase">关联班级</label>
-                <select
-                  value={reminderForm.classId || 'c1'}
-                  onChange={(e) => setReminderForm({ ...reminderForm, classId: e.target.value })}
-                  className="w-full px-2.5 py-1.5 border rounded-lg"
-                >
-                  {classes.filter(c => c.status === 'active').map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 block uppercase">定时设置描述</label>
-                  <input
-                    type="text"
-                    value={reminderForm.time || ''}
-                    onChange={(e) => setReminderForm({ ...reminderForm, time: e.target.value })}
-                    placeholder="如：每周二 16:00"
-                    className="w-full px-3 py-1.5 border rounded-lg focus:outline-none"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 block uppercase">周期规则</label>
-                  <select
-                    value={reminderForm.repeatRule || '每周二'}
-                    onChange={(e) => setReminderForm({ ...reminderForm, repeatRule: e.target.value })}
-                    className="w-full px-2.5 py-1.5 border rounded-lg"
-                  >
-                    <option>每周一</option>
-                    <option>每周二</option>
-                    <option>每周三</option>
-                    <option>每周四</option>
-                    <option>每周五</option>
-                    <option>一次性</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t text-xs">
-              <button onClick={() => setShowReminderModal(false)} className="px-3 py-1.5 bg-slate-100 rounded-lg">
-                取消
-              </button>
-              <button onClick={handleCreateReminder} className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg">
-                创建提醒闹钟
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
+function ScheduleCell({item,scope,colorSlot,onClick}:{key?:React.Key;item:ScheduleItem|undefined;scope:'teacher'|'class';colorSlot:number|undefined;onClick:()=>void}) {
+  if (!item) return <button onClick={onClick} className="min-w-0 border-l border-slate-100 p-1.5 text-left hover:bg-emerald-50/50 dark:border-zinc-800 dark:hover:bg-emerald-950/20"><span className="flex h-full items-center justify-center text-[10px] text-slate-300">＋ 安排</span></button>;
+  const hasClass = Boolean(item.classId || item.className);
+  const primary = scope === 'teacher' ? (hasClass ? item.className : item.title) : item.title;
+  const secondary = scope === 'teacher' ? (hasClass ? item.title : '个人事项') : item.teacherName || '';
+  const lowConfidence = item.confidence !== undefined && item.confidence < .75;
+  const style = !lowConfidence && colorSlot ? {
+    backgroundColor:`hsl(var(--schedule-hue-${colorSlot}) / 0.13)`,
+    borderColor:`hsl(var(--schedule-hue-${colorSlot}) / 0.38)`,
+    color:`hsl(var(--schedule-hue-${colorSlot}))`
+  } : undefined;
+  return <button onClick={onClick} className="min-w-0 border-l border-slate-100 p-1.5 text-center hover:bg-slate-50 dark:border-zinc-800 dark:hover:bg-zinc-800/40"><span style={style} className={`flex h-full min-w-0 flex-col items-center justify-center rounded-lg border px-2.5 py-2 text-center ${lowConfidence?'border-amber-300 bg-amber-50 text-amber-900':colorSlot?'':'border-slate-200 bg-slate-50 text-slate-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-slate-200'}`}><strong className="w-full truncate text-sm">{primary}</strong>{secondary?<span className="mt-1 w-full truncate text-[10px] opacity-75">{secondary}</span>:null}</span></button>;
 }
 
+function ScheduleEditor({item,periods,classes,onChange,onClose,onSave,onDelete}:{item:ScheduleItem;periods:SchedulePeriod[];classes:SchoolClass[];onChange:(item:ScheduleItem)=>void;onClose:()=>void;onSave:()=>void;onDelete?:()=>void}) { const defaultTitle=periods.find(period=>period.period===item.period)?.label??`第${item.period}节`;return <Modal title={item.id?'编辑课程':'安排课程'} onClose={onClose} footer={<><button onClick={onClose} className="rounded-lg px-3 py-2 text-xs font-bold text-slate-500">取消</button>{onDelete&&<button onClick={onDelete} className="mr-auto rounded-lg px-3 py-2 text-xs font-bold text-red-600">删除</button>}<button onClick={onSave} className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-bold text-white">保存</button></>}><div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-bold text-slate-500 sm:col-span-2">课程内容<input className={`${fieldClass} mt-1.5`} value={item.title} placeholder={`留空则使用“${defaultTitle}”`} onChange={e=>onChange({...item,title:e.target.value})}/></label><label className="text-xs font-bold text-slate-500">星期<select className={`${fieldClass} mt-1.5`} value={item.day} onChange={e=>onChange({...item,day:Number(e.target.value)})}>{dayNames.map((d,i)=><option key={d} value={i+1}>{d}</option>)}</select></label><label className="text-xs font-bold text-slate-500">课节<select className={`${fieldClass} mt-1.5`} value={item.period} onChange={e=>{const selectedPeriod=periods.find(period=>period.period===Number(e.target.value));onChange({...item,period:Number(e.target.value),time:periodTime(selectedPeriod)})}}>{periods.map(period=><option key={period.period} value={period.period}>{period.label}</option>)}</select></label><label className="text-xs font-bold text-slate-500">时间<input className={`${fieldClass} mt-1.5 bg-slate-50 text-slate-500 dark:bg-zinc-800`} value={periodTime(periods.find(period=>period.period===item.period))} readOnly/><span className="mt-1 block text-[10px] font-normal text-slate-400">统一在学校作息设置中调整</span></label>{item.scope==='teacher'?<label className="text-xs font-bold text-slate-500">上课班级<select className={`${fieldClass} mt-1.5`} value={item.classId} onChange={e=>onChange({...item,classId:e.target.value})}><option value="">无 / 个人事项</option>{classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>:<label className="text-xs font-bold text-slate-500">任课教师<input className={`${fieldClass} mt-1.5`} value={item.teacherName??''} onChange={e=>onChange({...item,teacherName:e.target.value})}/></label>}</div></Modal>; }
+
+function ReminderWorkspace({reminders,view,onView,onAdd,onBatch,onEdit,onSave,onToggle,onDelete}:{reminders:TimerReminder[];view:'list'|'quadrant';onView:(v:'list'|'quadrant')=>void;onAdd:()=>void;onBatch:()=>void;onEdit:(item:TimerReminder)=>void;onSave:(item:TimerReminder)=>void|Promise<void>;onToggle:(id:string)=>void|Promise<void>;onDelete:(id:string)=>void|Promise<void>}) {
+  const [draggedId,setDraggedId]=useState<string|null>(null);
+  const quadrants=[['重要且紧急',true,true,'border-rose-200'],['重要不紧急',true,false,'border-amber-200'],['紧急不重要',false,true,'border-blue-200'],['不重要不紧急',false,false,'border-slate-200']] as const;
+  const activeItems=reminders.filter(item=>item.status==='active').sort(sortRemindersByTime);
+  const moveToQuadrant=(important:boolean,urgent:boolean)=>{const item=reminders.find(entry=>entry.id===draggedId);if(!item)return;const target=activeItems.filter(entry=>Boolean(entry.important)===important&&Boolean(entry.urgent)===urgent);void onSave({...item,important,urgent,sortOrder:Math.max(-1,...target.map(entry=>entry.sortOrder??0))+1});setDraggedId(null)};
+  const card=(item:TimerReminder,movable:boolean)=><ReminderCard key={item.id} item={item} movable={movable} showQuadrantTone={!movable} onEdit={onEdit} onToggle={onToggle} onDelete={onDelete} onDragStart={()=>setDraggedId(item.id)} />;
+  const untimed=activeItems.filter(isUntimedReminder);const timed=activeItems.filter(item=>!isUntimedReminder(item));const overdue=timed.filter(item=>isReminderOverdue(item));const upcoming=timed.filter(item=>!isReminderOverdue(item));const completed=reminders.filter(item=>item.status==='completed').sort(sortRemindersByTime);const inactive=reminders.filter(item=>item.status==='inactive').sort(sortRemindersByTime);
+  const group=(label:string,items:TimerReminder[],tone='text-slate-500')=>items.length?<section><h3 className={`mb-2 text-xs font-black ${tone}`}>{label} · {items.length}</h3><div className="space-y-2">{items.map(item=>card(item,false))}</div></section>:null;
+  return <section className="min-h-0 flex-1"><div className="mb-3 flex flex-wrap items-center gap-2"><div className="inline-flex rounded-lg bg-slate-100 p-1 dark:bg-zinc-900"><Tab active={view==='quadrant'} onClick={()=>onView('quadrant')} icon={LayoutGrid}>四象限</Tab><Tab active={view==='list'} onClick={()=>onView('list')} icon={ListTodo}>清单</Tab></div><div className="ml-auto flex items-center gap-2"><button onClick={onBatch} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-bold text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"><Sparkles className="h-4 w-4"/>AI 批量创建</button><button onClick={onAdd} className="inline-flex h-9 items-center gap-1 rounded-lg bg-emerald-700 px-3 text-xs font-bold text-white"><Plus className="h-4 w-4"/>新建日程</button></div></div>{view==='list'?<div className="space-y-5">{group('时间待定',untimed,'text-amber-700')}{group('已过期',overdue,'text-red-600')}{group('接下来',upcoming)}{group('已完成',completed,'text-emerald-700')}{group('已停用',inactive)}{!reminders.length&&<Empty/>}</div>:<div className="grid min-h-0 gap-3 md:grid-cols-2">{quadrants.map(([label,important,urgent,color])=><div key={label} onDragOver={event=>event.preventDefault()} onDrop={()=>moveToQuadrant(important,urgent)} className={`min-h-44 rounded-2xl border bg-white p-3 transition-colors ${color} ${draggedId?'border-dashed':'dark:border-zinc-800'} dark:bg-zinc-900/50`}><h3 className="mb-3 text-xs font-black">{label}</h3><div className="space-y-2">{activeItems.filter(item=>Boolean(item.important)===important&&Boolean(item.urgent)===urgent).map(item=>card(item,true))}</div></div>)}</div>}</section>;
+}
+
+function ReminderCard({item,movable,showQuadrantTone,onEdit,onToggle,onDelete,onDragStart}:{key?:React.Key;item:TimerReminder;movable:boolean;showQuadrantTone:boolean;onEdit:(item:TimerReminder)=>void;onToggle:(id:string)=>void|Promise<void>;onDelete:(id:string)=>void|Promise<void>;onDragStart:()=>void}) {
+  const overdue=isReminderOverdue(item);const untimed=(item.timeKind??(item.startAt?'point':'none'))==='none';const completed=item.status==='completed';
+  return <article draggable={movable&&item.status==='active'} onDragStart={movable?onDragStart:undefined} className={`group rounded-xl border p-3 ${showQuadrantTone?`border-l-4 ${reminderQuadrantTone(item)}`:''} ${completed?'border-slate-200 bg-slate-50 opacity-70 dark:border-zinc-700 dark:bg-zinc-900':overdue?'border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950/20':untimed||item.assumptionWarning?'border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/20':'border-slate-200 bg-white dark:border-zinc-700 dark:bg-zinc-900'}`}><div className="flex items-start gap-2.5"><button onClick={()=>void onToggle(item.id)} className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border-2 ${completed?'border-emerald-700 bg-emerald-700 text-white':'border-slate-400 bg-white text-transparent hover:border-emerald-700'}`} aria-label={completed?'恢复日程':'完成日程'}>{completed?<Check className="h-3 w-3"/>:<Circle className="h-2 w-2"/>}</button><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-1.5"><h4 className={`text-sm font-bold ${completed?'line-through':''}`}>{item.name}</h4>{overdue?<span className="rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-black text-red-700">已过期</span>:null}{untimed&&item.status==='active'?<span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black text-amber-700">时间待定</span>:null}{item.assumptionWarning?<span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black text-amber-700">{item.assumptionWarning}</span>:null}</div><p className="mt-1 text-[10px] text-slate-500">{item.repeatRule} · {formatReminderTime(item)}{item.className?` · ${item.className}`:''}</p></div>{movable?<GripVertical className="mt-0.5 h-4 w-4 shrink-0 cursor-grab text-slate-300" aria-label="拖动日程"/>:null}<button onClick={()=>onEdit(item)} className="rounded-md p-1 hover:bg-slate-100 dark:hover:bg-zinc-800" aria-label="编辑日程"><Pencil className="h-4 w-4 text-slate-500"/></button><button onClick={()=>void onDelete(item.id)} className="rounded-md p-1 hover:bg-red-50 dark:hover:bg-red-950/30" aria-label="删除日程"><Trash2 className="h-4 w-4 text-slate-400"/></button></div></article>;
+}
+
+function Empty(){return <div className="rounded-2xl border border-dashed border-slate-300 py-16 text-center text-sm text-slate-400">还没有日程</div>}
+
+function recurrenceLabel(item:TimerReminder) { const recurrence=item.recurrence;if(!recurrence?.enabled)return '一次性';const unit={day:'天',week:'周',month:'月',year:'年'}[recurrence.unit];return `每 ${recurrence.interval>1?recurrence.interval:''}${unit}`; }
+function ReminderEditor({item,classes,onChange,onClose,onSave}:{item:TimerReminder;classes:SchoolClass[];onChange:(item:TimerReminder)=>void;onClose:()=>void;onSave:()=>void}) {
+  const change=(patch:Partial<TimerReminder>)=>{const next={...item,...patch};onChange({...next,time:formatReminderTime(next),dueAt:next.startAt,repeatRule:recurrenceLabel(next)})};
+  const recurrence=item.recurrence;
+  const updateRecurrence=(patch:Partial<NonNullable<TimerReminder['recurrence']>>)=>change({recurrence:{enabled:true,unit:'week',interval:1,...recurrence,...patch}});
+  const toggleWeekday=(day:number)=>{const days=recurrence?.weekdays??[];updateRecurrence({weekdays:days.includes(day)?days.filter(value=>value!==day):[...days,day].sort()})};
+  return <Modal title={item.id?'编辑日程':'新建日程'} onClose={onClose} footer={<><button onClick={onClose} className="rounded-lg px-3 py-2 text-xs font-bold text-slate-500">取消</button><button onClick={onSave} disabled={!item.name.trim()||(item.timeKind==='point'&&!item.startAt)||(item.timeKind==='range'&&(!item.startAt||!item.endAt))} className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">保存日程</button></>}><div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-bold text-slate-600 sm:col-span-2">日程名称<input className={`${fieldClass} mt-1.5`} value={item.name} onChange={e=>onChange({...item,name:e.target.value})}/></label><label className="text-xs font-bold text-slate-600">关联班级<select className={`${fieldClass} mt-1.5`} value={item.classId} onChange={e=>onChange({...item,classId:e.target.value})}><option value="">无</option>{classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label className="text-xs font-bold text-slate-600">时间类型<select className={`${fieldClass} mt-1.5`} value={item.timeKind??'none'} onChange={e=>change({timeKind:e.target.value as TimerReminder['timeKind'],startAt:'',endAt:''})}><option value="none">无时间</option><option value="point">时间点 / 截止时间</option><option value="range">时间段</option></select></label>{item.timeKind!=='none'?<label className="text-xs font-bold text-slate-600">{item.timeKind==='range'?'开始时间':'日程时间'}<input type="datetime-local" className={`${fieldClass} mt-1.5`} value={item.startAt??''} onChange={e=>change({startAt:e.target.value})}/></label>:null}{item.timeKind==='range'?<label className="text-xs font-bold text-slate-600">结束时间<input type="datetime-local" className={`${fieldClass} mt-1.5`} value={item.endAt??''} onChange={e=>change({endAt:e.target.value})}/></label>:null}<div className="rounded-xl border border-slate-200 p-3 sm:col-span-2 dark:border-zinc-700"><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={Boolean(recurrence?.enabled)} onChange={e=>change({recurrence:e.target.checked?{enabled:true,unit:'week',interval:1,weekdays:[]}:undefined})} className="accent-emerald-700"/><Repeat2 className="h-4 w-4 text-emerald-700"/>周期日程</label>{recurrence?.enabled?<div className="mt-3 grid gap-3 sm:grid-cols-3"><label className="text-xs font-bold text-slate-600">每隔<input type="number" min="1" max="365" value={recurrence.interval} onChange={e=>updateRecurrence({interval:Math.max(1,Number(e.target.value))})} className={`${fieldClass} mt-1.5`}/></label><label className="text-xs font-bold text-slate-600">周期<select value={recurrence.unit} onChange={e=>updateRecurrence({unit:e.target.value as typeof recurrence.unit})} className={`${fieldClass} mt-1.5`}><option value="day">天</option><option value="week">周</option><option value="month">月</option><option value="year">年</option></select></label><label className="text-xs font-bold text-slate-600">最多次数<input type="number" min="1" max="999" value={recurrence.maxOccurrences??''} onChange={e=>updateRecurrence({maxOccurrences:e.target.value?Number(e.target.value):undefined})} placeholder="不限" className={`${fieldClass} mt-1.5`}/></label>{recurrence.unit==='week'?<div className="sm:col-span-3"><span className="text-xs font-bold text-slate-600">重复星期</span><div className="mt-1.5 flex flex-wrap gap-1.5">{dayNames.map((day,index)=><button type="button" key={day} onClick={()=>toggleWeekday(index+1)} className={`rounded-lg px-2.5 py-1.5 text-xs font-bold ${(recurrence.weekdays??[]).includes(index+1)?'bg-emerald-700 text-white':'bg-slate-100 text-slate-600 dark:bg-zinc-800'}`}>{day}</button>)}</div></div>:null}{recurrence.unit==='month'?<label className="text-xs font-bold text-slate-600 sm:col-span-2">每月日期<input type="number" min="0" max="31" value={recurrence.monthDays?.[0]??new Date(item.startAt??Date.now()).getDate()} onChange={e=>updateRecurrence({monthDays:[Number(e.target.value)]})} className={`${fieldClass} mt-1.5`}/><span className="mt-1 block text-[10px] font-normal text-slate-400">0 表示每月最后一天</span></label>:null}<label className="text-xs font-bold text-slate-600">截止日期<input type="date" value={recurrence.endDate??''} onChange={e=>updateRecurrence({endDate:e.target.value||undefined})} className={`${fieldClass} mt-1.5`}/></label></div>:null}</div><div className="flex items-center gap-5 sm:col-span-2"><label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(item.important)} onChange={e=>onChange({...item,important:e.target.checked})} className="accent-emerald-700"/>重要</label><label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(item.urgent)} onChange={e=>onChange({...item,urgent:e.target.checked})} className="accent-rose-600"/>紧急</label></div></div></Modal>;
+}
+
+function ReminderImportDialog({classes,onClose,onApply}:{classes:SchoolClass[];onClose:()=>void;onApply:(items:TimerReminder[])=>Promise<void>}) {
+  const [source,setSource]=useState('');
+  const [drafts,setDrafts]=useState<ReminderImportDraft[]|null>(null);
+  const [warnings,setWarnings]=useState<string[]>([]);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const selectedCount=drafts?.filter(item=>item.selected&&item.name.trim()).length??0;
+  const generate=async()=>{setBusy(true);setError('');try{const result=await createReminderImportDraft(source);setDrafts(result.drafts);setWarnings(result.warnings)}catch(cause){setError(cause instanceof Error?cause.message:'REMINDER_DRAFT_FAILED')}finally{setBusy(false)}};
+  const update=(index:number,patch:Partial<ReminderImportDraft>)=>setDrafts(current=>current?.map((item,itemIndex)=>{if(itemIndex!==index)return item;const next={...item,...patch};return {...next,time:formatReminderTime(next),dueAt:next.startAt}})??current);
+  const apply=async()=>{if(!drafts)return;const selected=drafts.filter(item=>item.selected&&item.name.trim()).map(({selected:_,sourceExcerpt:__,confidence:___,warnings:____,...item})=>item);setBusy(true);setError('');try{await onApply(selected);onClose()}catch(cause){setError(cause instanceof Error?cause.message:'REMINDER_BATCH_SAVE_FAILED');setBusy(false)}};
+  const footer=drafts?<><button onClick={()=>setDrafts(null)} className="rounded-lg px-3 py-2 text-xs font-bold text-slate-500">返回修改原文</button><button onClick={()=>void apply()} disabled={busy||selectedCount===0} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">{busy?<LoaderCircle className="h-4 w-4 animate-spin"/>:<Check className="h-4 w-4"/>}确认新建 {selectedCount} 条</button></>:<button onClick={()=>void generate()} disabled={busy||!source.trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">{busy?<LoaderCircle className="h-4 w-4 animate-spin"/>:<Sparkles className="h-4 w-4"/>}生成日程草稿</button>;
+  return <Modal wide title="AI 批量创建日程" onClose={onClose} footer={footer}>{!drafts?<div className="space-y-3"><div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200"><strong>AI 只生成草稿，不会直接保存。</strong> 粘贴备忘录或聊天消息后，你可以逐条修改、取消勾选，再统一确认。</div><label className="block text-xs font-bold text-slate-600">待创建文本<textarea autoFocus value={source} maxLength={20000} onChange={event=>setSource(event.target.value)} className={`${fieldClass} mt-1.5 min-h-56 resize-y leading-6`} placeholder={'例如：\n明天下午五点前收七年级5班作文\n下午两点到四点开备课组会\n有空整理一下家长会材料'}/></label><div className="flex justify-between text-[10px] text-slate-500"><span>支持时间点、时间段和无时间日程</span><span>{source.length}/20000</span></div>{error&&<p className="flex items-center gap-1.5 rounded-lg bg-red-50 p-3 text-xs text-red-700"><AlertCircle className="h-4 w-4"/>{error}</p>}</div>:<div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-950"><div><strong className="text-sm">AI 日程草稿</strong><p className="mt-0.5 text-[10px] text-slate-600">黄色表示需要确认，红色表示已经过期；过期项默认不勾选。</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-600 dark:bg-zinc-900">AI 生成 · 待人工确认</span></div>{warnings.map(warning=><p key={warning} className="text-xs text-amber-700">• {warning}</p>)}<div className="max-h-[58vh] space-y-3 overflow-y-auto pr-1">{drafts.map((item,index)=><ReminderDraftRow key={item.id} item={item} index={index} classes={classes} onUpdate={update}/>)}</div>{!drafts.length&&<Empty/>}{error&&<p className="flex items-center gap-1.5 rounded-lg bg-red-50 p-3 text-xs text-red-700"><AlertCircle className="h-4 w-4"/>{error}</p>}</div>}</Modal>;
+}
+
+function ReminderDraftRow({item,index,classes,onUpdate}:{key?:React.Key;item:ReminderImportDraft;index:number;classes:SchoolClass[];onUpdate:(index:number,patch:Partial<ReminderImportDraft>)=>void}) {
+  const overdue=isReminderOverdue(item);const untimed=item.timeKind==='none';const needsReview=untimed||Boolean(item.assumptionWarning);
+  const changeTime=(patch:Partial<ReminderImportDraft>)=>onUpdate(index,patch);
+  return <article className={`rounded-xl border p-3 ${overdue?'border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950/20':needsReview?'border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/20':'border-slate-200 bg-white dark:border-zinc-700 dark:bg-zinc-900'}`}><div className="mb-3 flex items-center justify-between gap-3"><label className="inline-flex items-center gap-2 text-xs font-black"><input type="checkbox" checked={item.selected} onChange={event=>onUpdate(index,{selected:event.target.checked})} className="h-4 w-4 accent-emerald-700"/>创建这条</label><div className="flex gap-1.5">{overdue&&<span className="rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-black text-red-700">已过期</span>}{untimed&&<span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black text-amber-700">时间待定</span>}{item.recurrence?.enabled&&<span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-black text-emerald-700">{item.repeatRule}</span>}{item.assumptionWarning&&<span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black text-amber-700">{item.assumptionWarning}</span>}<span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-600">置信度 {Math.round(item.confidence*100)}%</span></div></div><div className="grid gap-2 md:grid-cols-2 lg:grid-cols-4"><label className="text-[10px] font-bold text-slate-600 lg:col-span-2">日程名称<input value={item.name} onChange={event=>onUpdate(index,{name:event.target.value})} className={`${fieldClass} mt-1`}/></label><label className="text-[10px] font-bold text-slate-600">关联班级<select value={item.classId} onChange={event=>{const selected=classes.find(itemClass=>itemClass.id===event.target.value);onUpdate(index,{classId:selected?.id??'',className:selected?.name??''})}} className={`${fieldClass} mt-1`}><option value="">无</option>{classes.map(itemClass=><option key={itemClass.id} value={itemClass.id}>{itemClass.name}</option>)}</select></label><label className="text-[10px] font-bold text-slate-600">时间类型<select value={item.timeKind} onChange={event=>changeTime({timeKind:event.target.value as ReminderImportDraft['timeKind'],startAt:'',endAt:''})} className={`${fieldClass} mt-1`}><option value="none">无时间</option><option value="point">时间点</option><option value="range">时间段</option></select></label>{item.timeKind!=='none'&&<label className="text-[10px] font-bold text-slate-600 lg:col-start-3">{item.timeKind==='range'?'开始时间':'日程时间'}<input type="datetime-local" value={item.startAt??''} onChange={event=>changeTime({startAt:event.target.value,assumptionWarning:undefined})} className={`${fieldClass} mt-1`}/></label>}{item.timeKind==='range'&&<label className="text-[10px] font-bold text-slate-600">结束时间<input type="datetime-local" value={item.endAt??''} onChange={event=>changeTime({endAt:event.target.value,assumptionWarning:undefined})} className={`${fieldClass} mt-1`}/></label>}<div className="flex items-end gap-4 lg:col-span-2"><label className="inline-flex items-center gap-2 pb-2 text-xs"><input type="checkbox" checked={Boolean(item.important)} onChange={event=>onUpdate(index,{important:event.target.checked})} className="accent-emerald-700"/>重要</label><label className="inline-flex items-center gap-2 pb-2 text-xs"><input type="checkbox" checked={Boolean(item.urgent)} onChange={event=>onUpdate(index,{urgent:event.target.checked})} className="accent-red-600"/>紧急</label></div></div><details className="mt-2 text-[10px] text-slate-600"><summary className="cursor-pointer font-bold">查看对应原文与判断提示</summary><p className="mt-1 rounded-lg bg-white/70 p-2 dark:bg-zinc-950/60">{item.sourceExcerpt}</p>{item.warnings.map(warning=><p key={warning} className="mt-1 text-amber-700">• {warning}</p>)}</details></article>;
+}
+
+function ImportDialog({scope,classId,classes,periods,onClose,onApply}:{scope:'teacher'|'class';classId:string;classes:SchoolClass[];periods:SchedulePeriod[];onClose:()=>void;onApply:(items:ScheduleItem[])=>Promise<void>}) {
+  const [file,setFile]=useState<File|null>(null);
+  const [draft,setDraft]=useState<ScheduleImportDraft|null>(null);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const recognize=async()=>{if(!file)return;setBusy(true);setError('');try{setDraft(await importSchedule(file,scope,classId))}catch(cause){setError(cause instanceof Error?cause.message:'SCHEDULE_IMPORT_FAILED')}finally{setBusy(false)}};
+  const update=(index:number,patch:Partial<ScheduleItem>)=>setDraft(current=>current?{...current,items:current.items.map((item,i)=>i===index?{...item,...patch}:item)}:current);
+  const remove=(index:number)=>setDraft(current=>current?{...current,items:current.items.filter((_,i)=>i!==index)}:current);
+  const orderedItems=(draft?.items??[]).map((item,index)=>({item,index})).sort((left,right)=>left.item.day-right.item.day||left.item.period-right.item.period);
+  const footer=draft?<button onClick={async()=>{setBusy(true);await onApply(draft.items);setBusy(false);onClose()}} disabled={busy||!draft.items.length} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">{busy?<LoaderCircle className="h-4 w-4 animate-spin"/>:<Check className="h-4 w-4"/>}确认写入 {draft.items.length} 项</button>:<button onClick={()=>void recognize()} disabled={!file||busy} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">{busy?<LoaderCircle className="h-4 w-4 animate-spin"/>:<FileScan className="h-4 w-4"/>}开始识别</button>;
+  return <Modal wide title="扫描纸质课表" onClose={onClose} footer={footer}>{!draft?<div className="space-y-4"><label className="flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-white p-5 text-center dark:border-zinc-700 dark:bg-zinc-950"><FileScan className="mb-3 h-8 w-8 text-emerald-700"/><strong className="text-sm">上传课表照片或 PDF</strong><span className="mt-1 text-xs text-slate-600">图片先在本地增强，再由 PaddleOCR 与 AI 生成草稿</span><input type="file" accept="image/*,application/pdf" className="sr-only" onChange={e=>setFile(e.target.files?.[0]??null)}/>{file&&<span className="mt-3 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold dark:bg-zinc-900">{file.name}</span>}</label>{error&&<p className="flex items-center gap-1.5 rounded-lg bg-red-50 p-3 text-xs text-red-700"><AlertCircle className="h-4 w-4"/>{error}</p>}</div>:<div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-700 dark:border-zinc-700 dark:bg-zinc-950"><span><strong>AI 识别草稿</strong> · 按星期和课节连续排列，黄色项目需要重点检查。</span>{draft.timings?<span className="font-mono text-[10px] text-slate-500">增强 {(draft.timings.enhanceMs/1000).toFixed(1)}s · OCR {(draft.timings.paddleMs/1000).toFixed(1)}s · AI {(draft.timings.aiMs/1000).toFixed(1)}s</span>:null}</div>{draft.warnings.map(w=><p key={w} className="text-xs text-amber-700">• {w}</p>)}<div className="max-h-[58vh] overflow-y-auto rounded-xl border border-slate-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"><div className="divide-y divide-slate-100 dark:divide-zinc-800">{orderedItems.map(({item,index})=><ImportDraftRow key={item.id} item={item} index={index} scope={scope} classes={classes} periods={periods} onUpdate={update} onRemove={remove}/>)}</div></div></div>}</Modal>;
+}
+
+function ImportDraftRow({item,index,scope,classes,periods,onUpdate,onRemove}:{key?:React.Key;item:ScheduleItem;index:number;scope:'teacher'|'class';classes:SchoolClass[];periods:SchedulePeriod[];onUpdate:(index:number,patch:Partial<ScheduleItem>)=>void;onRemove:(index:number)=>void}) {
+  const lowConfidence=item.confidence!==undefined&&item.confidence<.75;
+  return <div className={`grid gap-3 p-3 md:grid-cols-[190px_minmax(150px,1fr)_minmax(170px,1fr)_32px] ${lowConfidence?'bg-amber-50 dark:bg-amber-950/20':'bg-white dark:bg-zinc-900'}`}><div className="grid grid-cols-2 gap-2"><label className="min-w-0 text-[10px] font-bold text-slate-600">星期<select value={item.day} onChange={event=>onUpdate(index,{day:Number(event.target.value)})} className={`${fieldClass} mt-1 min-w-[82px]`}>{dayNames.map((day,dayIndex)=><option key={day} value={dayIndex+1}>{day}</option>)}</select></label><label className="min-w-0 text-[10px] font-bold text-slate-600">课节<select value={item.period} onChange={event=>{const selectedPeriod=periods.find(period=>period.period===Number(event.target.value));onUpdate(index,{period:Number(event.target.value),time:periodTime(selectedPeriod)})}} className={`${fieldClass} mt-1 min-w-[96px]`}>{periods.map(period=><option key={period.period} value={period.period}>{period.label}</option>)}</select></label></div><label className="text-[10px] font-bold text-slate-600">课程<input value={item.title} onChange={event=>onUpdate(index,{title:event.target.value})} className={`${fieldClass} mt-1`} /></label>{scope==='teacher'?<label className="text-[10px] font-bold text-slate-600">班级<select value={item.classId} onChange={event=>onUpdate(index,{classId:event.target.value,className:classes.find(itemClass=>itemClass.id===event.target.value)?.name??''})} className={`${fieldClass} mt-1`}><option value="">班级待确认</option>{classes.map(itemClass=><option key={itemClass.id} value={itemClass.id}>{itemClass.name}</option>)}</select></label>:<label className="text-[10px] font-bold text-slate-600">教师<input value={item.teacherName??''} onChange={event=>onUpdate(index,{teacherName:event.target.value})} className={`${fieldClass} mt-1`}/></label>}<button onClick={()=>onRemove(index)} className="self-end rounded-lg p-2 hover:bg-red-50 dark:hover:bg-red-950/30" aria-label="移除识别项"><Trash2 className="h-4 w-4 text-slate-500"/></button></div>;
+}

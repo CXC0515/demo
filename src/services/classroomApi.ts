@@ -27,3 +27,17 @@ export const saveClassroomLayout = async (layout: ClassroomLayout) => {
   const body = await response.json() as { layout: ClassroomLayout };
   return body.layout;
 };
+
+export const exportClassroomLayout = async (classId: string, className: string, includeStudentNo: boolean) => {
+  const response = await fetch(`/api/classes/${encodeURIComponent(classId)}/classroom-layout/export?includeStudentNo=${includeStudentNo}`);
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${className.replace(/[\\/:*?"<>|]/g, '-')}-座位表.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};

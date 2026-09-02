@@ -83,7 +83,7 @@ export function createNavGroups(activeGradingTaskCount: number): NavGroup[] {
         { id: 'class-mgmt', label: '班级管理', icon: FolderOpen },
         { id: 'student-mgmt', label: '学生管理', icon: Users },
         { id: 'classroom', label: '班级可视化', icon: Grid },
-        { id: 'schedule', label: '课表与提醒', icon: Calendar },
+        { id: 'schedule', label: '课表与日程', icon: Calendar },
         { id: 'tag-mgmt', label: '标签管理', icon: Sparkles }
       ]
     },

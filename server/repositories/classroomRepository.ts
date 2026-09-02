@@ -27,7 +27,7 @@ export interface ClassroomLayoutWriteInput {
 const database = getRosterDatabase();
 const defaultLayout = (classId: string): ClassroomLayout => ({
   classId,
-  rowCount: 6,
+  rowCount: 8,
   columnCount: 7,
   seats: []
 });

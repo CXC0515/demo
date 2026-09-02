@@ -9,7 +9,7 @@ import { createNavGroups, PageId } from './app/navigation';
 
 // Import Types and Mock Data
 import {
-  Student, SchoolClass, WorkbenchTask, ScheduleItem,
+  Student, SchoolClass, WorkbenchTask, ScheduleItem, SchedulePeriod,
   TimerReminder, ReviewItem, WorkflowState, TeacherObservation, RosterStudent, KnowledgeNode
 } from './domain/types';
 import { createEmptyWorkflowState } from './domain/gradingTask';
@@ -34,6 +34,7 @@ import ScheduleReminder from './features/schedule/ScheduleReminder';
 import SystemSettings from './features/settings/SystemSettingsPanel';
 import KnowledgeLibrary from './features/knowledge/KnowledgeLibrary';
 import { getKnowledgeGraph } from './services/resourceApi';
+import { getScheduleWorkspace, removeReminder, removeScheduleItem, saveReminder, saveReminderBatch, saveScheduleBatch, saveScheduleItem, saveSchedulePeriods } from './services/scheduleApi';
 import TagManagement from './features/tags/TagManagement';
 import LessonPlanWorkspace from './features/lesson-plan/LessonPlanWorkspace';
 import GradingWorkspace from './features/grading/GradingWorkspace';
@@ -63,7 +64,7 @@ const createInitialWorkflowState = (task: WorkbenchTask) => {
 export default function App() {
   // Navigation & View State
   const [activePage, setActivePage] = useState<PageId>('workbench');
-  const [selectedClassId, setSelectedClassId] = useState<string>('c5');
+  const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [studentManagementTargetId, setStudentManagementTargetId] = useState<string | null>(null);
   const [diagnosisRequestedTab, setDiagnosisRequestedTab] = useState<DiagnosisTab | null>(null);
@@ -86,6 +87,9 @@ export default function App() {
   const [tasks, setTasks] = useState<WorkbenchTask[]>([]);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [reminders, setReminders] = useState<TimerReminder[]>([]);
+  const [schedulePeriods, setSchedulePeriods] = useState<SchedulePeriod[]>([]);
+  const [showWeekends, setShowWeekends] = useState(() => localStorage.getItem('schedule-show-weekends') === 'true');
+  const [settingsRequestedSection, setSettingsRequestedSection] = useState<'schedule-periods' | null>(null);
   const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([]);
   const [workflowStates, setWorkflowStates] = useState<Record<string, WorkflowState>>({});
   const [knowledgeNodes, setKnowledgeNodes] = useState<KnowledgeNode[]>([]);
@@ -115,8 +119,7 @@ export default function App() {
       const snapshot = await getRoster();
       setClasses(snapshot.classes);
       setStudents(snapshot.students);
-      const preferredClass = snapshot.classes.find(item => item.id === 'c5' && item.status === 'active')
-        ?? snapshot.classes.find(item => item.status === 'active');
+      const preferredClass = snapshot.classes.find(item => item.status === 'active');
       if (preferredClass) setSelectedClassId(preferredClass.id);
       if (snapshot.students.length) setSelectedStudentId(snapshot.students[0].id);
     } catch (error) {
@@ -132,6 +135,11 @@ export default function App() {
     void listGradingTasks().then(loadedTasks => {
       setTasks(loadedTasks);
       setWorkflowStates(Object.fromEntries(loadedTasks.map(task => [task.id, createInitialWorkflowState(task)])));
+    }).catch(() => undefined);
+    void getScheduleWorkspace().then(workspace => {
+      setSchedule(workspace.schedule);
+      setReminders(workspace.reminders);
+      setSchedulePeriods(workspace.periods);
     }).catch(() => undefined);
   }, [loadKnowledgeCatalog]);
 
@@ -152,35 +160,50 @@ export default function App() {
   };
 
   // 2. Schedule Item edit/addition
-  const handleAddScheduleItem = (item: ScheduleItem) => {
-    setSchedule([...schedule, item]);
-    triggerToast('成功添加排课计划/行事日程！');
+  const handleAddScheduleItem = async (item: ScheduleItem) => {
+    const saved = await saveScheduleItem(item);
+    setSchedule(current => [...current.filter(existing => existing.id !== saved.id), saved]);
+    triggerToast('课表已保存');
   };
 
-  const handleUpdateScheduleItem = (updated: ScheduleItem) => {
-    setSchedule(schedule.map(s => s.id === updated.id ? updated : s));
-    triggerToast('排课计划已成功更新！');
+  const handleUpdateScheduleItem = async (updated: ScheduleItem) => {
+    const saved = await saveScheduleItem(updated);
+    setSchedule(current => current.map(item => item.id === saved.id ? saved : item));
+    triggerToast('课表已更新');
   };
 
-  const handleDeleteScheduleItem = (itemId: string) => {
-    setSchedule(schedule.filter(s => s.id !== itemId));
-    triggerToast('已成功移除此日程事件。');
+  const handleDeleteScheduleItem = async (itemId: string) => {
+    await removeScheduleItem(itemId);
+    setSchedule(current => current.filter(item => item.id !== itemId));
+    triggerToast('课程已删除');
   };
 
   // 3. Reminders list toggles
-  const handleAddReminder = (reminder: TimerReminder) => {
-    setReminders([...reminders, reminder]);
-    triggerToast(`⏰ 定时作业提醒 [${reminder.name}] 已成功创建！`);
+  const handleAddReminder = async (reminder: TimerReminder) => {
+    const saved = await saveReminder(reminder);
+    setReminders(current => [...current.filter(item => item.id !== saved.id), saved]);
+    triggerToast(`日程“${saved.name}”已保存`);
   };
 
-  const handleToggleReminderStatus = (reminderId: string) => {
-    setReminders(reminders.map(r => r.id === reminderId ? { ...r, status: r.status === 'active' ? 'inactive' : 'active' } : r));
-    triggerToast('定时提醒开关已切换！');
+  const handleAddReminderBatch = async (items: TimerReminder[]) => {
+    const saved = await saveReminderBatch(items);
+    setReminders(current => [...current.filter(item => !saved.some(next => next.id === item.id)), ...saved]);
+    triggerToast(`已批量新建 ${saved.length} 条日程`);
   };
 
-  const handleDeleteReminder = (reminderId: string) => {
-    setReminders(reminders.filter(r => r.id !== reminderId));
-    triggerToast('已删除此条定时提醒。');
+  const handleToggleReminderStatus = async (reminderId: string) => {
+    const current = reminders.find(item => item.id === reminderId);
+    if (!current) return;
+    await saveReminder({ ...current, status: current.status === 'completed' ? 'active' : current.status === 'inactive' ? 'active' : 'completed' });
+    const workspace = await getScheduleWorkspace();
+    setReminders(workspace.reminders);
+    triggerToast(current.status === 'active' ? '日程已完成' : '日程已恢复');
+  };
+
+  const handleDeleteReminder = async (reminderId: string) => {
+    await removeReminder(reminderId);
+    setReminders(current => current.filter(item => item.id !== reminderId));
+    triggerToast('日程已删除');
   };
 
   // 4. Class actions
@@ -210,6 +233,10 @@ export default function App() {
     try {
       const saved = await toggleRosterClassArchive(classId);
       setClasses(current => current.map(item => item.id === saved.id ? saved : item));
+      if (saved.status === 'archived' && selectedClassId === saved.id) {
+        const fallback = classes.find(item => item.id !== saved.id && item.status === 'active');
+        setSelectedClassId(fallback?.id ?? '');
+      }
       triggerToast(saved.status === 'archived' ? '该班级已归档。' : '该班级已取消归档。');
     } catch (error) {
       triggerToast(`班级状态更新失败：${error instanceof Error ? error.message : '未知错误'}`);
@@ -270,6 +297,7 @@ export default function App() {
     const snapshot = await getRoster();
     setClasses(snapshot.classes);
     setStudents(snapshot.students);
+    if (snapshot.classes.some(item => item.id === classId && item.status === 'active')) setSelectedClassId(classId);
     return result;
   };
 
@@ -431,7 +459,9 @@ export default function App() {
     );
   }
 
-  const selectedClass = classes.find(c => c.id === selectedClassId) ?? classes[0];
+  const selectedClass = classes.find(c => c.id === selectedClassId && c.status === 'active')
+    ?? classes.find(c => c.status === 'active')
+    ?? classes[0];
   const pendingReviewCount = reviewQueue.filter(r => r.status === 'pending').length
     + Object.keys(workflowStates).flatMap(taskId => workflowStates[taskId].questionGradingStates ?? []).flatMap(state => state.calibrationSamples).filter(sample => sample.status !== 'confirmed' && (sample.needsTeacherReview || sample.recognitionConflict || sample.gradingConfidence < lowConfidenceThreshold)).length;
   const activeGradingTaskCount = tasks.filter(task => task.status !== 'completed').length;
@@ -541,10 +571,22 @@ export default function App() {
               schedule={schedule}
               reminders={reminders}
               classes={classes}
+              periods={schedulePeriods}
+              showWeekends={showWeekends}
+              onOpenPeriodSettings={() => {
+                setSettingsRequestedSection('schedule-periods');
+                setActivePage('settings');
+              }}
               onAddScheduleItem={handleAddScheduleItem}
               onUpdateScheduleItem={handleUpdateScheduleItem}
               onDeleteScheduleItem={handleDeleteScheduleItem}
+              onImportSchedule={async items => {
+                const saved = await saveScheduleBatch(items);
+                setSchedule(current => [...current.filter(item => !saved.some(next => next.id === item.id)), ...saved]);
+                triggerToast(`已导入 ${saved.length} 项课程`);
+              }}
               onAddReminder={handleAddReminder}
+              onAddReminderBatch={handleAddReminderBatch}
               onToggleReminderStatus={handleToggleReminderStatus}
               onDeleteReminder={handleDeleteReminder}
             />
@@ -637,6 +679,19 @@ export default function App() {
                 setOcrHumanReviewThreshold(humanReview);
                 setOcrAutoPassThreshold(autoPass);
               }}
+              showWeekends={showWeekends}
+              onShowWeekendsChange={value => {
+                setShowWeekends(value);
+                localStorage.setItem('schedule-show-weekends', String(value));
+              }}
+              schedulePeriods={schedulePeriods}
+              schedule={schedule}
+              onSaveSchedulePeriods={async periods => {
+                const saved = await saveSchedulePeriods(periods);
+                setSchedulePeriods(saved);
+              }}
+              requestedSection={settingsRequestedSection}
+              onRequestedSectionHandled={() => setSettingsRequestedSection(null)}
               classes={classes}
               selectedClassId={selectedClassId}
               onSelectClass={setSelectedClassId}
