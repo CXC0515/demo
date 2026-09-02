@@ -13,6 +13,8 @@ const directory = mkdtempSync(path.join(tmpdir(), 'demo-reminder-import-'));
 process.env.ROSTER_DB_PATH = path.join(directory, 'roster.sqlite');
 const { buildReminderImportPrompt, createReminderDrafts } = await import('./reminderImportService');
 const { closeRosterDatabase } = await import('../../database/rosterDatabase');
+const { createClass } = await import('../../repositories/rosterRepository');
+const primaryClass = createClass({ name: '七年级 5 班', grade: '七年级', term: '2026 秋季学期', headTeacher: '测试教师', chineseTeacher: '测试教师', textbookVersion: '统编版七年级上册', defaultSubmitTime: '08:00', status: 'active' });
 after(() => { closeRosterDatabase(); rmSync(directory, { recursive: true, force: true }); });
 
 test('prompt treats pasted text as data and defines three time modes', () => {
@@ -54,7 +56,7 @@ test('creates editable drafts and leaves overdue drafts unchecked', async () => 
     ], warnings: []
   }) } }] }), { status: 200 }) as unknown as ReturnType<typeof fetch>;
   const result = await createReminderDrafts('测试', { apiKey: 'test', baseUrl: 'https://example.test/v1', visionModel: '', reminderModel: 'gpt-5.6-luna' }, fetcher, new Date('2026-09-02T02:00:00Z'));
-  assert.equal(result.drafts[0].classId, 'c5');
+  assert.equal(result.drafts[0].classId, primaryClass.id);
   assert.equal(result.drafts[0].selected, false);
   assert.equal(result.drafts[1].time, '时间待定');
   assert.equal(result.drafts[1].selected, true);

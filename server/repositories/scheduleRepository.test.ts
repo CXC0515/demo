@@ -12,12 +12,14 @@ import test, { after } from 'node:test';
 const directory = mkdtempSync(path.join(tmpdir(), 'demo-schedule-repository-'));
 process.env.ROSTER_DB_PATH = path.join(directory, 'roster.sqlite');
 const repository = await import('./scheduleRepository');
+const roster = await import('./rosterRepository');
 const { closeRosterDatabase } = await import('../database/rosterDatabase');
+const primaryClass = roster.createClass({ name: '七年级 5 班', grade: '七年级', term: '2026 秋季学期', headTeacher: '测试教师', chineseTeacher: '测试教师', textbookVersion: '统编版七年级上册', defaultSubmitTime: '08:00', status: 'active' });
 after(() => { closeRosterDatabase(); rmSync(directory, { recursive: true, force: true }); });
 
 test('persists schedules and reminder quadrant fields', () => {
-  repository.saveScheduleItem({ id: 'schedule-1', day: 6, period: 1, title: '周末社团', classId: 'c5', className: '七年级 5 班', type: 'class', time: '08:00', scope: 'class', teacherName: '王老师' });
-  repository.saveReminder({ id: 'reminder-1', name: '提交教案', classId: 'c5', className: '七年级 5 班', time: '周五 17:00', repeatRule: '一次性', status: 'active', important: true, urgent: false, timeKind: 'point', startAt: '2026-09-04T17:00' });
+  repository.saveScheduleItem({ id: 'schedule-1', day: 6, period: 1, title: '周末社团', classId: primaryClass.id, className: primaryClass.name, type: 'class', time: '08:00', scope: 'class', teacherName: '王老师' });
+  repository.saveReminder({ id: 'reminder-1', name: '提交教案', classId: primaryClass.id, className: primaryClass.name, time: '周五 17:00', repeatRule: '一次性', status: 'active', important: true, urgent: false, timeKind: 'point', startAt: '2026-09-04T17:00' });
   assert.equal(repository.listScheduleItems()[0].day, 6);
   assert.equal(repository.listReminders()[0].important, true);
   assert.equal(repository.listReminders()[0].urgent, false);
@@ -28,7 +30,7 @@ test('persists schedules and reminder quadrant fields', () => {
 test('saves reminder batches transactionally', () => {
   const saved = repository.saveReminders([
     { id: 'reminder-2', name: '无时间事项', classId: '', className: '', time: '时间待定', repeatRule: '一次性', status: 'active', timeKind: 'none' },
-    { id: 'reminder-3', name: '家长会', classId: 'c5', className: '七年级 5 班', time: '09:00 - 10:00', repeatRule: '一次性', status: 'active', timeKind: 'range', startAt: '2026-09-05T09:00', endAt: '2026-09-05T10:00' }
+    { id: 'reminder-3', name: '家长会', classId: primaryClass.id, className: primaryClass.name, time: '09:00 - 10:00', repeatRule: '一次性', status: 'active', timeKind: 'range', startAt: '2026-09-05T09:00', endAt: '2026-09-05T10:00' }
   ]);
   assert.equal(saved.length, 2);
   assert.equal(saved[1].timeKind, 'range');

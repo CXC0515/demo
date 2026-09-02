@@ -13,11 +13,11 @@ const directory = mkdtempSync(path.join(tmpdir(), 'demo-schedule-import-'));
 process.env.ROSTER_DB_PATH = path.join(directory, 'roster.sqlite');
 const { normalizeScheduleCellText, structureScheduleText } = await import('./scheduleImportService');
 const { closeRosterDatabase } = await import('../../database/rosterDatabase');
-const { updateClass } = await import('../../repositories/rosterRepository');
+const { createClass } = await import('../../repositories/rosterRepository');
 after(() => { closeRosterDatabase(); rmSync(directory, { recursive: true, force: true }); });
 
 test('turns AI timetable JSON into an editable teacher draft', async () => {
-  updateClass('c5', { name: '初一（10）班', grade: '七年级' });
+  const primaryClass = createClass({ name: '初一（10）班', grade: '七年级', term: '2026 秋季学期', headTeacher: '测试教师', chineseTeacher: '测试教师', textbookVersion: '统编版七年级上册', defaultSubmitTime: '08:00', status: 'active' });
   let requestBody = '';
   const fakeFetch = async (_url: string | URL | Request, init?: RequestInit) => {
     requestBody = String(init?.body ?? '');
@@ -29,11 +29,11 @@ test('turns AI timetable JSON into an editable teacher draft', async () => {
     warnings: ['第三节模糊']
   }) } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
-  const result = await structureScheduleText('周一 第二节 语文 七年级十班', { scope: 'teacher', classId: 'c5' }, {
+  const result = await structureScheduleText('周一 第二节 语文 七年级十班', { scope: 'teacher', classId: primaryClass.id }, {
     apiKey: 'test', baseUrl: 'https://example.test/v1', visionModel: 'test-model'
   }, fakeFetch as typeof fetch);
   assert.equal(result.items[0].scope, 'teacher');
-  assert.deepEqual(result.items.map(item => item.classId), ['c5', 'c5']);
+  assert.deepEqual(result.items.map(item => item.classId), [primaryClass.id, primaryClass.id]);
   assert.deepEqual(result.items.map(item => item.className), ['初一（10）班', '初一（10）班']);
   assert.equal(result.items[0].confidence, 0.91);
   assert.deepEqual(result.items.map(item => [item.day, item.period]), [[1, 2], [2, 1]]);
