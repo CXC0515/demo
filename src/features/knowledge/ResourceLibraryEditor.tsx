@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   Check,
@@ -29,6 +29,7 @@ import {
   DiscoverySuggestion,
   KnowledgeEntity,
   LibraryResource,
+  ResourceChunk,
   ResourceDetail,
   ResourceKind,
 } from "../../domain/types";
@@ -38,6 +39,7 @@ import {
   deleteLibraryResource,
   ResourceMetadataInput,
   reviewSuggestion,
+  retrieveLibraryResource,
   setLibraryResourcePageIncluded,
   updateLibraryResource,
   uploadLibraryResource,
@@ -406,6 +408,89 @@ const SuggestionItem = ({
   );
 };
 
+const ContinuousPageReader = ({
+  resourceId,
+  pages,
+  chunks,
+  selectedPage,
+  onSelectPage,
+}: {
+  resourceId: string;
+  pages: ResourceDetail["pages"];
+  chunks: ResourceChunk[];
+  selectedPage: number;
+  onSelectPage: (page: number) => void;
+}) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const suppressScrollSelectionRef = useRef(false);
+  const [showExcluded, setShowExcluded] = useState(false);
+  const visiblePages = pages.filter((page) => page.included || showExcluded || page.pageNumber === selectedPage);
+  useEffect(() => {
+    const target = scrollRef.current?.querySelector<HTMLElement>(`[data-resource-page="${selectedPage}"]`);
+    if (target && Math.abs(target.getBoundingClientRect().top - (scrollRef.current?.getBoundingClientRect().top ?? 0)) > 120) {
+      suppressScrollSelectionRef.current = true;
+      target.scrollIntoView({ block: "start" });
+      const timer = window.setTimeout(() => { suppressScrollSelectionRef.current = false; }, 600);
+      return () => window.clearTimeout(timer);
+    }
+  }, [resourceId, selectedPage, showExcluded]);
+  const updateCurrentPage = () => {
+    if (suppressScrollSelectionRef.current) return;
+    const container = scrollRef.current;
+    if (!container) return;
+    const top = container.getBoundingClientRect().top + 90;
+    const candidates = Array.from(container.querySelectorAll("[data-resource-page]")) as HTMLElement[];
+    let closest: HTMLElement | null = null;
+    candidates.forEach((item) => {
+      if (!closest || Math.abs(item.getBoundingClientRect().top - top) < Math.abs(closest.getBoundingClientRect().top - top)) closest = item;
+    });
+    const page = Number(closest?.dataset.resourcePage);
+    if (page && page !== selectedPage) onSelectPage(page);
+  };
+  return (
+    <div className="relative flex h-full min-h-0 flex-col bg-slate-200/50 dark:bg-zinc-950">
+      <div className="z-20 flex shrink-0 items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-2.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
+        <span className="inline-flex items-center gap-2 text-xs font-black text-slate-700 dark:text-slate-200"><Eye className="h-4 w-4" />当前第 {selectedPage} 页</span>
+        <label className="inline-flex items-center gap-2 text-xs text-slate-500"><input type="checkbox" checked={showExcluded} onChange={(event) => setShowExcluded(event.target.checked)} className="accent-emerald-700" />显示已排除页面</label>
+      </div>
+      <div ref={scrollRef} onScroll={updateCurrentPage} className="min-h-0 flex-1 scroll-smooth overflow-y-auto p-3">
+        <div className="mx-auto max-w-5xl space-y-4">
+          {visiblePages.map((page) => {
+            const pageChunks = chunks.filter((chunk) => chunk.level === "content" && chunk.pageStart <= page.pageNumber && chunk.pageEnd >= page.pageNumber);
+            const imageUrl = `/api/resources/${resourceId}/pages/${page.pageNumber}/image`;
+            return (
+              <article key={page.pageNumber} data-resource-page={page.pageNumber} className={`scroll-mt-3 overflow-hidden rounded-xl border bg-white shadow-sm dark:bg-zinc-900 ${page.included ? "border-slate-200 dark:border-zinc-800" : "border-dashed border-rose-300 opacity-60"}`}>
+                <header className="flex items-center justify-between border-b border-slate-100 px-3 py-2 dark:border-zinc-800">
+                  <div className="flex items-center gap-2"><strong className="text-xs">第 {page.pageNumber} 页</strong>{!page.included && <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">已排除</span>}</div>
+                  <div className="flex items-center gap-2 text-[10px] text-slate-400"><span>{page.parseStatus === "ready" ? "已解析" : page.parseStatus === "processing" ? "解析中" : page.parseStatus === "failed" ? "解析失败" : "未解析"}</span><span>·</span><span>{page.ragStatus === "indexed" ? `RAG 已入库 ${page.ragChunkCount} 块` : page.ragStatus === "indexing" ? "RAG 入库中" : page.ragStatus === "excluded" ? "不参与 RAG" : "RAG 未入库"}</span></div>
+                </header>
+                <div className={`grid gap-3 p-3 ${page.parseStatus === "ready" ? "lg:grid-cols-2" : "grid-cols-1"}`}>
+                  <figure>
+                    <figcaption className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-400">原始页面</figcaption>
+                    <img loading="lazy" src={imageUrl} alt={`原始资料第 ${page.pageNumber} 页`} className="w-full rounded-lg border border-slate-200 bg-white object-contain dark:border-zinc-700" style={{ aspectRatio: "210 / 297" }} />
+                  </figure>
+                  {page.parseStatus === "ready" && (
+                    <figure>
+                      <figcaption className="mb-2 text-[10px] font-black uppercase tracking-wide text-emerald-700">OCR 识别版</figcaption>
+                      <div className="relative overflow-hidden rounded-lg border border-emerald-200 bg-white">
+                        <img loading="lazy" src={imageUrl} alt={`第 ${page.pageNumber} 页 OCR 识别底图`} className="w-full object-contain opacity-25" style={{ aspectRatio: "210 / 297" }} />
+                        {pageChunks.filter((chunk) => chunk.boundingBox).slice(0, 80).map((chunk) => (
+                          <span key={chunk.id} title={chunk.text.slice(0, 180)} className="absolute overflow-hidden border border-emerald-500 bg-emerald-100/75 text-[7px] leading-tight text-emerald-950" style={{ left: `${chunk.boundingBox!.x * 100}%`, top: `${chunk.boundingBox!.y * 100}%`, width: `${chunk.boundingBox!.width * 100}%`, height: `${chunk.boundingBox!.height * 100}%` }}>{chunk.text}</span>
+                        ))}
+                      </div>
+                      <details className="mt-2 rounded-lg bg-slate-50 p-2 text-xs dark:bg-zinc-950"><summary className="cursor-pointer font-bold text-slate-600 dark:text-slate-300">查看提取文本（{pageChunks.length} 块）</summary><div className="mt-2 max-h-48 space-y-2 overflow-y-auto text-slate-500">{pageChunks.map((chunk) => <p key={chunk.id}>{chunk.text}</p>)}</div></details>
+                    </figure>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function ResourceLibraryEditor({
   resources,
   detail,
@@ -421,11 +506,14 @@ export default function ResourceLibraryEditor({
   const [kind, setKind] = useState<"all" | ResourceKind>("all");
   const [dialog, setDialog] = useState<"upload" | "edit" | null>(null);
   const [inspectorTab, setInspectorTab] = useState<
-    "overview" | "pages" | "structure" | "review"
+    "overview" | "pages" | "structure" | "rag" | "review"
   >("overview");
   const [pageStart, setPageStart] = useState(1);
   const [pageEnd, setPageEnd] = useState(20);
   const [selectedSuggestions, setSelectedSuggestions] = useState<string[]>([]);
+  const [ragQuery, setRagQuery] = useState("");
+  const [ragResults, setRagResults] = useState<Array<ResourceChunk & { retrievalRank: number }>>([]);
+  const [ragSearching, setRagSearching] = useState(false);
   const filtered = useMemo(
     () =>
       resources.filter(
@@ -491,8 +579,8 @@ export default function ResourceLibraryEditor({
     }
   };
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)] gap-4 min-h-[690px]">
-      <aside className="glass-panel rounded-2xl overflow-hidden flex flex-col min-h-[320px] max-h-[420px] lg:min-h-[690px] lg:max-h-none">
+    <div className="grid h-[calc(100vh-190px)] min-h-[680px] grid-cols-1 gap-4 lg:grid-cols-[240px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)]">
+      <aside className="glass-panel flex min-h-0 flex-col overflow-hidden rounded-2xl">
         <div className="p-3 border-b border-slate-200/70 dark:border-zinc-800 space-y-3">
           <button
             onClick={() => setDialog("upload")}
@@ -571,7 +659,7 @@ export default function ResourceLibraryEditor({
         </div>
       </aside>
 
-      <section className="glass-panel rounded-2xl overflow-hidden min-w-0">
+      <section className="glass-panel min-h-0 min-w-0 overflow-hidden rounded-2xl">
         {loading && !detail ? (
           <div className="h-full grid place-items-center text-slate-400">
             <LoaderCircle className="w-6 h-6 animate-spin" />
@@ -631,33 +719,15 @@ export default function ResourceLibraryEditor({
               </button>
             </header>
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px] flex-1 min-h-0">
-              <div className="bg-slate-200/50 dark:bg-zinc-950 p-3 min-h-[580px] relative">
-                <div className="absolute z-10 left-5 top-5 px-2.5 py-1.5 rounded-lg bg-slate-950/75 text-white text-xs flex items-center gap-2">
-                  <Eye className="w-3.5 h-3.5" />第 {selectedPage} 页
-                </div>
-                <object
-                  key={`${detail.id}-${selectedPage}`}
-                  data={`/api/resources/${detail.id}/pages/${selectedPage}/content`}
-                  type="application/pdf"
-                  className="w-full h-full min-h-[580px] rounded-lg bg-white shadow-sm"
-                >
-                  <a
-                    href={`/api/resources/${detail.id}/pages/${selectedPage}/content`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-emerald-700"
-                  >
-                    打开 PDF
-                  </a>
-                </object>
-              </div>
-              <aside className="border-l border-slate-200/70 dark:border-zinc-800 min-h-[580px] flex flex-col">
-                <div className="grid grid-cols-4 border-b border-slate-200/70 dark:border-zinc-800">
+              <ContinuousPageReader resourceId={detail.id} pages={detail.pages} chunks={detail.chunks} selectedPage={selectedPage} onSelectPage={onOpenPage} />
+              <aside className="flex min-h-0 flex-col border-l border-slate-200/70 dark:border-zinc-800">
+                <div className="grid grid-cols-5 border-b border-slate-200/70 dark:border-zinc-800">
                   {(
                     [
                       ["overview", "概览"],
                       ["pages", "页面"],
                       ["structure", "结构"],
+                      ["rag", "RAG"],
                       ["review", `待审核 ${pending.length}`],
                     ] as const
                   ).map(([value, label]) => (
@@ -670,7 +740,7 @@ export default function ResourceLibraryEditor({
                     </button>
                   ))}
                 </div>
-                <div className="p-4 overflow-y-auto flex-1">
+                <div className="min-h-0 flex-1 overflow-y-auto p-4">
                   {inspectorTab === "overview" && (
                     <div className="space-y-5">
                       <div>
@@ -835,6 +905,38 @@ export default function ResourceLibraryEditor({
                           等待解析
                         </div>
                       )}
+                    </div>
+                  )}
+                  {inspectorTab === "rag" && (
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-sm font-black text-slate-800 dark:text-slate-100">检索测试</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-400">直接查询已经进入 RAG 语料库的文本块，并保留原资料页码。</p>
+                      </div>
+                      <form onSubmit={async (event) => {
+                        event.preventDefault();
+                        if (!ragQuery.trim()) return;
+                        setRagSearching(true);
+                        try {
+                          setRagResults(await retrieveLibraryResource(detail.id, ragQuery.trim()));
+                        } catch (error) {
+                          onShowToast(`检索失败：${error instanceof Error ? error.message : "未知错误"}`);
+                        } finally {
+                          setRagSearching(false);
+                        }
+                      }} className="space-y-2">
+                        <input value={ragQuery} onChange={(event) => setRagQuery(event.target.value)} placeholder="输入知识点、题型或原文关键词" className={fieldClass} />
+                        <button disabled={ragSearching || !ragQuery.trim()} className="btn-primary flex w-full items-center justify-center gap-2 py-2 text-sm disabled:opacity-40">{ragSearching ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}检索 RAG 语料</button>
+                      </form>
+                      <div className="space-y-2">
+                        {ragResults.map((result) => (
+                          <button key={result.id} onClick={() => onOpenPage(result.pageStart)} className="w-full rounded-xl border border-slate-200 p-3 text-left hover:border-emerald-300 hover:bg-emerald-50/40 dark:border-zinc-800 dark:hover:bg-emerald-950/20">
+                            <span className="flex items-center justify-between gap-2"><strong className="truncate text-xs text-slate-700 dark:text-slate-200">{result.title}</strong><span className="shrink-0 text-[10px] font-bold text-emerald-700">第 {result.pageStart} 页</span></span>
+                            <span className="mt-1.5 line-clamp-4 block text-xs leading-5 text-slate-500">{result.text}</span>
+                          </button>
+                        ))}
+                        {!ragSearching && ragQuery && !ragResults.length && <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-xs text-slate-400">没有命中已入库内容</div>}
+                      </div>
                     </div>
                   )}
                   {inspectorTab === "review" && (

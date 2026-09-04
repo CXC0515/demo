@@ -698,6 +698,9 @@ export interface ResourcePageState {
   included: boolean;
   parseStatus: ResourcePageParseStatus;
   parseErrorCode?: string;
+  ragStatus: 'unindexed' | 'indexing' | 'indexed' | 'failed' | 'excluded';
+  ragChunkCount: number;
+  ragIndexedAt?: string;
   updatedAt: string;
 }
 

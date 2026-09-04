@@ -16,7 +16,7 @@ import {
   RequestTimeoutError
 } from '@paddleocr/api-sdk';
 import { DocumentParserConfig } from '../../config/documentParserConfig';
-import { saveParserArtifact } from '../../repositories/parserArtifactRepository';
+import { mergeParserArtifactPages } from '../../repositories/parserArtifactRepository';
 import { MaterialParser, MaterialParserError, MaterialParserInput } from './MaterialParser';
 import { enhanceRecognitionPage } from './recognitionImagePreprocessor';
 
@@ -59,12 +59,13 @@ export class PaddleVisionMaterialParser implements MaterialParser {
           returnMarkdownImages: !scheduleProfile
         }
       });
-      if (!scheduleProfile) saveParserArtifact(input.assetId, {
+      const pageOffset = input.pageOffset ?? 0;
+      if (!scheduleProfile) mergeParserArtifactPages(input.assetId, {
         model: this.config.paddleModel || Model.PaddleOCRVL16,
         jobId: result.jobId,
         dataInfo: result.dataInfo,
         pages: result.pages.map((page, index) => ({
-          pageNumber: index + 1,
+          pageNumber: pageOffset + index + 1,
           prunedResult: page.prunedResult,
           raw: page.raw,
           exports: page.exports,
@@ -76,22 +77,22 @@ export class PaddleVisionMaterialParser implements MaterialParser {
       await mkdir(resourceDirectory, { recursive: true });
       const resourcePlans = scheduleProfile ? [] : result.pages.flatMap((page, pageIndex) => [
         ...(page.inputImageUrl ? [{
-          fileName: `page-${pageIndex + 1}-source.jpg`,
+          fileName: `page-${pageOffset + pageIndex + 1}-source.jpg`,
           resourceUrl: page.inputImageUrl,
           role: 'source-page' as const,
-          pageNumber: pageIndex + 1
+          pageNumber: pageOffset + pageIndex + 1
         }] : []),
         ...Object.entries(page.markdownImages).map(([resourceName, resourceUrl], resourceIndex) => ({
-          fileName: `page-${pageIndex + 1}-content-${resourceIndex + 1}${path.extname(resourceName) || '.jpg'}`,
+          fileName: `page-${pageOffset + pageIndex + 1}-content-${resourceIndex + 1}${path.extname(resourceName) || '.jpg'}`,
           resourceUrl,
           role: 'content' as const,
-          pageNumber: pageIndex + 1
+          pageNumber: pageOffset + pageIndex + 1
         })),
         ...Object.entries(page.outputImages).map(([resourceName, resourceUrl], resourceIndex) => ({
-          fileName: `page-${pageIndex + 1}-${resourceName.replace(/[^a-zA-Z0-9._-]/g, '-')}-${resourceIndex + 1}${path.extname(new URL(resourceUrl).pathname) || '.jpg'}`,
+          fileName: `page-${pageOffset + pageIndex + 1}-${resourceName.replace(/[^a-zA-Z0-9._-]/g, '-')}-${resourceIndex + 1}${path.extname(new URL(resourceUrl).pathname) || '.jpg'}`,
           resourceUrl,
           role: 'layout-visualization' as const,
-          pageNumber: pageIndex + 1
+          pageNumber: pageOffset + pageIndex + 1
         }))
       ]);
       const savedResources = await Promise.all(resourcePlans.map(async plan => ({
@@ -143,7 +144,7 @@ export class PaddleVisionMaterialParser implements MaterialParser {
                 type,
                 text: block.block_content.trim(),
                 markdown: block.block_content.trim(),
-                pageNumber: pageIndex + 1,
+                pageNumber: pageOffset + pageIndex + 1,
                 boundingBox: {
                   x: left / pageWidth,
                   y: top / pageHeight,

@@ -122,6 +122,12 @@ test("resource pages stay traceable across partial parses and exclusions", () =>
     assert.equal(repository.listChunks(resource.id).length, 2);
     repository.setResourcePageIncluded(resource.id, 1, false);
     assert.deepEqual(repository.searchChunks("共同关键词").map((item) => item.pageStart), [2]);
+    repository.markResourcePages(resource.id, 2, 2, "ready");
+    repository.markResourcePagesRag(resource.id, 2, 2, "indexed");
+    const indexedPage = repository.listResourcePages(resource.id)[1];
+    assert.equal(indexedPage.ragStatus, "indexed");
+    assert.equal(indexedPage.ragChunkCount, 1);
+    assert.deepEqual(repository.retrieveResourceChunks(resource.id, "共同关键词").map((item) => item.pageStart), [2]);
     const job = repository.createProcessingJob(resource.id, 2, 2);
     repository.updateProcessingJob(job.id, { status: "completed", stage: "completed", completedAt: new Date().toISOString() });
     assert.equal(repository.listProcessingJobs(resource.id)[0].status, "completed");

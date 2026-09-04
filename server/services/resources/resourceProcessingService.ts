@@ -96,16 +96,18 @@ export const processLibraryResource = async (
       fileName: resource.fileName,
       mimeType: resource.mimeType,
       filePath: temporaryPath,
+      pageOffset: pageStart - 1,
     });
     const publicResource = resourceRepository.getStoredResource(resourceId)!;
     const chunks = buildResourceChunks(
       publicResource,
       normalizedDocument,
-      pageStart - 1,
+      0,
     );
     const analyzer = new ResourceAnalyzer(getModelConfig());
     resourceRepository.updateProcessingJob(jobId, { stage: "saving" });
     resourceRepository.mergeChunksForPages(resourceId, pageStart, pageEnd, chunks);
+    resourceRepository.markResourcePagesRag(resourceId, pageStart, pageEnd, "indexing");
     const allChunks = resourceRepository.listChunks(resourceId);
     resourceRepository.updateProcessingJob(jobId, { stage: "analyzing" });
     const completeAnalysis = await analyzer.analyze(
@@ -119,6 +121,7 @@ export const processLibraryResource = async (
       completeAnalysis.suggestions,
     );
     resourceRepository.markResourcePages(resourceId, pageStart, pageEnd, "ready");
+    resourceRepository.markResourcePagesRag(resourceId, pageStart, pageEnd, "indexed");
     resourceRepository.updateResource(resourceId, {
       status: normalizedDocument.warnings.length ? "needs-review" : "ready",
       summary: completeAnalysis.summary,
@@ -139,6 +142,7 @@ export const processLibraryResource = async (
       parseErrorCode: code,
     });
     resourceRepository.markResourcePages(resourceId, pageStart, pageEnd, "failed", code);
+    resourceRepository.markResourcePagesRag(resourceId, pageStart, pageEnd, "failed", code);
     resourceRepository.updateProcessingJob(jobId, { status: "failed", stage: "failed", errorCode: code, completedAt: new Date().toISOString() });
     throw error;
   } finally {

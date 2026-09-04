@@ -15,6 +15,7 @@ import {
   processLibraryResource,
   readPdfPageCount,
 } from "../services/resources/resourceProcessingService";
+import { getResourcePageImagePath } from "../services/resources/resourcePageRenderService";
 
 const router = Router();
 const uploadDirectory = path.resolve("var/uploads/resources");
@@ -192,6 +193,15 @@ router.get("/resources/:resourceId", (request, response) => {
   });
 });
 
+router.get("/resources/:resourceId/retrieve", (request, response) => {
+  const query = typeof request.query.q === "string" ? request.query.q.trim() : "";
+  if (!query) {
+    response.status(400).json({ code: "SEARCH_QUERY_REQUIRED" });
+    return;
+  }
+  response.json({ results: resourceRepository.retrieveResourceChunks(request.params.resourceId, query, 10) });
+});
+
 router.patch("/resources/:resourceId", (request, response) => {
   const parsed = metadataSchema.partial().safeParse(request.body);
   if (!parsed.success) {
@@ -251,6 +261,19 @@ router.get("/resources/:resourceId/pages/:pageNumber/content", async (request, r
   }
 });
 
+router.get("/resources/:resourceId/pages/:pageNumber/image", async (request, response) => {
+  const pageNumber = Number(request.params.pageNumber);
+  try {
+    const imagePath = await getResourcePageImagePath(request.params.resourceId, pageNumber);
+    response.type("image/jpeg");
+    response.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+    response.sendFile(imagePath);
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "PAGE_RENDER_FAILED";
+    response.status(code === "RESOURCE_NOT_FOUND" ? 404 : 400).json({ code });
+  }
+});
+
 router.patch("/resources/:resourceId/pages/:pageNumber", (request, response) => {
   const parsed = pageStateSchema.safeParse(request.body);
   const pageNumber = Number(request.params.pageNumber);
@@ -299,6 +322,7 @@ router.post("/resources/:resourceId/analyze", (request, response) => {
   }
   const job = resourceRepository.createProcessingJob(resource.id, pageStart, pageEnd);
   resourceRepository.markResourcePages(resource.id, pageStart, pageEnd, "processing");
+  resourceRepository.markResourcePagesRag(resource.id, pageStart, pageEnd, "indexing");
   const queuedResource = resourceRepository.updateResource(resource.id, {
     status: "processing",
     parseErrorCode: undefined,

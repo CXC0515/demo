@@ -160,6 +160,9 @@ const toResourcePage = (row: JsonObject): ResourcePageState => ({
   included: Boolean(row.included),
   parseStatus: row.parse_status as ResourcePageState["parseStatus"],
   parseErrorCode: row.parse_error_code ? String(row.parse_error_code) : undefined,
+  ragStatus: row.rag_status as ResourcePageState["ragStatus"],
+  ragChunkCount: Number(row.rag_chunk_count ?? 0),
+  ragIndexedAt: row.rag_indexed_at ? String(row.rag_indexed_at) : undefined,
   updatedAt: String(row.updated_at),
 });
 
@@ -625,8 +628,10 @@ export class ResourceRepository {
 
   setResourcePageIncluded(resourceId: string, pageNumber: number, included: boolean) {
     const result = this.database.prepare(
-      "UPDATE resource_pages SET included = ?, updated_at = ? WHERE resource_id = ? AND page_number = ?",
-    ).run(included ? 1 : 0, new Date().toISOString(), resourceId, pageNumber);
+      `UPDATE resource_pages SET included = ?,
+       rag_status = CASE WHEN ? = 0 THEN 'excluded' WHEN parse_status = 'ready' THEN 'indexed' ELSE 'unindexed' END,
+       updated_at = ? WHERE resource_id = ? AND page_number = ?`,
+    ).run(included ? 1 : 0, included ? 1 : 0, new Date().toISOString(), resourceId, pageNumber);
     if (!result.changes) return undefined;
     return toResourcePage(this.database.prepare(
       "SELECT * FROM resource_pages WHERE resource_id = ? AND page_number = ?",
@@ -638,6 +643,23 @@ export class ResourceRepository {
       UPDATE resource_pages SET parse_status = ?, parse_error_code = ?, updated_at = ?
       WHERE resource_id = ? AND page_number BETWEEN ? AND ?
     `).run(status, errorCode ?? null, new Date().toISOString(), resourceId, pageStart, pageEnd);
+  }
+
+  markResourcePagesRag(resourceId: string, pageStart: number, pageEnd: number, status: ResourcePageState["ragStatus"], errorCode?: string) {
+    const timestamp = new Date().toISOString();
+    this.database.prepare(`
+      UPDATE resource_pages
+      SET rag_status = CASE WHEN included = 0 THEN 'excluded' ELSE ? END,
+          rag_chunk_count = CASE WHEN ? = 'indexed' THEN (
+            SELECT COUNT(*) FROM resource_chunks chunk
+            WHERE chunk.resource_id = resource_pages.resource_id AND chunk.level = 'content'
+              AND resource_pages.page_number BETWEEN chunk.page_start AND chunk.page_end
+          ) ELSE rag_chunk_count END,
+          rag_indexed_at = CASE WHEN ? = 'indexed' THEN ? ELSE rag_indexed_at END,
+          parse_error_code = CASE WHEN ? = 'failed' THEN ? ELSE parse_error_code END,
+          updated_at = ?
+      WHERE resource_id = ? AND page_number BETWEEN ? AND ?
+    `).run(status, status, status, timestamp, status, errorCode ?? null, timestamp, resourceId, pageStart, pageEnd);
   }
 
   createProcessingJob(resourceId: string, pageStart: number, pageEnd: number) {
@@ -843,6 +865,43 @@ export class ResourceRepository {
         )
         .all(pattern, pattern, pattern, limit) as JsonObject[]
     ).map(toChunk);
+  }
+
+  retrieveResourceChunks(resourceId: string, query: string, limit = 10) {
+    const phrase = `"${query.replace(/"/g, '""')}"`;
+    const substringResults = () => {
+      const pattern = `%${query.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
+      return (this.database.prepare(`
+        SELECT chunk.*, 0 AS retrieval_rank FROM resource_chunks chunk
+        WHERE chunk.resource_id = ? AND chunk.level = 'content'
+          AND (chunk.title LIKE ? ESCAPE '\\' OR chunk.text LIKE ? ESCAPE '\\')
+          AND NOT EXISTS (
+            SELECT 1 FROM resource_pages page WHERE page.resource_id = chunk.resource_id
+              AND page.included = 0 AND page.page_number BETWEEN chunk.page_start AND chunk.page_end
+          )
+        ORDER BY chunk.page_start, chunk.sort_order LIMIT ?
+      `).all(resourceId, pattern, pattern, limit) as JsonObject[]).map((row) => ({
+        ...toChunk(row), retrievalRank: 0,
+      }));
+    };
+    try {
+      const fullTextResults = (this.database.prepare(`
+        SELECT chunk.*, fts.rank AS retrieval_rank
+        FROM resource_chunks_fts fts
+        JOIN resource_chunks chunk ON chunk.id = fts.chunk_id
+        WHERE fts.resource_id = ? AND resource_chunks_fts MATCH ?
+          AND NOT EXISTS (
+            SELECT 1 FROM resource_pages page WHERE page.resource_id = chunk.resource_id
+              AND page.included = 0 AND page.page_number BETWEEN chunk.page_start AND chunk.page_end
+          )
+        ORDER BY fts.rank LIMIT ?
+      `).all(resourceId, phrase, limit) as JsonObject[]).map((row) => ({
+        ...toChunk(row), retrievalRank: Number(row.retrieval_rank),
+      }));
+      return fullTextResults.length ? fullTextResults : substringResults();
+    } catch {
+      return substringResults();
+    }
   }
 
   getChunksByIds(ids: string[]) {

@@ -10,6 +10,7 @@ export interface MaterialParserInput {
   fileName: string;
   mimeType: string;
   filePath: string;
+  pageOffset?: number;
 }
 
 export interface MaterialParser {

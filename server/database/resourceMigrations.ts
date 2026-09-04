@@ -236,6 +236,53 @@ const migrations = [
       WHERE status = 'processing';
     `,
   },
+  {
+    version: 5,
+    sql: `
+      ALTER TABLE resource_pages ADD COLUMN rag_status TEXT NOT NULL DEFAULT 'unindexed'
+        CHECK (rag_status IN ('unindexed', 'indexing', 'indexed', 'failed', 'excluded'));
+      ALTER TABLE resource_pages ADD COLUMN rag_chunk_count INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE resource_pages ADD COLUMN rag_indexed_at TEXT;
+
+      CREATE VIRTUAL TABLE resource_chunks_fts USING fts5(
+        chunk_id UNINDEXED,
+        resource_id UNINDEXED,
+        title,
+        text,
+        tags,
+        tokenize = 'unicode61'
+      );
+      INSERT INTO resource_chunks_fts (chunk_id, resource_id, title, text, tags)
+      SELECT id, resource_id, title, text, tags_json FROM resource_chunks WHERE level = 'content';
+
+      CREATE TRIGGER resource_chunks_fts_insert AFTER INSERT ON resource_chunks
+      WHEN new.level = 'content' BEGIN
+        INSERT INTO resource_chunks_fts (chunk_id, resource_id, title, text, tags)
+        VALUES (new.id, new.resource_id, new.title, new.text, new.tags_json);
+      END;
+      CREATE TRIGGER resource_chunks_fts_delete AFTER DELETE ON resource_chunks
+      WHEN old.level = 'content' BEGIN
+        DELETE FROM resource_chunks_fts WHERE chunk_id = old.id;
+      END;
+      CREATE TRIGGER resource_chunks_fts_update AFTER UPDATE ON resource_chunks
+      WHEN old.level = 'content' OR new.level = 'content' BEGIN
+        DELETE FROM resource_chunks_fts WHERE chunk_id = old.id;
+        INSERT INTO resource_chunks_fts (chunk_id, resource_id, title, text, tags)
+        SELECT new.id, new.resource_id, new.title, new.text, new.tags_json WHERE new.level = 'content';
+      END;
+
+      UPDATE resource_pages
+      SET rag_status = CASE WHEN included = 0 THEN 'excluded' ELSE 'indexed' END,
+          rag_chunk_count = (
+            SELECT COUNT(*) FROM resource_chunks chunk
+            WHERE chunk.resource_id = resource_pages.resource_id
+              AND chunk.level = 'content'
+              AND resource_pages.page_number BETWEEN chunk.page_start AND chunk.page_end
+          ),
+          rag_indexed_at = CASE WHEN parse_status = 'ready' THEN updated_at ELSE NULL END
+      WHERE parse_status = 'ready';
+    `,
+  },
 ];
 
 export const runResourceMigrations = (database: Database.Database) => {

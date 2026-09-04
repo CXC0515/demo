@@ -17,6 +17,7 @@ import {
   ResourceDetail,
   ResourcePageState,
   ResourceKind,
+  ResourceChunk,
 } from "../domain/types";
 
 const readErrorCode = async (response: Response) => {
@@ -120,6 +121,12 @@ export const setLibraryResourcePageIncluded = async (
     },
   )
 ).page;
+
+export const retrieveLibraryResource = async (resourceId: string, query: string) => (
+  await requestJson<{ results: Array<ResourceChunk & { retrievalRank: number }> }>(
+    `/api/resources/${resourceId}/retrieve?q=${encodeURIComponent(query)}`,
+  )
+).results;
 
 export const getKnowledgeGraph = async (query = "") => {
   const suffix = query ? `?q=${encodeURIComponent(query)}` : "";

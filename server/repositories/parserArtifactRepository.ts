@@ -18,6 +18,19 @@ export const saveParserArtifact = (assetId: string, artifact: unknown) => {
   renameSync(temporary, target);
 };
 
+export const mergeParserArtifactPages = (
+  assetId: string,
+  artifact: { model: string; jobId: string; dataInfo: unknown; pages: Array<{ pageNumber: number } & Record<string, unknown>> },
+) => {
+  const current = getParserArtifact(assetId) as { pages?: Array<{ pageNumber: number } & Record<string, unknown>> } | undefined;
+  const replaced = new Set(artifact.pages.map((page) => page.pageNumber));
+  saveParserArtifact(assetId, {
+    ...artifact,
+    pages: [...(current?.pages ?? []).filter((page) => !replaced.has(page.pageNumber)), ...artifact.pages]
+      .sort((left, right) => left.pageNumber - right.pageNumber),
+  });
+};
+
 export const getParserArtifact = (assetId: string) => {
   try {
     return JSON.parse(readFileSync(artifactPath(assetId), 'utf8')) as unknown;
