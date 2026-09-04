@@ -246,6 +246,7 @@ router.get("/resources/:resourceId/content", (request, response) => {
     return;
   }
   response.type(resource.mimeType);
+  response.setHeader("Cache-Control", "private, max-age=31536000, immutable");
   response.sendFile(path.resolve(resource.diskPath));
 });
 

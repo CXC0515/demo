@@ -427,7 +427,7 @@ const OcrPageReader = ({
     const target = scrollRef.current?.querySelector<HTMLElement>(`[data-resource-page="${selectedPage}"]`);
     if (target && Math.abs(target.getBoundingClientRect().top - (scrollRef.current?.getBoundingClientRect().top ?? 0)) > 120) {
       suppressScrollSelectionRef.current = true;
-      target.scrollIntoView({ block: "start" });
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
       const timer = window.setTimeout(() => { suppressScrollSelectionRef.current = false; }, 600);
       return () => window.clearTimeout(timer);
     }
@@ -501,6 +501,8 @@ export default function ResourceLibraryEditor({
     "overview" | "pages" | "rag" | "review"
   >("overview");
   const [readingMode, setReadingMode] = useState<"pdf" | "ocr">("pdf");
+  const [pdfPage, setPdfPage] = useState(selectedPage);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [pageStart, setPageStart] = useState(1);
   const [pageEnd, setPageEnd] = useState(20);
   const [selectedSuggestions, setSelectedSuggestions] = useState<string[]>([]);
@@ -525,6 +527,13 @@ export default function ResourceLibraryEditor({
   const latestJob = detail?.processingJobs[0];
   const pageWindowStart = Math.floor(Math.max(0, selectedPage - 1) / 50) * 50;
   const visiblePages = detail?.pages.slice(pageWindowStart, pageWindowStart + 50) ?? [];
+  useEffect(() => {
+    if (detail) setPdfPage(Math.min(selectedPage, detail.pageCount ?? selectedPage));
+  }, [detail?.id]);
+  const navigatePage = (page: number) => {
+    onOpenPage(page);
+    if (readingMode === "pdf") setPdfPage(page);
+  };
   const runAnalysis = async () => {
     if (!detail) return;
     try {
@@ -711,11 +720,11 @@ export default function ResourceLibraryEditor({
                 <Trash2 className="w-4 h-4" />
               </button>
             </header>
-            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px] flex-1 min-h-0">
+            <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
               <div className="flex min-h-0 flex-col bg-slate-200/50 dark:bg-zinc-950">
                 <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
                   <div className="inline-flex rounded-lg bg-slate-100 p-1 dark:bg-zinc-800">
-                    <button onClick={() => setReadingMode("pdf")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${readingMode === "pdf" ? "bg-white text-slate-900 shadow-sm dark:bg-zinc-700 dark:text-white" : "text-slate-500"}`}>PDF 原文</button>
+                    <button onClick={() => { setReadingMode("pdf"); onOpenPage(pdfPage); }} className={`rounded-md px-3 py-1.5 text-xs font-bold ${readingMode === "pdf" ? "bg-white text-slate-900 shadow-sm dark:bg-zinc-700 dark:text-white" : "text-slate-500"}`}>PDF 原文</button>
                     <button onClick={() => {
                       setReadingMode("ocr");
                       const current = detail.pages.find((page) => page.pageNumber === selectedPage);
@@ -725,19 +734,21 @@ export default function ResourceLibraryEditor({
                       }
                     }} className={`rounded-md px-3 py-1.5 text-xs font-bold ${readingMode === "ocr" ? "bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-300" : "text-slate-500"}`}>OCR 识别</button>
                   </div>
-                  <span className="text-xs font-bold text-slate-500">第 {selectedPage} 页</span>
+                  <div className="flex items-center gap-2"><span className="text-xs font-bold text-slate-500">第 {selectedPage} 页</span><button onClick={() => setInspectorOpen(true)} className="btn-secondary px-2.5 py-1.5 text-xs lg:hidden">详情</button></div>
                 </div>
-                <div className="min-h-0 flex-1 p-3">
-                  {readingMode === "pdf" ? (
-                    <object key={`${detail.id}-${selectedPage}`} data={`${detail.publicUrl}#page=${selectedPage}&view=FitH`} type="application/pdf" className="h-full min-h-[560px] w-full rounded-lg bg-white shadow-sm">
-                      <a href={`${detail.publicUrl}#page=${selectedPage}`} target="_blank" rel="noreferrer" className="text-emerald-700">打开 PDF</a>
+                <div className="relative min-h-0 flex-1 p-3">
+                  <div className={readingMode === "pdf" ? "h-full" : "invisible pointer-events-none absolute inset-3 h-auto"}>
+                    <object key={`${detail.id}-${pdfPage}`} data={`${detail.publicUrl}#page=${pdfPage}&view=FitH`} type="application/pdf" className="h-full min-h-[560px] w-full rounded-lg bg-white shadow-sm">
+                      <a href={`${detail.publicUrl}#page=${pdfPage}`} target="_blank" rel="noreferrer" className="text-emerald-700">打开 PDF</a>
                     </object>
-                  ) : (
+                  </div>
+                  <div className={readingMode === "ocr" ? "h-full" : "invisible pointer-events-none absolute inset-3 h-auto"}>
                     <OcrPageReader resourceId={detail.id} pages={detail.pages} chunks={detail.chunks} selectedPage={selectedPage} onSelectPage={onOpenPage} />
-                  )}
+                  </div>
                 </div>
               </div>
-              <aside className="flex min-h-0 flex-col border-l border-slate-200/70 dark:border-zinc-800">
+              {inspectorOpen && <button aria-label="关闭详情" onClick={() => setInspectorOpen(false)} className="fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-[1px] lg:hidden" />}
+              <aside className={`${inspectorOpen ? "fixed inset-y-4 right-4 z-50 flex w-[min(360px,calc(100vw-2rem))] rounded-2xl bg-white shadow-2xl dark:bg-zinc-900" : "hidden"} min-h-0 flex-col overflow-hidden border-l border-slate-200/70 dark:border-zinc-800 lg:static lg:z-auto lg:flex lg:w-auto lg:rounded-none lg:bg-transparent lg:shadow-none`}>
                 <div className="grid grid-cols-4 border-b border-slate-200/70 dark:border-zinc-800">
                   {(
                     [
@@ -755,6 +766,7 @@ export default function ResourceLibraryEditor({
                       {label}
                     </button>
                   ))}
+                  <button onClick={() => setInspectorOpen(false)} className="absolute right-2 top-11 grid h-8 w-8 place-items-center rounded-lg bg-white shadow lg:hidden dark:bg-zinc-800" aria-label="关闭详情面板"><X className="h-4 w-4" /></button>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto p-4">
                   {inspectorTab === "overview" && (
@@ -848,17 +860,17 @@ export default function ResourceLibraryEditor({
                   {inspectorTab === "pages" && (
                     <div className="space-y-4">
                       <div className="flex items-center gap-2">
-                        <button disabled={pageWindowStart === 0} onClick={() => onOpenPage(Math.max(1, pageWindowStart - 49))} className="btn-secondary px-2.5 py-1.5 text-xs disabled:opacity-40">上一组</button>
+                        <button disabled={pageWindowStart === 0} onClick={() => navigatePage(Math.max(1, pageWindowStart - 49))} className="btn-secondary px-2.5 py-1.5 text-xs disabled:opacity-40">上一组</button>
                         <label className="flex flex-1 items-center gap-2 text-xs text-slate-500">跳到
-                          <input type="number" min={1} max={detail.pageCount ?? 1} value={selectedPage} onChange={(event) => onOpenPage(Math.max(1, Math.min(detail.pageCount ?? 1, Number(event.target.value))))} className={`${fieldClass} min-w-0 py-1.5`} />
+                          <input type="number" min={1} max={detail.pageCount ?? 1} value={selectedPage} onChange={(event) => navigatePage(Math.max(1, Math.min(detail.pageCount ?? 1, Number(event.target.value))))} className={`${fieldClass} min-w-0 py-1.5`} />
                         </label>
-                        <button disabled={pageWindowStart + 50 >= detail.pages.length} onClick={() => onOpenPage(pageWindowStart + 51)} className="btn-secondary px-2.5 py-1.5 text-xs disabled:opacity-40">下一组</button>
+                        <button disabled={pageWindowStart + 50 >= detail.pages.length} onClick={() => navigatePage(pageWindowStart + 51)} className="btn-secondary px-2.5 py-1.5 text-xs disabled:opacity-40">下一组</button>
                       </div>
                       <div className="grid grid-cols-5 gap-2">
                         {visiblePages.map((page) => (
                           <button
                             key={page.pageNumber}
-                            onClick={() => onOpenPage(page.pageNumber)}
+                            onClick={() => navigatePage(page.pageNumber)}
                             className={`relative rounded-lg border px-1 py-2 text-xs font-bold ${selectedPage === page.pageNumber ? "border-emerald-600 bg-emerald-50 text-emerald-800" : "border-slate-200 dark:border-zinc-800 text-slate-500"} ${page.included ? "" : "opacity-45 line-through"}`}
                             title={`${page.included ? "纳入" : "已排除"} · ${page.parseStatus}`}
                           >
@@ -918,7 +930,7 @@ export default function ResourceLibraryEditor({
                       </form>
                       <div className="space-y-2">
                         {ragResults.map((result) => (
-                          <button key={result.id} onClick={() => onOpenPage(result.pageStart)} className="w-full rounded-xl border border-slate-200 p-3 text-left hover:border-emerald-300 hover:bg-emerald-50/40 dark:border-zinc-800 dark:hover:bg-emerald-950/20">
+                          <button key={result.id} onClick={() => navigatePage(result.pageStart)} className="w-full rounded-xl border border-slate-200 p-3 text-left hover:border-emerald-300 hover:bg-emerald-50/40 dark:border-zinc-800 dark:hover:bg-emerald-950/20">
                             <span className="flex items-center justify-between gap-2"><strong className="truncate text-xs text-slate-700 dark:text-slate-200">{result.title}</strong><span className="shrink-0 text-[10px] font-bold text-emerald-700">第 {result.pageStart} 页</span></span>
                             <span className="mt-1.5 line-clamp-4 block text-xs leading-5 text-slate-500">{result.text}</span>
                           </button>
