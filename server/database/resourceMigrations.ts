@@ -191,6 +191,51 @@ const migrations = [
       );
     `,
   },
+  {
+    version: 4,
+    sql: `
+      CREATE TABLE resource_pages (
+        resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+        page_number INTEGER NOT NULL CHECK (page_number > 0),
+        included INTEGER NOT NULL DEFAULT 1 CHECK (included IN (0, 1)),
+        parse_status TEXT NOT NULL DEFAULT 'unparsed' CHECK (parse_status IN ('unparsed', 'processing', 'ready', 'failed')),
+        parse_error_code TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (resource_id, page_number)
+      );
+      CREATE INDEX resource_pages_status_idx ON resource_pages(resource_id, included, parse_status, page_number);
+
+      CREATE TABLE resource_processing_jobs (
+        id TEXT PRIMARY KEY,
+        resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+        page_start INTEGER NOT NULL,
+        page_end INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'interrupted')),
+        stage TEXT NOT NULL CHECK (stage IN ('queued', 'preparing', 'ocr', 'analyzing', 'saving', 'completed', 'failed', 'interrupted')),
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+      CREATE INDEX resource_processing_jobs_resource_idx ON resource_processing_jobs(resource_id, created_at DESC);
+
+      INSERT INTO resource_pages (resource_id, page_number, included, parse_status, updated_at)
+      WITH RECURSIVE page_numbers(resource_id, page_number, page_count, parsed_start, parsed_end, updated_at) AS (
+        SELECT id, 1, page_count, parsed_page_start, parsed_page_end, updated_at
+        FROM resources WHERE page_count IS NOT NULL AND page_count > 0
+        UNION ALL
+        SELECT resource_id, page_number + 1, page_count, parsed_start, parsed_end, updated_at
+        FROM page_numbers WHERE page_number < page_count
+      )
+      SELECT resource_id, page_number, 1,
+        CASE WHEN page_number BETWEEN COALESCE(parsed_start, -1) AND COALESCE(parsed_end, -1) THEN 'ready' ELSE 'unparsed' END,
+        updated_at
+      FROM page_numbers;
+
+      UPDATE resources SET status = 'needs-review', parse_error_code = 'PROCESSING_INTERRUPTED'
+      WHERE status = 'processing';
+    `,
+  },
 ];
 
 export const runResourceMigrations = (database: Database.Database) => {

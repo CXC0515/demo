@@ -16,6 +16,8 @@ import {
   KnowledgeTag,
   LibraryResource,
   ResourceChunk,
+  ResourcePageState,
+  ResourceProcessingJob,
 } from "../../src/domain/types";
 import {
   middleSchoolMathNodes,
@@ -150,6 +152,28 @@ const toSuggestion = (row: JsonObject): DiscoverySuggestion => ({
   createdNodeId: row.created_node_id ? String(row.created_node_id) : undefined,
   createdAt: String(row.created_at),
   reviewedAt: row.reviewed_at ? String(row.reviewed_at) : undefined,
+});
+
+const toResourcePage = (row: JsonObject): ResourcePageState => ({
+  resourceId: String(row.resource_id),
+  pageNumber: Number(row.page_number),
+  included: Boolean(row.included),
+  parseStatus: row.parse_status as ResourcePageState["parseStatus"],
+  parseErrorCode: row.parse_error_code ? String(row.parse_error_code) : undefined,
+  updatedAt: String(row.updated_at),
+});
+
+const toProcessingJob = (row: JsonObject): ResourceProcessingJob => ({
+  id: String(row.id),
+  resourceId: String(row.resource_id),
+  pageStart: Number(row.page_start),
+  pageEnd: Number(row.page_end),
+  status: row.status as ResourceProcessingJob["status"],
+  stage: row.stage as ResourceProcessingJob["stage"],
+  errorCode: row.error_code ? String(row.error_code) : undefined,
+  createdAt: String(row.created_at),
+  updatedAt: String(row.updated_at),
+  completedAt: row.completed_at ? String(row.completed_at) : undefined,
 });
 
 export interface StoredLibraryResource extends LibraryResource {
@@ -553,8 +577,8 @@ export class ResourceRepository {
     > & { pageCount?: number | null },
   ) {
     const now = new Date().toISOString();
-    this.database
-      .prepare(
+    this.database.transaction(() => {
+      this.database.prepare(
         `
       INSERT INTO resources
       (id, title, file_name, mime_type, kind, subject, grade, publisher, edition, is_primary, status, page_count, disk_path, public_url, summary, tags_json, created_at, updated_at)
@@ -578,7 +602,85 @@ export class ResourceRepository {
         now,
         now,
       );
+      if (input.pageCount) this.initializeResourcePages(input.id, input.pageCount);
+    })();
     return this.getStoredResource(input.id)!;
+  }
+
+  initializeResourcePages(resourceId: string, pageCount: number) {
+    const insert = this.database.prepare(`
+      INSERT OR IGNORE INTO resource_pages
+      (resource_id, page_number, included, parse_status, updated_at)
+      VALUES (?, ?, 1, 'unparsed', ?)
+    `);
+    const timestamp = new Date().toISOString();
+    for (let page = 1; page <= pageCount; page += 1) insert.run(resourceId, page, timestamp);
+  }
+
+  listResourcePages(resourceId: string) {
+    return (this.database.prepare(
+      "SELECT * FROM resource_pages WHERE resource_id = ? ORDER BY page_number",
+    ).all(resourceId) as JsonObject[]).map(toResourcePage);
+  }
+
+  setResourcePageIncluded(resourceId: string, pageNumber: number, included: boolean) {
+    const result = this.database.prepare(
+      "UPDATE resource_pages SET included = ?, updated_at = ? WHERE resource_id = ? AND page_number = ?",
+    ).run(included ? 1 : 0, new Date().toISOString(), resourceId, pageNumber);
+    if (!result.changes) return undefined;
+    return toResourcePage(this.database.prepare(
+      "SELECT * FROM resource_pages WHERE resource_id = ? AND page_number = ?",
+    ).get(resourceId, pageNumber) as JsonObject);
+  }
+
+  markResourcePages(resourceId: string, pageStart: number, pageEnd: number, status: ResourcePageState["parseStatus"], errorCode?: string) {
+    this.database.prepare(`
+      UPDATE resource_pages SET parse_status = ?, parse_error_code = ?, updated_at = ?
+      WHERE resource_id = ? AND page_number BETWEEN ? AND ?
+    `).run(status, errorCode ?? null, new Date().toISOString(), resourceId, pageStart, pageEnd);
+  }
+
+  createProcessingJob(resourceId: string, pageStart: number, pageEnd: number) {
+    const id = randomUUID();
+    const timestamp = new Date().toISOString();
+    this.database.prepare(`
+      INSERT INTO resource_processing_jobs
+      (id, resource_id, page_start, page_end, status, stage, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'running', 'queued', ?, ?)
+    `).run(id, resourceId, pageStart, pageEnd, timestamp, timestamp);
+    return this.listProcessingJobs(resourceId).find((job) => job.id === id)!;
+  }
+
+  updateProcessingJob(id: string, update: Partial<Pick<ResourceProcessingJob, "status" | "stage" | "errorCode" | "completedAt">>) {
+    const current = this.database.prepare("SELECT * FROM resource_processing_jobs WHERE id = ?").get(id) as JsonObject | undefined;
+    if (!current) return undefined;
+    const next = { ...toProcessingJob(current), ...update };
+    this.database.prepare(`
+      UPDATE resource_processing_jobs SET status = ?, stage = ?, error_code = ?, updated_at = ?, completed_at = ? WHERE id = ?
+    `).run(next.status, next.stage, next.errorCode ?? null, new Date().toISOString(), next.completedAt ?? null, id);
+    return toProcessingJob(this.database.prepare("SELECT * FROM resource_processing_jobs WHERE id = ?").get(id) as JsonObject);
+  }
+
+  listProcessingJobs(resourceId: string, limit = 12) {
+    return (this.database.prepare(
+      "SELECT * FROM resource_processing_jobs WHERE resource_id = ? ORDER BY created_at DESC LIMIT ?",
+    ).all(resourceId, limit) as JsonObject[]).map(toProcessingJob);
+  }
+
+  markRunningJobsInterrupted() {
+    const timestamp = new Date().toISOString();
+    return this.database.transaction(() => {
+      const jobs = this.database.prepare(`
+        UPDATE resource_processing_jobs SET status='interrupted', stage='interrupted', error_code='PROCESSING_INTERRUPTED', updated_at=?, completed_at=? WHERE status='running'
+      `).run(timestamp, timestamp).changes;
+      this.database.prepare(`
+        UPDATE resources SET status='needs-review', parse_error_code='PROCESSING_INTERRUPTED', updated_at=? WHERE status='processing'
+      `).run(timestamp);
+      this.database.prepare(`
+        UPDATE resource_pages SET parse_status='failed', parse_error_code='PROCESSING_INTERRUPTED', updated_at=? WHERE parse_status='processing'
+      `).run(timestamp);
+      return jobs;
+    })();
   }
 
   listResources() {
@@ -691,11 +793,35 @@ export class ResourceRepository {
     })();
   }
 
+  mergeChunksForPages(resourceId: string, pageStart: number, pageEnd: number, chunks: ResourceChunk[]) {
+    const remove = this.database.prepare(
+      "DELETE FROM resource_chunks WHERE resource_id = ? AND page_start >= ? AND page_end <= ?",
+    );
+    const insert = this.database.prepare(`
+      INSERT INTO resource_chunks
+      (id, resource_id, parent_id, level, title, summary, text, tags_json, page_start, page_end, bounding_box_json, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const timestamp = new Date().toISOString();
+    this.database.transaction(() => {
+      remove.run(resourceId, pageStart, pageEnd);
+      chunks.forEach((chunk) => insert.run(
+        chunk.id, resourceId, chunk.parentId ?? null, chunk.level, chunk.title, chunk.summary, chunk.text,
+        JSON.stringify(chunk.tags), chunk.pageStart, chunk.pageEnd,
+        chunk.boundingBox ? JSON.stringify(chunk.boundingBox) : null, chunk.order, timestamp, timestamp,
+      ));
+    })();
+  }
+
   listChunks(resourceId: string) {
     return (
       this.database
         .prepare(
-          "SELECT * FROM resource_chunks WHERE resource_id = ? ORDER BY sort_order",
+          `SELECT chunk.* FROM resource_chunks chunk
+           WHERE chunk.resource_id = ? AND NOT EXISTS (
+             SELECT 1 FROM resource_pages page WHERE page.resource_id = chunk.resource_id
+             AND page.included = 0 AND page.page_number BETWEEN chunk.page_start AND chunk.page_end
+           ) ORDER BY chunk.page_start, chunk.sort_order`,
         )
         .all(resourceId) as JsonObject[]
     ).map(toChunk);
@@ -707,8 +833,11 @@ export class ResourceRepository {
       this.database
         .prepare(
           `
-      SELECT * FROM resource_chunks
-      WHERE level = 'content' AND (title LIKE ? ESCAPE '\\' OR text LIKE ? ESCAPE '\\' OR tags_json LIKE ? ESCAPE '\\')
+      SELECT chunk.* FROM resource_chunks chunk
+      WHERE chunk.level = 'content' AND NOT EXISTS (
+        SELECT 1 FROM resource_pages page WHERE page.resource_id = chunk.resource_id
+        AND page.included = 0 AND page.page_number BETWEEN chunk.page_start AND chunk.page_end
+      ) AND (chunk.title LIKE ? ESCAPE '\\' OR chunk.text LIKE ? ESCAPE '\\' OR chunk.tags_json LIKE ? ESCAPE '\\')
       ORDER BY page_start, sort_order LIMIT ?
     `,
         )

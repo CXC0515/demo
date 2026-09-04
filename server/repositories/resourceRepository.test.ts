@@ -102,6 +102,35 @@ test("resource review creates an authoritative node and source link", () => {
   }
 });
 
+test("resource pages stay traceable across partial parses and exclusions", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "resource-pages-"));
+  const database = createResourceDatabase(path.join(directory, "resources.sqlite"));
+  try {
+    const repository = new ResourceRepository(database);
+    const resource = repository.createResource({
+      id: randomUUID(), title: "逐页资料", fileName: "pages.pdf", mimeType: "application/pdf",
+      kind: "supplement", subject: "语文", grade: "七年级", publisher: "", edition: "",
+      isPrimary: false, diskPath: path.join(directory, "pages.pdf"), publicUrl: "/content", pageCount: 3,
+    });
+    assert.equal(repository.listResourcePages(resource.id).length, 3);
+    const chunk = (page: number, text: string) => ({
+      id: `${resource.id}:content:${page}`, resourceId: resource.id, level: "content" as const,
+      title: `第 ${page} 页`, summary: "", text, tags: [], pageStart: page, pageEnd: page, order: page,
+    });
+    repository.mergeChunksForPages(resource.id, 1, 1, [chunk(1, "共同关键词 第一页")]);
+    repository.mergeChunksForPages(resource.id, 2, 2, [chunk(2, "共同关键词 第二页")]);
+    assert.equal(repository.listChunks(resource.id).length, 2);
+    repository.setResourcePageIncluded(resource.id, 1, false);
+    assert.deepEqual(repository.searchChunks("共同关键词").map((item) => item.pageStart), [2]);
+    const job = repository.createProcessingJob(resource.id, 2, 2);
+    repository.updateProcessingJob(job.id, { status: "completed", stage: "completed", completedAt: new Date().toISOString() });
+    assert.equal(repository.listProcessingJobs(resource.id)[0].status, "completed");
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("merging nodes preserves the target and archives the source id", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "resource-merge-"));
   const database = createResourceDatabase(

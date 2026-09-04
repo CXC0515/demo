@@ -71,73 +71,37 @@ export const buildResourceChunks = (
   const blocks = [...document.blocks].sort(
     (first, second) => first.order - second.order,
   );
-  const pageNumbers = blocks.map(
-    (block) => (block.pageNumber ?? 1) + pageOffset,
-  );
-  const firstPage = pageNumbers.length
-    ? Math.min(...pageNumbers)
-    : pageOffset + 1;
-  const lastPage = pageNumbers.length ? Math.max(...pageNumbers) : firstPage;
-  const rootId = `${resource.id}:document`;
-  const chunks: ResourceChunk[] = [
-    {
-      id: rootId,
-      resourceId: resource.id,
-      level: "document",
-      title: resource.title,
-      summary: "",
-      text: "",
-      tags: [],
-      pageStart: firstPage,
-      pageEnd: lastPage,
-      order: 0,
-    },
-  ];
-  let sectionId = rootId;
-  let sectionOrder = 1;
-  blocks.forEach((block, index) => {
-    const pageNumber = (block.pageNumber ?? 1) + pageOffset;
-    if (block.type === "heading") {
-      sectionId = `${resource.id}:section:${block.id}`;
-      chunks.push({
-        id: sectionId,
-        resourceId: resource.id,
-        parentId: rootId,
-        level: "section",
-        title: block.text.slice(0, 120),
-        summary: "",
-        text: block.text,
-        tags: [],
-        pageStart: pageNumber,
-        pageEnd: pageNumber,
-        boundingBox: block.boundingBox,
-        order: sectionOrder++ * 10_000,
-      });
-    }
-    chunks.push({
-      id: `${resource.id}:content:${block.id}`,
-      resourceId: resource.id,
-      parentId: sectionId,
-      level: "content",
-      title:
-        block.type === "heading"
-          ? block.text.slice(0, 80)
-          : `第 ${pageNumber} 页内容`,
-      summary: "",
-      text: block.text,
-      tags: [],
-      pageStart: pageNumber,
-      pageEnd: pageNumber,
-      boundingBox: block.boundingBox,
-      order: index + 1,
-    });
+  const grouped = new Map<number, typeof blocks>();
+  blocks.forEach((block) => {
+    const page = (block.pageNumber ?? 1) + pageOffset;
+    grouped.set(page, [...(grouped.get(page) ?? []), block]);
   });
-  const sectionChunks = chunks.filter((chunk) => chunk.level === "section");
-  sectionChunks.forEach((section, index) => {
-    const next = sectionChunks[index + 1];
-    section.pageEnd = next
-      ? Math.max(section.pageStart, next.pageStart - 1)
-      : lastPage;
+  const chunks: ResourceChunk[] = [];
+  Array.from(grouped.entries()).sort(([a], [b]) => a - b).forEach(([pageNumber, pageBlocks]) => {
+    const rootId = `${resource.id}:document:${pageNumber}`;
+    chunks.push({
+      id: rootId, resourceId: resource.id, level: "document", title: `${resource.title} · 第 ${pageNumber} 页`,
+      summary: "", text: "", tags: [], pageStart: pageNumber, pageEnd: pageNumber, order: pageNumber * 1_000_000,
+    });
+    let sectionId = rootId;
+    pageBlocks.forEach((block, index) => {
+      const stableBlockId = `${pageNumber}:${block.id}`;
+      if (block.type === "heading") {
+        sectionId = `${resource.id}:section:${stableBlockId}`;
+        chunks.push({
+          id: sectionId, resourceId: resource.id, parentId: rootId, level: "section",
+          title: block.text.slice(0, 120), summary: "", text: block.text, tags: [],
+          pageStart: pageNumber, pageEnd: pageNumber, boundingBox: block.boundingBox,
+          order: pageNumber * 1_000_000 + (index + 1) * 1_000,
+        });
+      }
+      chunks.push({
+        id: `${resource.id}:content:${stableBlockId}`, resourceId: resource.id, parentId: sectionId, level: "content",
+        title: block.type === "heading" ? block.text.slice(0, 80) : `第 ${pageNumber} 页内容`,
+        summary: "", text: block.text, tags: [], pageStart: pageNumber, pageEnd: pageNumber,
+        boundingBox: block.boundingBox, order: pageNumber * 1_000_000 + index + 1,
+      });
+    });
   });
   return chunks;
 };

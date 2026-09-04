@@ -14,11 +14,13 @@ import gradingTaskManagementRouter from './routes/gradingTaskManagement';
 import resourcesRouter from './routes/resources';
 import scheduleRouter from './routes/schedule';
 import { getModelConfig, isModelConfigured } from './config/modelConfig';
+import { resourceRepository } from './repositories/resourceRepository';
 
 const app = express();
 const port = Number(process.env.API_PORT ?? 3001);
 const uploadDirectory = path.resolve('var/uploads');
 mkdirSync(uploadDirectory, { recursive: true });
+resourceRepository.markRunningJobsInterrupted();
 
 app.use(express.json({ limit: '1mb' }));
 app.use('/uploads', express.static(uploadDirectory, { index: false, fallthrough: false }));

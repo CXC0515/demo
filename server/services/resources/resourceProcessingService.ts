@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PDFDocument } from "pdf-lib";
 import { getModelConfig } from "../../config/modelConfig";
@@ -42,15 +42,34 @@ const createPageRangePdf = async (
   return temporaryPath;
 };
 
+export const getResourcePagePdfPath = async (resourceId: string, pageNumber: number) => {
+  const resource = resourceRepository.getStoredResource(resourceId);
+  if (!resource) throw new Error("RESOURCE_NOT_FOUND");
+  if (!resource.pageCount || pageNumber < 1 || pageNumber > resource.pageCount) throw new Error("INVALID_PAGE_NUMBER");
+  const previewDirectory = path.resolve("var/uploads/parsed", resourceId, "previews");
+  const previewPath = path.join(previewDirectory, `page-${pageNumber}.pdf`);
+  try {
+    await access(previewPath);
+    return previewPath;
+  } catch {
+    await mkdir(previewDirectory, { recursive: true });
+    const source = await PDFDocument.load(await readFile(resource.diskPath), { updateMetadata: false });
+    const output = await PDFDocument.create();
+    const [page] = await output.copyPages(source, [pageNumber - 1]);
+    output.addPage(page);
+    await writeFile(previewPath, await output.save());
+    return previewPath;
+  }
+};
+
 export const processLibraryResource = async (
   resourceId: string,
   pageStart: number,
   pageEnd: number,
+  jobId: string,
 ) => {
   const resource = resourceRepository.getStoredResource(resourceId);
   if (!resource) throw new Error("RESOURCE_NOT_FOUND");
-  if (resource.status === "processing")
-    throw new Error("RESOURCE_ALREADY_PROCESSING");
   if (resource.mimeType !== "application/pdf")
     throw new Error("RESOURCE_FORMAT_UNSUPPORTED");
   if (
@@ -62,20 +81,16 @@ export const processLibraryResource = async (
   ) {
     throw new Error("INVALID_PAGE_RANGE");
   }
-  resourceRepository.updateResource(resourceId, {
-    status: "processing",
-    parseErrorCode: undefined,
-    parsedPageStart: pageStart,
-    parsedPageEnd: pageEnd,
-  });
   let temporaryPath = "";
   try {
+    resourceRepository.updateProcessingJob(jobId, { stage: "preparing" });
     temporaryPath = await createPageRangePdf(
       resource.diskPath,
       resourceId,
       pageStart,
       pageEnd,
     );
+    resourceRepository.updateProcessingJob(jobId, { stage: "ocr" });
     const normalizedDocument = await parseMaterial({
       assetId: resource.id,
       fileName: resource.fileName,
@@ -89,27 +104,29 @@ export const processLibraryResource = async (
       pageStart - 1,
     );
     const analyzer = new ResourceAnalyzer(getModelConfig());
-    const analysis = await analyzer.analyze(
+    resourceRepository.updateProcessingJob(jobId, { stage: "saving" });
+    resourceRepository.mergeChunksForPages(resourceId, pageStart, pageEnd, chunks);
+    const allChunks = resourceRepository.listChunks(resourceId);
+    resourceRepository.updateProcessingJob(jobId, { stage: "analyzing" });
+    const completeAnalysis = await analyzer.analyze(
       publicResource,
-      chunks,
+      allChunks,
       resourceRepository.listNodes(),
     );
-    const root = chunks.find((chunk) => chunk.level === "document");
-    if (root) {
-      root.summary = analysis.summary;
-      root.tags = analysis.tags;
-    }
-    resourceRepository.replaceChunks(resourceId, chunks);
+    resourceRepository.updateProcessingJob(jobId, { stage: "saving" });
     resourceRepository.replacePendingSuggestions(
       resourceId,
-      analysis.suggestions,
+      completeAnalysis.suggestions,
     );
+    resourceRepository.markResourcePages(resourceId, pageStart, pageEnd, "ready");
     resourceRepository.updateResource(resourceId, {
       status: normalizedDocument.warnings.length ? "needs-review" : "ready",
-      summary: analysis.summary,
-      tags: analysis.tags,
+      summary: completeAnalysis.summary,
+      tags: completeAnalysis.tags,
       parseErrorCode: undefined,
     });
+    const completedAt = new Date().toISOString();
+    resourceRepository.updateProcessingJob(jobId, { status: "completed", stage: "completed", completedAt });
   } catch (error) {
     const code =
       error instanceof MaterialParserError
@@ -121,6 +138,8 @@ export const processLibraryResource = async (
       status: "failed",
       parseErrorCode: code,
     });
+    resourceRepository.markResourcePages(resourceId, pageStart, pageEnd, "failed", code);
+    resourceRepository.updateProcessingJob(jobId, { status: "failed", stage: "failed", errorCode: code, completedAt: new Date().toISOString() });
     throw error;
   } finally {
     if (temporaryPath)

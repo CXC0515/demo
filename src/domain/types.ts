@@ -690,6 +690,32 @@ export interface LibraryResource {
   updatedAt: string;
 }
 
+export type ResourcePageParseStatus = 'unparsed' | 'processing' | 'ready' | 'failed';
+
+export interface ResourcePageState {
+  resourceId: string;
+  pageNumber: number;
+  included: boolean;
+  parseStatus: ResourcePageParseStatus;
+  parseErrorCode?: string;
+  updatedAt: string;
+}
+
+export type ResourceProcessingStage = 'queued' | 'preparing' | 'ocr' | 'analyzing' | 'saving' | 'completed' | 'failed' | 'interrupted';
+
+export interface ResourceProcessingJob {
+  id: string;
+  resourceId: string;
+  pageStart: number;
+  pageEnd: number;
+  status: 'running' | 'completed' | 'failed' | 'interrupted';
+  stage: ResourceProcessingStage;
+  errorCode?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
 export interface ResourceChunk {
   id: string;
   resourceId: string;
@@ -795,6 +821,8 @@ export interface DiscoverySuggestion {
 export interface ResourceDetail extends LibraryResource {
   chunks: ResourceChunk[];
   suggestions: DiscoverySuggestion[];
+  pages: ResourcePageState[];
+  processingJobs: ResourceProcessingJob[];
 }
 
 export interface KnowledgeGraphSnapshot {

@@ -46,6 +46,16 @@ test('completing a recurring event creates the next occurrence and reopening rem
   assert.equal(repository.listReminders().some(item => item.generatedFromId === original.id), false);
 });
 
+test('editing a recurring event can update the current and future occurrence', () => {
+  const original = repository.saveReminder({ id: 'recurring-series', name: '教研会', classId: '', className: '', time: '2026-09-08 14:00', repeatRule: '每 周', status: 'active', timeKind: 'point', startAt: '2026-09-08T14:00', recurrence: { enabled: true, unit: 'week', interval: 1, weekdays: [2], maxOccurrences: 4 } });
+  repository.saveReminder({ ...original, status: 'completed' });
+  const future = repository.listReminders().find(item => item.generatedFromId === original.id)!;
+  const changed = repository.saveReminderSeries({ ...future, name: '联合教研会', startAt: '2026-09-15T15:00', time: '2026-09-15 15:00' });
+  assert.equal(changed[0].name, '联合教研会');
+  assert.equal(changed[0].startAt, '2026-09-15T15:00');
+  assert.equal(repository.listReminders().find(item => item.id === original.id)?.name, '教研会');
+});
+
 test('persists the school-wide period timetable', () => {
   assert.equal(repository.listSchedulePeriods()[0].startTime, '08:00');
   repository.saveSchedulePeriods([

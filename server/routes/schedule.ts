@@ -9,7 +9,7 @@ import path from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
-import { deleteReminder, deleteScheduleItem, listReminders, listScheduleItems, listSchedulePeriods, saveReminder, saveReminders, saveScheduleItem, saveScheduleItems, saveSchedulePeriods } from '../repositories/scheduleRepository';
+import { deleteReminder, deleteScheduleItem, listReminders, listScheduleItems, listSchedulePeriods, saveReminder, saveReminderSeries, saveReminders, saveScheduleItem, saveScheduleItems, saveSchedulePeriods } from '../repositories/scheduleRepository';
 import { importScheduleDocument } from '../services/schedule/scheduleImportService';
 import { createReminderDrafts } from '../services/schedule/reminderImportService';
 
@@ -78,6 +78,15 @@ router.post('/schedule/reminders/batch', (request, response) => {
   const parsed = z.object({ reminders: z.array(reminderSchema).min(1).max(50) }).safeParse(request.body);
   if (!parsed.success) { response.status(400).json({ code: 'INVALID_REMINDER_BATCH', issues: parsed.error.issues }); return; }
   response.status(201).json({ reminders: saveReminders(parsed.data.reminders) });
+});
+router.put('/schedule/reminders/:id/series', (request, response) => {
+  const parsed = reminderSchema.safeParse({ ...request.body, id: request.params.id });
+  if (!parsed.success) { response.status(400).json({ code: 'INVALID_REMINDER', issues: parsed.error.issues }); return; }
+  try {
+    response.json({ reminders: saveReminderSeries(parsed.data) });
+  } catch (error) {
+    response.status(404).json({ code: error instanceof Error ? error.message : 'REMINDER_NOT_FOUND' });
+  }
 });
 router.post('/schedule/reminders/draft', async (request, response) => {
   const parsed = z.object({ text: z.string().trim().min(1).max(20000) }).safeParse(request.body);

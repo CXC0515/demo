@@ -15,6 +15,7 @@ import {
   KnowledgeTreeSnapshot,
   LibraryResource,
   ResourceDetail,
+  ResourcePageState,
   ResourceKind,
 } from "../domain/types";
 
@@ -104,6 +105,21 @@ export const analyzeLibraryResource = async (
       },
     )
   ).resource;
+
+export const setLibraryResourcePageIncluded = async (
+  resourceId: string,
+  pageNumber: number,
+  included: boolean,
+) => (
+  await requestJson<{ page: ResourcePageState }>(
+    `/api/resources/${resourceId}/pages/${pageNumber}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ included }),
+    },
+  )
+).page;
 
 export const getKnowledgeGraph = async (query = "") => {
   const suffix = query ? `?q=${encodeURIComponent(query)}` : "";

@@ -11,6 +11,7 @@ import multer from "multer";
 import { z } from "zod";
 import { resourceRepository } from "../repositories/resourceRepository";
 import {
+  getResourcePagePdfPath,
   processLibraryResource,
   readPdfPageCount,
 } from "../services/resources/resourceProcessingService";
@@ -56,6 +57,7 @@ const analyzeSchema = z.object({
   pageStart: z.number().int().positive(),
   pageEnd: z.number().int().positive(),
 });
+const pageStateSchema = z.object({ included: z.boolean() });
 const entityTypeSchema = z.enum([
   "domain",
   "topic",
@@ -184,6 +186,8 @@ router.get("/resources/:resourceId", (request, response) => {
       ...publicResource,
       chunks: resourceRepository.listChunks(resource.id),
       suggestions: resourceRepository.listSuggestions(resource.id),
+      pages: resourceRepository.listResourcePages(resource.id),
+      processingJobs: resourceRepository.listProcessingJobs(resource.id),
     },
   });
 });
@@ -235,6 +239,37 @@ router.get("/resources/:resourceId/content", (request, response) => {
   response.sendFile(path.resolve(resource.diskPath));
 });
 
+router.get("/resources/:resourceId/pages/:pageNumber/content", async (request, response) => {
+  const pageNumber = Number(request.params.pageNumber);
+  try {
+    const previewPath = await getResourcePagePdfPath(request.params.resourceId, pageNumber);
+    response.type("application/pdf");
+    response.sendFile(previewPath);
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "PAGE_PREVIEW_FAILED";
+    response.status(code === "RESOURCE_NOT_FOUND" ? 404 : 400).json({ code });
+  }
+});
+
+router.patch("/resources/:resourceId/pages/:pageNumber", (request, response) => {
+  const parsed = pageStateSchema.safeParse(request.body);
+  const pageNumber = Number(request.params.pageNumber);
+  if (!parsed.success || !Number.isInteger(pageNumber) || pageNumber < 1) {
+    response.status(400).json({ code: "INVALID_RESOURCE_PAGE" });
+    return;
+  }
+  const page = resourceRepository.setResourcePageIncluded(
+    request.params.resourceId,
+    pageNumber,
+    parsed.data.included,
+  );
+  if (!page) {
+    response.status(404).json({ code: "RESOURCE_PAGE_NOT_FOUND" });
+    return;
+  }
+  response.json({ page });
+});
+
 router.post("/resources/:resourceId/analyze", (request, response) => {
   const parsed = analyzeSchema.safeParse(request.body);
   const resource = resourceRepository.getStoredResource(
@@ -262,7 +297,15 @@ router.post("/resources/:resourceId/analyze", (request, response) => {
     response.status(400).json({ code: "INVALID_PAGE_RANGE" });
     return;
   }
-  void processLibraryResource(resource.id, pageStart, pageEnd).catch(
+  const job = resourceRepository.createProcessingJob(resource.id, pageStart, pageEnd);
+  resourceRepository.markResourcePages(resource.id, pageStart, pageEnd, "processing");
+  const queuedResource = resourceRepository.updateResource(resource.id, {
+    status: "processing",
+    parseErrorCode: undefined,
+    parsedPageStart: pageStart,
+    parsedPageEnd: pageEnd,
+  });
+  void processLibraryResource(resource.id, pageStart, pageEnd, job.id).catch(
     (error) => {
       console.error(
         JSON.stringify({
@@ -276,11 +319,8 @@ router.post("/resources/:resourceId/analyze", (request, response) => {
   response
     .status(202)
     .json({
-      resource: resourceRepository.updateResource(resource.id, {
-        status: "processing",
-        parsedPageStart: pageStart,
-        parsedPageEnd: pageEnd,
-      }),
+      resource: queuedResource,
+      job,
     });
 });
 

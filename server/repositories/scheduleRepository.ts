@@ -149,6 +149,32 @@ export const saveReminder = (input: TimerReminder): TimerReminder => database.tr
   return saved;
 })();
 
+export const saveReminderSeries = (input: TimerReminder): TimerReminder[] => database.transaction(() => {
+  const currentRow = database.prepare('SELECT * FROM timer_reminders WHERE id = ?').get(input.id) as ReminderRow | undefined;
+  if (!currentRow) throw new Error('REMINDER_NOT_FOUND');
+  const current = toReminder(currentRow);
+  if (!current.seriesId) return [saveReminderRecord(input)];
+  const rows = database.prepare(`
+    SELECT * FROM timer_reminders WHERE series_id = ? AND occurrence_number >= ? AND status = 'active'
+    ORDER BY occurrence_number
+  `).all(current.seriesId, current.occurrenceNumber ?? 1) as ReminderRow[];
+  const delta = current.startAt && input.startAt ? parseLocal(input.startAt).getTime() - parseLocal(current.startAt).getTime() : 0;
+  return rows.map((row) => {
+    const occurrence = toReminder(row);
+    if (occurrence.id === input.id) return saveReminderRecord(input);
+    const shiftedStart = occurrence.startAt && delta ? formatLocal(new Date(parseLocal(occurrence.startAt).getTime() + delta)) : occurrence.startAt;
+    const shiftedEnd = occurrence.endAt && delta ? formatLocal(new Date(parseLocal(occurrence.endAt).getTime() + delta)) : occurrence.endAt;
+    return saveReminderRecord({
+      ...occurrence,
+      name: input.name, classId: input.classId, className: input.className,
+      important: input.important, urgent: input.urgent, recurrence: input.recurrence,
+      repeatRule: input.repeatRule, timeKind: input.timeKind,
+      startAt: shiftedStart, endAt: shiftedEnd, dueAt: shiftedStart,
+      time: displayReminderTime(input.timeKind, shiftedStart, shiftedEnd),
+    });
+  });
+})();
+
 export const saveReminders = (items: TimerReminder[]) => database.transaction(() => items.map(saveReminder))();
 
 export const deleteReminder = (id: string) => database.prepare('DELETE FROM timer_reminders WHERE id = ?').run(id).changes > 0;

@@ -38,6 +38,7 @@ import {
   deleteLibraryResource,
   ResourceMetadataInput,
   reviewSuggestion,
+  setLibraryResourcePageIncluded,
   updateLibraryResource,
   uploadLibraryResource,
 } from "../../services/resourceApi";
@@ -84,6 +85,27 @@ const describeParseError = (code?: string) =>
     PADDLEOCR_PARSE_FAILED: "文档识别失败，请稍后重试或更换页码范围。",
     MODEL_REQUEST_FAILED: "内容分析服务暂时不可用，已保留 OCR 内容。",
   })[code ?? ""] ?? "解析未完成，请重试。";
+
+const compactPageRanges = (pages: number[]) => {
+  if (!pages.length) return "暂无";
+  const ranges: string[] = [];
+  let start = pages[0];
+  let end = pages[0];
+  pages.slice(1).forEach((page) => {
+    if (page === end + 1) end = page;
+    else {
+      ranges.push(start === end ? `${start}` : `${start}–${end}`);
+      start = end = page;
+    }
+  });
+  ranges.push(start === end ? `${start}` : `${start}–${end}`);
+  return ranges.join("、");
+};
+
+const processingStageLabels = {
+  queued: "已排队", preparing: "准备页码", ocr: "识别文字", analyzing: "分析内容",
+  saving: "保存结果", completed: "已完成", failed: "失败", interrupted: "已中断",
+} as const;
 
 const MetadataDialog = ({
   resource,
@@ -399,7 +421,7 @@ export default function ResourceLibraryEditor({
   const [kind, setKind] = useState<"all" | ResourceKind>("all");
   const [dialog, setDialog] = useState<"upload" | "edit" | null>(null);
   const [inspectorTab, setInspectorTab] = useState<
-    "overview" | "structure" | "review"
+    "overview" | "pages" | "structure" | "review"
   >("overview");
   const [pageStart, setPageStart] = useState(1);
   const [pageEnd, setPageEnd] = useState(20);
@@ -417,6 +439,11 @@ export default function ResourceLibraryEditor({
   );
   const pending =
     detail?.suggestions.filter((item) => item.status === "pending") ?? [];
+  const readyPages = detail?.pages.filter((page) => page.parseStatus === "ready").map((page) => page.pageNumber) ?? [];
+  const currentPageState = detail?.pages.find((page) => page.pageNumber === selectedPage);
+  const latestJob = detail?.processingJobs[0];
+  const pageWindowStart = Math.floor(Math.max(0, selectedPage - 1) / 50) * 50;
+  const visiblePages = detail?.pages.slice(pageWindowStart, pageWindowStart + 50) ?? [];
   const runAnalysis = async () => {
     if (!detail) return;
     try {
@@ -610,12 +637,12 @@ export default function ResourceLibraryEditor({
                 </div>
                 <object
                   key={`${detail.id}-${selectedPage}`}
-                  data={`${detail.publicUrl}#page=${selectedPage}&view=FitH`}
+                  data={`/api/resources/${detail.id}/pages/${selectedPage}/content`}
                   type="application/pdf"
                   className="w-full h-full min-h-[580px] rounded-lg bg-white shadow-sm"
                 >
                   <a
-                    href={`${detail.publicUrl}#page=${selectedPage}`}
+                    href={`/api/resources/${detail.id}/pages/${selectedPage}/content`}
                     target="_blank"
                     rel="noreferrer"
                     className="text-emerald-700"
@@ -625,10 +652,11 @@ export default function ResourceLibraryEditor({
                 </object>
               </div>
               <aside className="border-l border-slate-200/70 dark:border-zinc-800 min-h-[580px] flex flex-col">
-                <div className="grid grid-cols-3 border-b border-slate-200/70 dark:border-zinc-800">
+                <div className="grid grid-cols-4 border-b border-slate-200/70 dark:border-zinc-800">
                   {(
                     [
                       ["overview", "概览"],
+                      ["pages", "页面"],
                       ["structure", "结构"],
                       ["review", `待审核 ${pending.length}`],
                     ] as const
@@ -677,6 +705,14 @@ export default function ResourceLibraryEditor({
                             </span>
                           )}
                         </div>
+                        <p className="text-[11px] text-slate-500">
+                          已解析：{compactPageRanges(readyPages)}
+                        </p>
+                        {latestJob && (
+                          <div className="rounded-lg bg-slate-50 dark:bg-zinc-900 px-3 py-2 text-xs text-slate-500">
+                            最近任务：第 {latestJob.pageStart}–{latestJob.pageEnd} 页 · {processingStageLabels[latestJob.stage]}
+                          </div>
+                        )}
                         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                           <input
                             type="number"
@@ -721,6 +757,56 @@ export default function ResourceLibraryEditor({
                           {describeParseError(detail.parseErrorCode)}
                         </div>
                       )}
+                    </div>
+                  )}
+                  {inspectorTab === "pages" && (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <button disabled={pageWindowStart === 0} onClick={() => onOpenPage(Math.max(1, pageWindowStart - 49))} className="btn-secondary px-2.5 py-1.5 text-xs disabled:opacity-40">上一组</button>
+                        <label className="flex flex-1 items-center gap-2 text-xs text-slate-500">跳到
+                          <input type="number" min={1} max={detail.pageCount ?? 1} value={selectedPage} onChange={(event) => onOpenPage(Math.max(1, Math.min(detail.pageCount ?? 1, Number(event.target.value))))} className={`${fieldClass} min-w-0 py-1.5`} />
+                        </label>
+                        <button disabled={pageWindowStart + 50 >= detail.pages.length} onClick={() => onOpenPage(pageWindowStart + 51)} className="btn-secondary px-2.5 py-1.5 text-xs disabled:opacity-40">下一组</button>
+                      </div>
+                      <div className="grid grid-cols-5 gap-2">
+                        {visiblePages.map((page) => (
+                          <button
+                            key={page.pageNumber}
+                            onClick={() => onOpenPage(page.pageNumber)}
+                            className={`relative rounded-lg border px-1 py-2 text-xs font-bold ${selectedPage === page.pageNumber ? "border-emerald-600 bg-emerald-50 text-emerald-800" : "border-slate-200 dark:border-zinc-800 text-slate-500"} ${page.included ? "" : "opacity-45 line-through"}`}
+                            title={`${page.included ? "纳入" : "已排除"} · ${page.parseStatus}`}
+                          >
+                            {page.pageNumber}
+                            <span className={`absolute right-1 top-1 w-1.5 h-1.5 rounded-full ${page.parseStatus === "ready" ? "bg-emerald-500" : page.parseStatus === "processing" ? "bg-blue-500 animate-pulse" : page.parseStatus === "failed" ? "bg-rose-500" : "bg-slate-300"}`} />
+                          </button>
+                        ))}
+                      </div>
+                      {currentPageState && (
+                        <div className="rounded-xl border border-slate-200 dark:border-zinc-800 p-3 space-y-3">
+                          <div>
+                            <p className="text-sm font-bold">第 {selectedPage} 页</p>
+                            <p className="text-xs text-slate-400 mt-1">原文件保留；排除后不进入检索、RAG 与知识发现。</p>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await setLibraryResourcePageIncluded(detail.id, selectedPage, !currentPageState.included);
+                                await onDataChanged(detail.id);
+                                onShowToast(currentPageState.included ? "该页已从 AI 资料范围排除，可随时恢复" : "该页已恢复使用");
+                              } catch (error) {
+                                onShowToast(`页面更新失败：${error instanceof Error ? error.message : "未知错误"}`);
+                              }
+                            }}
+                            className={currentPageState.included ? "btn-secondary w-full py-2 text-sm text-rose-600" : "btn-primary w-full py-2 text-sm"}
+                          >
+                            {currentPageState.included ? "从 AI 资料中排除此页" : "恢复此页"}
+                          </button>
+                        </div>
+                      )}
+                      <div className="text-[11px] text-slate-400 leading-5">
+                        <p><span className="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1" />已解析　<span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1" />处理中　<span className="inline-block w-2 h-2 rounded-full bg-slate-300 mr-1" />未解析</p>
+                        <p>上传原件保存在服务端原件目录；解析文本与引用索引保存在资料库数据库中。未来在线版可增加桌面同步目录。</p>
+                      </div>
                     </div>
                   )}
                   {inspectorTab === "structure" && (

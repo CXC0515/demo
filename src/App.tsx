@@ -38,7 +38,7 @@ import ScheduleReminder from './features/schedule/ScheduleReminder';
 import SystemSettings from './features/settings/SystemSettingsPanel';
 import KnowledgeLibrary from './features/knowledge/KnowledgeLibrary';
 import { getKnowledgeGraph } from './services/resourceApi';
-import { getScheduleWorkspace, removeReminder, removeScheduleItem, saveReminder, saveReminderBatch, saveScheduleBatch, saveScheduleItem, saveSchedulePeriods } from './services/scheduleApi';
+import { getScheduleWorkspace, removeReminder, removeScheduleItem, saveReminder, saveReminderBatch, saveReminderSeries, saveScheduleBatch, saveScheduleItem, saveSchedulePeriods } from './services/scheduleApi';
 import TagManagement from './features/tags/TagManagement';
 import LessonPlanWorkspace from './features/lesson-plan/LessonPlanWorkspace';
 import GradingWorkspace from './features/grading/GradingWorkspace';
@@ -202,16 +202,24 @@ export default function App() {
   };
 
   // 3. Reminders list toggles
-  const handleAddReminder = async (reminder: TimerReminder) => {
-    const saved = await saveReminder(reminder);
-    setReminders(current => [...current.filter(item => item.id !== saved.id), saved]);
-    triggerToast(`日程“${saved.name}”已保存`);
+  const handleAddReminder = async (reminder: TimerReminder, scope: 'single' | 'future' = 'single') => {
+    const saved = scope === 'future' ? await saveReminderSeries(reminder) : [await saveReminder(reminder)];
+    const workspace = await getScheduleWorkspace();
+    setReminders(workspace.reminders);
+    triggerToast(scope === 'future' ? `已更新“${reminder.name}”及后续日程` : `日程“${saved[0].name}”已保存`);
   };
 
   const handleAddReminderBatch = async (items: TimerReminder[]) => {
     const saved = await saveReminderBatch(items);
     setReminders(current => [...current.filter(item => !saved.some(next => next.id === item.id)), ...saved]);
     triggerToast(`已批量新建 ${saved.length} 条日程`);
+  };
+
+  const handleUpdateReminderBatch = async (items: TimerReminder[]) => {
+    const saved = await saveReminderBatch(items);
+    const workspace = await getScheduleWorkspace();
+    setReminders(workspace.reminders);
+    triggerToast(`已更新 ${saved.length} 条日程`);
   };
 
   const handleToggleReminderStatus = async (reminderId: string) => {
@@ -623,6 +631,8 @@ export default function App() {
               schedule={schedule}
               reminders={reminders}
               classes={classes}
+              selectedClassId={selectedClassId}
+              onSelectClass={setSelectedClassId}
               periods={schedulePeriods}
               showWeekends={showWeekends}
               onOpenPeriodSettings={() => {
@@ -639,6 +649,7 @@ export default function App() {
               }}
               onAddReminder={handleAddReminder}
               onAddReminderBatch={handleAddReminderBatch}
+              onUpdateReminderBatch={handleUpdateReminderBatch}
               onToggleReminderStatus={handleToggleReminderStatus}
               onDeleteReminder={handleDeleteReminder}
             />
