@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import "katex/dist/katex.min.css";
 import {
   BookOpen,
   Check,
@@ -31,6 +32,7 @@ import {
   ResourceChunk,
   ResourceDetail,
   ResourceKind,
+  ResourceProcessingMetrics,
 } from "../../domain/types";
 import {
   analyzeLibraryResource,
@@ -107,6 +109,61 @@ const processingStageLabels = {
   queued: "已排队", preparing: "准备页码", ocr: "识别文字", analyzing: "分析内容",
   saving: "保存结果", completed: "已完成", failed: "失败", interrupted: "已中断",
 } as const;
+
+const processingPhaseLabels = {
+  "pdf-extraction": "正在裁取页码",
+  uploading: "正在提交文件",
+  recognizing: "云端排队与识别",
+  downloading: "正在下载识别结果",
+  enhancing: "正在增强页面图片",
+  "ocr-saving": "正在保存 OCR 内容",
+  "rag-indexing": "正在写入 RAG",
+  "knowledge-analysis": "OCR 已可查看，正在分析知识内容",
+} as const;
+
+const metricLabels: Array<[keyof ResourceProcessingMetrics, string]> = [
+  ["pdfExtractionMs", "裁取 PDF"],
+  ["uploadingMs", "提交文件"],
+  ["recognizingMs", "云端识别"],
+  ["downloadingMs", "下载结果"],
+  ["enhancingMs", "图片增强"],
+  ["ocrSavingMs", "保存 OCR"],
+  ["ragIndexingMs", "RAG 入库"],
+  ["analyzingMs", "知识分析"],
+];
+
+const formatDuration = (milliseconds: number) =>
+  milliseconds < 1000 ? `${milliseconds}ms` : `${(milliseconds / 1000).toFixed(milliseconds < 10_000 ? 1 : 0)}s`;
+
+let katexModulePromise: Promise<typeof import("katex")> | undefined;
+const OcrFormula = ({ expression }: { expression: string }) => {
+  const [html, setHtml] = useState("");
+  useEffect(() => {
+    let active = true;
+    katexModulePromise ??= import("katex");
+    void katexModulePromise.then(({ default: katex }) => {
+      if (active) setHtml(katex.renderToString(expression, { throwOnError: false, strict: "ignore", output: "html" }));
+    });
+    return () => { active = false; };
+  }, [expression]);
+  return html
+    ? <span className="ocr-formula inline-block max-w-full overflow-x-auto align-middle" dangerouslySetInnerHTML={{ __html: html }} />
+    : <span>{expression}</span>;
+};
+
+const OcrRichText = ({ text, className = "" }: { text: string; className?: string }) => {
+  const parts = text.split(/(\$[^$]+\$)/g).filter(Boolean);
+  return (
+    <span className={className}>
+      {parts.map((part, index) => {
+        if (!(part.startsWith("$") && part.endsWith("$"))) return <React.Fragment key={index}>{part}</React.Fragment>;
+        const expression = part.slice(1, -1).trim();
+        if (!expression) return null;
+        return <React.Fragment key={index}><OcrFormula expression={expression} /></React.Fragment>;
+      })}
+    </span>
+  );
+};
 
 const MetadataDialog = ({
   resource,
@@ -422,6 +479,7 @@ const OcrPageReader = ({
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const suppressScrollSelectionRef = useRef(false);
+  const [showRecognitionBoxes, setShowRecognitionBoxes] = useState(false);
   const visiblePages = pages.filter((page) => page.included && page.parseStatus === "ready");
   useEffect(() => {
     const target = scrollRef.current?.querySelector<HTMLElement>(`[data-resource-page="${selectedPage}"]`);
@@ -449,7 +507,10 @@ const OcrPageReader = ({
     <div className="relative flex h-full min-h-0 flex-col bg-slate-200/50 dark:bg-zinc-950">
       <div className="z-20 flex shrink-0 items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-2.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
         <span className="inline-flex items-center gap-2 text-xs font-black text-slate-700 dark:text-slate-200"><Eye className="h-4 w-4" />OCR 第 {selectedPage} 页</span>
-        <span className="text-[10px] text-slate-400">仅显示已解析且未排除的页面 · 共 {visiblePages.length} 页</span>
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] text-slate-400">仅显示已解析且未排除的页面 · 共 {visiblePages.length} 页</span>
+          <button type="button" onClick={() => setShowRecognitionBoxes((value) => !value)} className={`rounded-md px-2 py-1 text-[10px] font-bold ${showRecognitionBoxes ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-500 dark:bg-zinc-800"}`}>{showRecognitionBoxes ? "隐藏识别框" : "显示识别框"}</button>
+        </div>
       </div>
       <div ref={scrollRef} onScroll={updateCurrentPage} className="min-h-0 flex-1 scroll-smooth overflow-y-auto p-3">
         <div className="mx-auto max-w-5xl space-y-4">
@@ -465,13 +526,13 @@ const OcrPageReader = ({
                 <div className="p-3">
                     <figure className="mx-auto max-w-3xl">
                       <figcaption className="mb-2 text-[10px] font-black uppercase tracking-wide text-emerald-700">OCR 识别版</figcaption>
-                      <div className="relative overflow-hidden rounded-lg border border-emerald-200 bg-white">
-                        <img loading="lazy" src={imageUrl} alt={`第 ${page.pageNumber} 页 OCR 识别底图`} className="w-full object-contain opacity-25" style={{ aspectRatio: "210 / 297" }} />
+                      <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-white">
+                        <img loading="lazy" src={imageUrl} alt={`第 ${page.pageNumber} 页 OCR 识别底图`} className="w-full object-contain" style={{ aspectRatio: "210 / 297" }} />
                         {pageChunks.filter((chunk) => chunk.boundingBox).slice(0, 80).map((chunk) => (
-                          <span key={chunk.id} title={chunk.text.slice(0, 180)} className="absolute overflow-hidden border border-emerald-500 bg-emerald-100/75 text-[7px] leading-tight text-emerald-950" style={{ left: `${chunk.boundingBox!.x * 100}%`, top: `${chunk.boundingBox!.y * 100}%`, width: `${chunk.boundingBox!.width * 100}%`, height: `${chunk.boundingBox!.height * 100}%` }}>{chunk.text}</span>
+                          <span key={chunk.id} title={chunk.text.slice(0, 180)} className={`absolute overflow-hidden text-[7px] leading-tight ${showRecognitionBoxes ? "border border-emerald-500 bg-emerald-100/80 text-emerald-950" : "border border-transparent bg-transparent text-transparent selection:bg-blue-200/70"}`} style={{ left: `${chunk.boundingBox!.x * 100}%`, top: `${chunk.boundingBox!.y * 100}%`, width: `${chunk.boundingBox!.width * 100}%`, height: `${chunk.boundingBox!.height * 100}%` }}><OcrRichText text={chunk.text} /></span>
                         ))}
                       </div>
-                      <details className="mt-2 rounded-lg bg-slate-50 p-2 text-xs dark:bg-zinc-950"><summary className="cursor-pointer font-bold text-slate-600 dark:text-slate-300">查看提取文本（{pageChunks.length} 块）</summary><div className="mt-2 max-h-48 space-y-2 overflow-y-auto text-slate-500">{pageChunks.map((chunk) => <p key={chunk.id}>{chunk.text}</p>)}</div></details>
+                      <details className="mt-2 rounded-lg bg-slate-50 p-2 text-xs dark:bg-zinc-950"><summary className="cursor-pointer font-bold text-slate-600 dark:text-slate-300">查看提取文本（{pageChunks.length} 块）</summary><div className="mt-2 max-h-48 space-y-2 overflow-y-auto text-slate-500">{pageChunks.map((chunk) => <p key={chunk.id} className="whitespace-pre-wrap"><OcrRichText text={chunk.text} /></p>)}</div></details>
                     </figure>
                 </div>
               </article>
@@ -807,8 +868,15 @@ export default function ResourceLibraryEditor({
                           已解析：{compactPageRanges(readyPages)}
                         </p>
                         {latestJob && (
-                          <div className="rounded-lg bg-slate-50 dark:bg-zinc-900 px-3 py-2 text-xs text-slate-500">
-                            最近任务：第 {latestJob.pageStart}–{latestJob.pageEnd} 页 · {processingStageLabels[latestJob.stage]}
+                          <div className="space-y-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-zinc-900">
+                            <p>最近任务：第 {latestJob.pageStart}–{latestJob.pageEnd} 页 · {latestJob.phase ? processingPhaseLabels[latestJob.phase] : processingStageLabels[latestJob.stage]}</p>
+                            {metricLabels.some(([key]) => latestJob.metrics[key] !== undefined) && (
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+                                {metricLabels.flatMap(([key, label]) => latestJob.metrics[key] === undefined ? [] : [
+                                  <span key={key} className="flex items-center justify-between gap-2"><span>{label}</span><strong className="font-bold text-slate-700 dark:text-slate-200">{formatDuration(latestJob.metrics[key]!)}</strong></span>,
+                                ])}
+                              </div>
+                            )}
                           </div>
                         )}
                         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">

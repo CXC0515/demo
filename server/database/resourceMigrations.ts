@@ -283,6 +283,13 @@ const migrations = [
       WHERE parse_status = 'ready';
     `,
   },
+  {
+    version: 6,
+    sql: `
+      ALTER TABLE resource_processing_jobs ADD COLUMN phase TEXT;
+      ALTER TABLE resource_processing_jobs ADD COLUMN metrics_json TEXT NOT NULL DEFAULT '{}';
+    `,
+  },
 ];
 
 export const runResourceMigrations = (database: Database.Database) => {

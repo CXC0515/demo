@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { NormalizedDocument } from '../../../src/domain/types';
+import { NormalizedDocument, ResourceProcessingMetrics, ResourceProcessingPhase } from '../../../src/domain/types';
 
 export interface MaterialParserInput {
   assetId: string;
@@ -11,6 +11,7 @@ export interface MaterialParserInput {
   mimeType: string;
   filePath: string;
   pageOffset?: number;
+  onProgress?: (phase: ResourceProcessingPhase, metrics: ResourceProcessingMetrics) => void;
 }
 
 export interface MaterialParser {

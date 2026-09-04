@@ -173,6 +173,8 @@ const toProcessingJob = (row: JsonObject): ResourceProcessingJob => ({
   pageEnd: Number(row.page_end),
   status: row.status as ResourceProcessingJob["status"],
   stage: row.stage as ResourceProcessingJob["stage"],
+  phase: row.phase ? row.phase as ResourceProcessingJob["phase"] : undefined,
+  metrics: parseJson(String(row.metrics_json ?? "{}"), {}),
   errorCode: row.error_code ? String(row.error_code) : undefined,
   createdAt: String(row.created_at),
   updatedAt: String(row.updated_at),
@@ -673,13 +675,14 @@ export class ResourceRepository {
     return this.listProcessingJobs(resourceId).find((job) => job.id === id)!;
   }
 
-  updateProcessingJob(id: string, update: Partial<Pick<ResourceProcessingJob, "status" | "stage" | "errorCode" | "completedAt">>) {
+  updateProcessingJob(id: string, update: Partial<Pick<ResourceProcessingJob, "status" | "stage" | "phase" | "metrics" | "errorCode" | "completedAt">>) {
     const current = this.database.prepare("SELECT * FROM resource_processing_jobs WHERE id = ?").get(id) as JsonObject | undefined;
     if (!current) return undefined;
-    const next = { ...toProcessingJob(current), ...update };
+    const previous = toProcessingJob(current);
+    const next = { ...previous, ...update, metrics: { ...previous.metrics, ...update.metrics } };
     this.database.prepare(`
-      UPDATE resource_processing_jobs SET status = ?, stage = ?, error_code = ?, updated_at = ?, completed_at = ? WHERE id = ?
-    `).run(next.status, next.stage, next.errorCode ?? null, new Date().toISOString(), next.completedAt ?? null, id);
+      UPDATE resource_processing_jobs SET status = ?, stage = ?, phase = ?, metrics_json = ?, error_code = ?, updated_at = ?, completed_at = ? WHERE id = ?
+    `).run(next.status, next.stage, next.phase ?? null, JSON.stringify(next.metrics), next.errorCode ?? null, new Date().toISOString(), next.completedAt ?? null, id);
     return toProcessingJob(this.database.prepare("SELECT * FROM resource_processing_jobs WHERE id = ?").get(id) as JsonObject);
   }
 
@@ -917,10 +920,20 @@ export class ResourceRepository {
   replacePendingSuggestions(
     resourceId: string,
     suggestions: DiscoverySuggestion[],
+    pageRange?: { start: number; end: number },
   ) {
-    const remove = this.database.prepare(
-      "DELETE FROM discovery_suggestions WHERE resource_id = ? AND status = 'pending'",
-    );
+    const remove = pageRange
+      ? this.database.prepare(`
+          DELETE FROM discovery_suggestions
+          WHERE resource_id = ? AND status = 'pending' AND EXISTS (
+            SELECT 1 FROM json_each(source_chunk_ids_json) source
+            JOIN resource_chunks chunk ON chunk.id = source.value
+            WHERE chunk.page_start >= ? AND chunk.page_end <= ?
+          )
+        `)
+      : this.database.prepare(
+          "DELETE FROM discovery_suggestions WHERE resource_id = ? AND status = 'pending'",
+        );
     const insert = this.database.prepare(`
       INSERT INTO discovery_suggestions
       (id, resource_id, kind, status, proposed_type, proposed_name, description, aliases_json, confidence, rationale, source_chunk_ids_json,
@@ -928,7 +941,8 @@ export class ResourceRepository {
       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)
     `);
     this.database.transaction(() => {
-      remove.run(resourceId);
+      if (pageRange) remove.run(resourceId, pageRange.start, pageRange.end);
+      else remove.run(resourceId);
       suggestions.forEach((item) =>
         insert.run(
           item.id,

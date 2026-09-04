@@ -454,6 +454,7 @@ export interface NormalizedDocument {
   warnings: MaterialParseWarning[];
   pageCount?: number;
   parsedAt: string;
+  processingMetrics?: ResourceProcessingMetrics;
 }
 
 export interface AnalysisEvidenceRef {
@@ -706,6 +707,28 @@ export interface ResourcePageState {
 
 export type ResourceProcessingStage = 'queued' | 'preparing' | 'ocr' | 'analyzing' | 'saving' | 'completed' | 'failed' | 'interrupted';
 
+export type ResourceProcessingPhase =
+  | 'pdf-extraction'
+  | 'uploading'
+  | 'recognizing'
+  | 'downloading'
+  | 'enhancing'
+  | 'ocr-saving'
+  | 'rag-indexing'
+  | 'knowledge-analysis';
+
+export interface ResourceProcessingMetrics {
+  pdfExtractionMs?: number;
+  uploadingMs?: number;
+  recognizingMs?: number;
+  downloadingMs?: number;
+  enhancingMs?: number;
+  ocrSavingMs?: number;
+  ragIndexingMs?: number;
+  analyzingMs?: number;
+  totalMs?: number;
+}
+
 export interface ResourceProcessingJob {
   id: string;
   resourceId: string;
@@ -713,6 +736,8 @@ export interface ResourceProcessingJob {
   pageEnd: number;
   status: 'running' | 'completed' | 'failed' | 'interrupted';
   stage: ResourceProcessingStage;
+  phase?: ResourceProcessingPhase;
+  metrics: ResourceProcessingMetrics;
   errorCode?: string;
   createdAt: string;
   updatedAt: string;

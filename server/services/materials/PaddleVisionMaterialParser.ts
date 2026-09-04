@@ -41,7 +41,10 @@ export class PaddleVisionMaterialParser implements MaterialParser {
       pollTimeout: 900_000
     });
     try {
-      const result = await client.parseDocument({
+      const metrics = {} as NonNullable<Awaited<ReturnType<MaterialParser['parse']>>['processingMetrics']>;
+      input.onProgress?.('uploading', metrics);
+      const uploadStartedAt = performance.now();
+      const job = await client.submitDocumentParsing({
         filePath: input.filePath,
         model: this.config.paddleModel || Model.PaddleOCRVL16,
         options: {
@@ -59,6 +62,11 @@ export class PaddleVisionMaterialParser implements MaterialParser {
           returnMarkdownImages: !scheduleProfile
         }
       });
+      metrics.uploadingMs = Math.round(performance.now() - uploadStartedAt);
+      input.onProgress?.('recognizing', metrics);
+      const recognizingStartedAt = performance.now();
+      const result = await client.waitDocumentParsingResult(job);
+      metrics.recognizingMs = Math.round(performance.now() - recognizingStartedAt);
       const pageOffset = input.pageOffset ?? 0;
       if (!scheduleProfile) mergeParserArtifactPages(input.assetId, {
         model: this.config.paddleModel || Model.PaddleOCRVL16,
@@ -95,6 +103,8 @@ export class PaddleVisionMaterialParser implements MaterialParser {
           pageNumber: pageOffset + pageIndex + 1
         }))
       ]);
+      input.onProgress?.('downloading', metrics);
+      const downloadingStartedAt = performance.now();
       const savedResources = await Promise.all(resourcePlans.map(async plan => ({
         ...plan,
         resourcePath: await client.saveResource(plan.resourceUrl, resourceDirectory, {
@@ -102,9 +112,15 @@ export class PaddleVisionMaterialParser implements MaterialParser {
           filename: plan.fileName
         })
       })));
-      if (!scheduleProfile) await Promise.all(savedResources
-        .filter(resource => resource.role === 'source-page')
-        .map(resource => enhanceRecognitionPage(resource.resourcePath)));
+      metrics.downloadingMs = Math.round(performance.now() - downloadingStartedAt);
+      input.onProgress?.('enhancing', metrics);
+      const enhancingStartedAt = performance.now();
+      if (!scheduleProfile) {
+        await Promise.all(savedResources
+          .filter(resource => resource.role === 'source-page')
+          .map(resource => enhanceRecognitionPage(resource.resourcePath)));
+      }
+      metrics.enhancingMs = Math.round(performance.now() - enhancingStartedAt);
       const warnings = result.pages.flatMap((page, index) => page.markdownText.trim() ? [] : [{
         code: 'PADDLEOCR_EMPTY_PAGE',
         message: `第 ${index + 1} 页没有生成可用的 Markdown。`
@@ -164,7 +180,8 @@ export class PaddleVisionMaterialParser implements MaterialParser {
         })),
         warnings,
         pageCount: result.pages.length,
-        parsedAt: new Date().toISOString()
+        parsedAt: new Date().toISOString(),
+        processingMetrics: metrics
       };
     } catch (error) {
       if (error instanceof AuthError) throw new MaterialParserError('PADDLEOCR_AUTH_FAILED', { cause: error });

@@ -6,6 +6,7 @@
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PDFDocument } from "pdf-lib";
+import type { ResourceProcessingMetrics } from "../../../src/domain/types";
 import { getModelConfig } from "../../config/modelConfig";
 import { resourceRepository } from "../../repositories/resourceRepository";
 import { MaterialParserError } from "../materials/MaterialParser";
@@ -68,6 +69,7 @@ export const processLibraryResource = async (
   pageEnd: number,
   jobId: string,
 ) => {
+  const processingStartedAt = performance.now();
   const resource = resourceRepository.getStoredResource(resourceId);
   if (!resource) throw new Error("RESOURCE_NOT_FOUND");
   if (resource.mimeType !== "application/pdf")
@@ -82,22 +84,31 @@ export const processLibraryResource = async (
     throw new Error("INVALID_PAGE_RANGE");
   }
   let temporaryPath = "";
+  let ocrAvailable = false;
+  let metrics: ResourceProcessingMetrics = {};
   try {
-    resourceRepository.updateProcessingJob(jobId, { stage: "preparing" });
+    resourceRepository.updateProcessingJob(jobId, { stage: "preparing", phase: "pdf-extraction" });
+    const extractionStartedAt = performance.now();
     temporaryPath = await createPageRangePdf(
       resource.diskPath,
       resourceId,
       pageStart,
       pageEnd,
     );
-    resourceRepository.updateProcessingJob(jobId, { stage: "ocr" });
+    metrics.pdfExtractionMs = Math.round(performance.now() - extractionStartedAt);
+    resourceRepository.updateProcessingJob(jobId, { stage: "ocr", phase: "uploading", metrics });
     const normalizedDocument = await parseMaterial({
       assetId: resource.id,
       fileName: resource.fileName,
       mimeType: resource.mimeType,
       filePath: temporaryPath,
       pageOffset: pageStart - 1,
+      onProgress: (phase, parserMetrics) => {
+        metrics = { ...metrics, ...parserMetrics };
+        resourceRepository.updateProcessingJob(jobId, { stage: "ocr", phase, metrics });
+      },
     });
+    metrics = { ...metrics, ...normalizedDocument.processingMetrics };
     const publicResource = resourceRepository.getStoredResource(resourceId)!;
     const chunks = buildResourceChunks(
       publicResource,
@@ -105,31 +116,40 @@ export const processLibraryResource = async (
       0,
     );
     const analyzer = new ResourceAnalyzer(getModelConfig());
-    resourceRepository.updateProcessingJob(jobId, { stage: "saving" });
+    resourceRepository.updateProcessingJob(jobId, { stage: "saving", phase: "ocr-saving", metrics });
+    const ocrSavingStartedAt = performance.now();
     resourceRepository.mergeChunksForPages(resourceId, pageStart, pageEnd, chunks);
+    metrics.ocrSavingMs = Math.round(performance.now() - ocrSavingStartedAt);
+    resourceRepository.updateProcessingJob(jobId, { stage: "saving", phase: "rag-indexing", metrics });
+    const ragIndexingStartedAt = performance.now();
     resourceRepository.markResourcePagesRag(resourceId, pageStart, pageEnd, "indexing");
-    const allChunks = resourceRepository.listChunks(resourceId);
-    resourceRepository.updateProcessingJob(jobId, { stage: "analyzing" });
+    resourceRepository.markResourcePagesRag(resourceId, pageStart, pageEnd, "indexed");
+    resourceRepository.markResourcePages(resourceId, pageStart, pageEnd, "ready");
+    metrics.ragIndexingMs = Math.round(performance.now() - ragIndexingStartedAt);
+    ocrAvailable = true;
+    resourceRepository.updateProcessingJob(jobId, { stage: "analyzing", phase: "knowledge-analysis", metrics });
+    const analyzingStartedAt = performance.now();
     const completeAnalysis = await analyzer.analyze(
       publicResource,
-      allChunks,
+      chunks,
       resourceRepository.listNodes(),
     );
+    metrics.analyzingMs = Math.round(performance.now() - analyzingStartedAt);
     resourceRepository.updateProcessingJob(jobId, { stage: "saving" });
     resourceRepository.replacePendingSuggestions(
       resourceId,
       completeAnalysis.suggestions,
+      { start: pageStart, end: pageEnd },
     );
-    resourceRepository.markResourcePages(resourceId, pageStart, pageEnd, "ready");
-    resourceRepository.markResourcePagesRag(resourceId, pageStart, pageEnd, "indexed");
     resourceRepository.updateResource(resourceId, {
       status: normalizedDocument.warnings.length ? "needs-review" : "ready",
-      summary: completeAnalysis.summary,
-      tags: completeAnalysis.tags,
+      summary: publicResource.summary || completeAnalysis.summary,
+      tags: [...new Set([...publicResource.tags, ...completeAnalysis.tags])],
       parseErrorCode: undefined,
     });
     const completedAt = new Date().toISOString();
-    resourceRepository.updateProcessingJob(jobId, { status: "completed", stage: "completed", completedAt });
+    metrics.totalMs = Math.round(performance.now() - processingStartedAt);
+    resourceRepository.updateProcessingJob(jobId, { status: "completed", stage: "completed", phase: undefined, metrics, completedAt });
   } catch (error) {
     const code =
       error instanceof MaterialParserError
@@ -138,12 +158,15 @@ export const processLibraryResource = async (
           ? error.message
           : "RESOURCE_PROCESSING_FAILED";
     resourceRepository.updateResource(resourceId, {
-      status: "failed",
+      status: ocrAvailable ? "needs-review" : "failed",
       parseErrorCode: code,
     });
-    resourceRepository.markResourcePages(resourceId, pageStart, pageEnd, "failed", code);
-    resourceRepository.markResourcePagesRag(resourceId, pageStart, pageEnd, "failed", code);
-    resourceRepository.updateProcessingJob(jobId, { status: "failed", stage: "failed", errorCode: code, completedAt: new Date().toISOString() });
+    if (!ocrAvailable) {
+      resourceRepository.markResourcePages(resourceId, pageStart, pageEnd, "failed", code);
+      resourceRepository.markResourcePagesRag(resourceId, pageStart, pageEnd, "failed", code);
+    }
+    metrics.totalMs = Math.round(performance.now() - processingStartedAt);
+    resourceRepository.updateProcessingJob(jobId, { status: "failed", stage: "failed", phase: undefined, metrics, errorCode: code, completedAt: new Date().toISOString() });
     throw error;
   } finally {
     if (temporaryPath)

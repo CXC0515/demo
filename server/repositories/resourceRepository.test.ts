@@ -128,9 +128,20 @@ test("resource pages stay traceable across partial parses and exclusions", () =>
     assert.equal(indexedPage.ragStatus, "indexed");
     assert.equal(indexedPage.ragChunkCount, 1);
     assert.deepEqual(repository.retrieveResourceChunks(resource.id, "共同关键词").map((item) => item.pageStart), [2]);
+    const suggestion = (page: number, name: string) => ({
+      id: randomUUID(), resourceId: resource.id, kind: "node" as const, status: "pending" as const,
+      proposedType: "knowledge" as const, proposedName: name, description: "", aliases: [], confidence: 0.8,
+      rationale: "测试", sourceChunkIds: [`${resource.id}:content:${page}`], createdAt: new Date().toISOString(),
+    });
+    repository.replacePendingSuggestions(resource.id, [suggestion(1, "第一页旧建议"), suggestion(2, "第二页旧建议")]);
+    repository.replacePendingSuggestions(resource.id, [suggestion(2, "第二页新建议")], { start: 2, end: 2 });
+    assert.deepEqual(repository.listSuggestions(resource.id).map((item) => item.proposedName).sort(), ["第一页旧建议", "第二页新建议"]);
     const job = repository.createProcessingJob(resource.id, 2, 2);
-    repository.updateProcessingJob(job.id, { status: "completed", stage: "completed", completedAt: new Date().toISOString() });
-    assert.equal(repository.listProcessingJobs(resource.id)[0].status, "completed");
+    repository.updateProcessingJob(job.id, { stage: "ocr", phase: "recognizing", metrics: { uploadingMs: 120 } });
+    repository.updateProcessingJob(job.id, { status: "completed", stage: "completed", phase: undefined, metrics: { recognizingMs: 4200 }, completedAt: new Date().toISOString() });
+    const completedJob = repository.listProcessingJobs(resource.id)[0];
+    assert.equal(completedJob.status, "completed");
+    assert.deepEqual(completedJob.metrics, { uploadingMs: 120, recognizingMs: 4200 });
   } finally {
     database.close();
     rmSync(directory, { recursive: true, force: true });
