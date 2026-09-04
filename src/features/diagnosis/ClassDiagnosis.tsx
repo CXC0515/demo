@@ -14,7 +14,6 @@ interface ClassDiagnosisProps {
   students: Student[];
   classes: SchoolClass[];
   selectedClassId: string;
-  onSelectClass: (classId: string) => void;
   onNavigate: (pageId: string, subPageId?: string) => void;
   onShowToast: (message: string) => void;
 }
@@ -23,7 +22,6 @@ export default function ClassDiagnosis({
   students,
   classes,
   selectedClassId,
-  onSelectClass,
   onNavigate,
   onShowToast
 }: ClassDiagnosisProps) {
@@ -63,18 +61,7 @@ export default function ClassDiagnosis({
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">诊断班级</span>
           <div className="mt-2">
             <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">{activeClass.name}</h3>
-            <p className="text-xs text-slate-400">人数：{classStudents.length}人 · {activeClass.textbookVersion}</p>
-          </div>
-          <div className="mt-3">
-            <select
-              value={selectedClassId}
-              onChange={(e) => onSelectClass(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-zinc-800 border rounded-xl text-xs font-semibold cursor-pointer focus:outline-none"
-            >
-              {classes.filter(c => c.status === 'active').map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+            <p className="text-xs text-slate-400">人数：{classStudents.length} 人</p>
           </div>
         </div>
 

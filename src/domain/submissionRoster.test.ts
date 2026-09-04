@@ -16,7 +16,7 @@ const student = (studentNo: string, name: string): RosterStudent => ({
   classId: 'c5',
   className: '七年级 5 班',
   gender: 'male',
-  isRepresentative: false,
+  committeeRoleIds: [],
   status: 'good',
   enrollmentStatus: 'active',
   behaviorTags: [],

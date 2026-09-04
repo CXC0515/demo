@@ -16,7 +16,7 @@ const student = (id: string, name: string, studentNo: string): Student => ({
   classId: 'c5',
   className: '五年级一班',
   gender: 'male',
-  isRepresentative: false,
+  committeeRoleIds: [],
   status: 'good',
   behaviorTags: [],
   parent: { name: '', phone: '', relation: '', remark: '' },

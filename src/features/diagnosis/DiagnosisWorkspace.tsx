@@ -5,19 +5,21 @@
 
 import React, { useEffect, useState } from 'react';
 import { BarChart3, UserSquare2 } from 'lucide-react';
-import { SchoolClass, Student, TeacherObservation } from '../../domain/types';
+import { CommitteeRole, SchoolClass, Student, TeacherObservation } from '../../domain/types';
 import ClassDiagnosis from './ClassDiagnosis';
 import StudentProfile from '../students/StudentProfileV2';
 
 interface DiagnosisWorkspaceProps {
   students: Student[];
   classes: SchoolClass[];
+  committeeRoles: CommitteeRole[];
   selectedClassId: string;
   selectedStudentId: string;
   onSelectClass: (classId: string) => void;
   onSelectStudent: (studentId: string) => void;
   onEditStudent: (studentId: string) => void;
   onAddObservation: (studentId: string, note: TeacherObservation) => void;
+  onUpdateStudent: (student: Student) => Promise<boolean>;
   onNavigate: (pageId: string, subPageId?: string) => void;
   onShowToast: (message: string) => void;
   requestedTab?: DiagnosisTab | null;
@@ -34,12 +36,14 @@ const tabs: { id: DiagnosisTab; label: string; icon: React.ElementType }[] = [
 export default function DiagnosisWorkspace({
   students,
   classes,
+  committeeRoles,
   selectedClassId,
   selectedStudentId,
   onSelectClass,
   onSelectStudent,
   onEditStudent,
   onAddObservation,
+  onUpdateStudent,
   onNavigate,
   onShowToast,
   requestedTab,
@@ -59,8 +63,8 @@ export default function DiagnosisWorkspace({
 
   return (
     <div className="space-y-5 animate-fade-in" id="diagnosis-workspace-page">
-      <div className="glass-panel rounded-2xl p-2 flex flex-wrap gap-1.5 bg-slate-100/60 dark:bg-zinc-900/60">
-        {tabs.map(tab => {
+      <div className="glass-panel flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-slate-100/60 p-2 dark:bg-zinc-900/60">
+        <div className="flex flex-wrap gap-1.5">{tabs.map(tab => {
           const Icon = tab.icon;
           return (
             <button
@@ -76,7 +80,13 @@ export default function DiagnosisWorkspace({
               {tab.label}
             </button>
           );
-        })}
+        })}</div>
+        <label className="flex items-center gap-2 px-2 text-xs font-bold text-slate-400">
+          <span className="hidden sm:inline">当前班级</span>
+          <select value={selectedClassId} onChange={event => onSelectClass(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-emerald-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-slate-100">
+            {classes.filter(item => item.status === 'active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+        </label>
       </div>
 
       {activeTab === 'class' && (
@@ -84,7 +94,6 @@ export default function DiagnosisWorkspace({
           students={students}
           classes={classes}
           selectedClassId={selectedClassId}
-          onSelectClass={onSelectClass}
           onNavigate={(pageId, subPageId) => {
             if (pageId === 'diagnosis' && subPageId === 'profile') {
               setActiveTab('student');
@@ -99,13 +108,13 @@ export default function DiagnosisWorkspace({
       {activeTab === 'student' && (
         <StudentProfile
           students={students}
-          classes={classes}
+          committeeRoles={committeeRoles}
           selectedClassId={selectedClassId}
           selectedStudentId={selectedStudentId}
-          onSelectClass={onSelectClass}
           onSelectStudent={onSelectStudent}
           onEditStudent={onEditStudent}
           onAddObservation={onAddObservation}
+          onUpdateStudent={onUpdateStudent}
           onShowToast={onShowToast}
           targetStudentId={studentDetailTargetId}
           onTargetStudentHandled={() => setStudentDetailTargetId(null)}

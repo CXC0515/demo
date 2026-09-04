@@ -17,7 +17,7 @@ const { createClass } = await import('../../repositories/rosterRepository');
 after(() => { closeRosterDatabase(); rmSync(directory, { recursive: true, force: true }); });
 
 test('turns AI timetable JSON into an editable teacher draft', async () => {
-  const primaryClass = createClass({ name: '初一（10）班', grade: '七年级', term: '2026 秋季学期', headTeacher: '测试教师', chineseTeacher: '测试教师', textbookVersion: '统编版七年级上册', defaultSubmitTime: '08:00', status: 'active' });
+  const primaryClass = createClass({ name: '初一（10）班', grade: '七年级', term: '2026 秋季学期', headTeacher: '测试教师', chineseTeacher: '测试教师', status: 'active' });
   let requestBody = '';
   const fakeFetch = async (_url: string | URL | Request, init?: RequestInit) => {
     requestBody = String(init?.body ?? '');

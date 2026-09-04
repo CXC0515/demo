@@ -1464,7 +1464,7 @@ export default function GradingWorkflow({
   );
 
   return (
-    <div className="mx-auto max-w-7xl space-y-4">
+    <div className="w-full space-y-4">
       <header className="flex flex-wrap items-center gap-3">
         <div className="flex min-w-0 items-center gap-3"><button type="button" title="返回批改任务" aria-label="返回批改任务" onClick={onBack} className="rounded-2xl border border-slate-200 bg-white/70 p-2.5 text-slate-500 hover:text-emerald-700 dark:border-zinc-800 dark:bg-zinc-900"><ArrowLeft className="h-4 w-4" /></button><div className="min-w-0"><h1 className="truncate text-xl font-black text-slate-900 dark:text-white">{selectedTask.name}</h1><p className="mt-1 text-xs text-slate-500">{currentClassName} · {expectedStudentCount} 人 · 收作业 {selectedTask.deadline}</p></div></div>
       </header>

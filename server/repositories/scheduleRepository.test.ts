@@ -14,7 +14,7 @@ process.env.ROSTER_DB_PATH = path.join(directory, 'roster.sqlite');
 const repository = await import('./scheduleRepository');
 const roster = await import('./rosterRepository');
 const { closeRosterDatabase } = await import('../database/rosterDatabase');
-const primaryClass = roster.createClass({ name: '七年级 5 班', grade: '七年级', term: '2026 秋季学期', headTeacher: '测试教师', chineseTeacher: '测试教师', textbookVersion: '统编版七年级上册', defaultSubmitTime: '08:00', status: 'active' });
+const primaryClass = roster.createClass({ name: '七年级 5 班', grade: '七年级', term: '2026 秋季学期', headTeacher: '测试教师', chineseTeacher: '测试教师', status: 'active' });
 after(() => { closeRosterDatabase(); rmSync(directory, { recursive: true, force: true }); });
 
 test('persists schedules and reminder quadrant fields', () => {

@@ -22,8 +22,6 @@ const primaryClass = repository.createClass({
   term: '2026 秋季学期',
   headTeacher: '测试教师',
   chineseTeacher: '测试教师',
-  textbookVersion: '统编版七年级上册',
-  defaultSubmitTime: '08:00',
   status: 'active'
 });
 
@@ -40,23 +38,23 @@ test('persists authoritative roster relationships and constraints', () => {
     term: '2026 秋季学期',
     headTeacher: '测试教师',
     chineseTeacher: '测试教师',
-    textbookVersion: '统编版七年级上册',
-    defaultSubmitTime: '08:00',
     status: 'active'
   });
+  const monitorRole = repository.listCommitteeRoles().find(role => role.name === '班长');
+  assert.ok(monitorRole);
+  const sportsRole = repository.createCommitteeRole('体育委员');
   const first = repository.createStudent({
     studentId: 'sqlite-test-student-1',
     classId: primaryClass.id,
     studentNo: '5001',
     name: '测试学生甲',
     gender: 'female',
-    isRepresentative: true
+    committeeRoleIds: [monitorRole.id, sportsRole.id]
   });
-  assert.equal(first.isRepresentative, true);
+  assert.deepEqual(first.committeeRoleIds, [monitorRole.id, sportsRole.id]);
 
   const fiveClass = repository.listClasses().find(item => item.id === primaryClass.id);
   assert.equal(fiveClass?.studentCount, 1);
-  assert.deepEqual(fiveClass?.representatives, [first.studentId]);
 
   assert.throws(() => repository.createStudent({
     classId: primaryClass.id,
@@ -76,16 +74,21 @@ test('persists authoritative roster relationships and constraints', () => {
   assert.deepEqual(match.unknownStudentNos, ['9999']);
   assert.deepEqual(match.duplicateStudentNos, ['5001']);
 
-  repository.updateClass(primaryClass.id, { representatives: [second.studentId] });
-  assert.equal(repository.findStudentByNo(primaryClass.id, '5001')?.isRepresentative, false);
-  assert.equal(repository.findStudentByNo(primaryClass.id, '5002')?.isRepresentative, true);
+  repository.replaceClassCommitteeAssignments(primaryClass.id, [
+    { studentId: first.studentId, roleId: sportsRole.id },
+    { studentId: second.studentId, roleId: sportsRole.id }
+  ]);
+  assert.deepEqual(repository.findStudentByNo(primaryClass.id, '5001')?.committeeRoleIds, [sportsRole.id]);
+  assert.deepEqual(repository.findStudentByNo(primaryClass.id, '5002')?.committeeRoleIds, [sportsRole.id]);
+  assert.throws(() => repository.deleteCommitteeRole(sportsRole.id), /COMMITTEE_ROLE_IN_USE/);
+  assert.throws(() => repository.deleteCommitteeRole(monitorRole.id), /DEFAULT_COMMITTEE_ROLE/);
 
   const moved = repository.updateStudent(second.studentId, {
     classId: targetClass.id,
     studentNo: '3999',
     name: second.name,
     gender: second.gender,
-    isRepresentative: true,
+    committeeRoleIds: second.committeeRoleIds,
     status: second.status,
     behaviorTags: second.behaviorTags,
     parent: second.parent,
@@ -97,7 +100,7 @@ test('persists authoritative roster relationships and constraints', () => {
     homeworkHistory: second.homeworkHistory
   });
   assert.equal(moved?.classId, targetClass.id);
-  assert.equal(moved?.isRepresentative, false);
+  assert.deepEqual(moved?.committeeRoleIds, []);
 });
 
 test('database remains readable after the repository connection closes', () => {

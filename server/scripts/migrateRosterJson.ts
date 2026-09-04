@@ -8,15 +8,23 @@ import path from 'node:path';
 import { ClassMembership, SchoolClass, Student } from '../../src/domain/types';
 import { closeRosterDatabase, getRosterDatabase } from '../database/rosterDatabase';
 
-type LegacyStudentProfile = Omit<Student, 'id' | 'studentNo' | 'classId' | 'className' | 'isRepresentative'> & {
+type LegacyStudentProfile = Omit<Student, 'id' | 'studentNo' | 'classId' | 'className' | 'committeeRoleIds'> & {
   studentId: string;
   isRepresentative?: boolean;
 };
 
+type LegacySchoolClass = SchoolClass & {
+  textbookVersion?: string;
+  defaultSubmitTime?: string;
+  representatives?: string[];
+};
+
+type LegacyClassMembership = ClassMembership & { isRepresentative?: boolean };
+
 interface LegacyRosterStore {
-  classes: SchoolClass[];
+  classes: LegacySchoolClass[];
   students: LegacyStudentProfile[];
-  memberships: ClassMembership[];
+  memberships: LegacyClassMembership[];
 }
 
 const sourcePath = path.resolve(process.argv[2] ?? 'var/data/roster.json');
@@ -59,8 +67,8 @@ const insertStudent = database.prepare(`
 `);
 const insertMembership = database.prepare(`
   INSERT INTO class_memberships (
-    id, class_id, student_id, student_no, is_representative, status, joined_at, left_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    id, class_id, student_id, student_no, status, joined_at, left_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?)
 `);
 
 database.transaction(() => {
@@ -72,8 +80,8 @@ database.transaction(() => {
       schoolClass.term,
       schoolClass.headTeacher,
       schoolClass.chineseTeacher,
-      schoolClass.textbookVersion,
-      schoolClass.defaultSubmitTime,
+      schoolClass.textbookVersion ?? '',
+      schoolClass.defaultSubmitTime ?? '08:00',
       schoolClass.status,
       schoolClass.studentCount,
       now,
@@ -81,21 +89,15 @@ database.transaction(() => {
     );
   });
   store.students.forEach(profile => {
-    const { studentId, name, gender, status, isRepresentative: _legacyRole, ...details } = profile;
+    const { studentId, name, gender, status, isRepresentative: _discardedLegacyRole, ...details } = profile;
     insertStudent.run(studentId, name, gender ?? 'male', status ?? 'good', JSON.stringify(details), now, now);
   });
   store.memberships.forEach(membership => {
-    const profile = store.students.find(item => item.studentId === membership.studentId);
-    const schoolClass = store.classes.find(item => item.id === membership.classId);
-    const isRepresentative = typeof membership.isRepresentative === 'boolean'
-      ? membership.isRepresentative
-      : Boolean(profile?.isRepresentative || schoolClass?.representatives.includes(membership.studentId));
     insertMembership.run(
       membership.id,
       membership.classId,
       membership.studentId,
       membership.studentNo,
-      isRepresentative ? 1 : 0,
       membership.status,
       membership.joinedAt,
       membership.leftAt ?? null

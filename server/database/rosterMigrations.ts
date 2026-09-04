@@ -227,6 +227,79 @@ const migrations: Migration[] = [
       CREATE UNIQUE INDEX timer_reminders_generated_from_idx ON timer_reminders (generated_from_id) WHERE generated_from_id IS NOT NULL;
       PRAGMA foreign_keys = ON;
     `
+  },
+  {
+    version: 8,
+    sql: `
+      ALTER TABLE class_memberships DROP COLUMN is_representative;
+
+      CREATE TABLE committee_roles (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT INTO committee_roles (id, name, sort_order, is_default, created_at, updated_at)
+      VALUES ('committee-role-monitor', '班长', 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+
+      CREATE TABLE committee_assignments (
+        class_id TEXT NOT NULL REFERENCES classes(id) ON UPDATE CASCADE ON DELETE CASCADE,
+        student_id TEXT NOT NULL REFERENCES students(id) ON UPDATE CASCADE ON DELETE CASCADE,
+        role_id TEXT NOT NULL REFERENCES committee_roles(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (class_id, student_id, role_id)
+      );
+
+      CREATE INDEX committee_assignments_student_idx
+        ON committee_assignments (student_id, class_id);
+      CREATE INDEX committee_assignments_role_idx
+        ON committee_assignments (role_id, class_id);
+
+      CREATE TRIGGER committee_student_must_be_in_class
+      BEFORE INSERT ON committee_assignments
+      WHEN NOT EXISTS (
+        SELECT 1 FROM class_memberships
+        WHERE class_id = NEW.class_id
+          AND student_id = NEW.student_id
+          AND status IN ('active', 'suspended')
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'COMMITTEE_STUDENT_NOT_IN_CLASS');
+      END;
+
+      CREATE TRIGGER remove_inactive_student_from_committee
+      AFTER UPDATE OF status ON class_memberships
+      WHEN OLD.status IN ('active', 'suspended') AND NEW.status NOT IN ('active', 'suspended')
+      BEGIN
+        DELETE FROM committee_assignments
+        WHERE class_id = OLD.class_id AND student_id = OLD.student_id;
+      END;
+    `
+  },
+  {
+    version: 9,
+    sql: `
+      UPDATE timer_reminders
+      SET time_text = '时间待定',
+          time_kind = 'none',
+          start_at = NULL,
+          end_at = NULL,
+          due_at = NULL,
+          assumption_warning = '',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE assumption_warning <> '';
+    `
+  },
+  {
+    version: 10,
+    sql: `
+      UPDATE timer_reminders
+      SET name = '委派班委', updated_at = CURRENT_TIMESTAMP
+      WHERE name = '选课代表';
+    `
   }
 ];
 

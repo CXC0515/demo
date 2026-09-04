@@ -4,10 +4,11 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { EnrollmentStatus, RosterSnapshot, RosterStudent, SchoolClass, Student } from '../../src/domain/types';
+import type Database from 'better-sqlite3';
+import { CommitteeAssignment, CommitteeRole, EnrollmentStatus, RosterSnapshot, RosterStudent, SchoolClass, Student } from '../../src/domain/types';
 import { getRosterDatabase } from '../database/rosterDatabase';
 
-type StudentDetails = Omit<Student, 'id' | 'name' | 'studentNo' | 'classId' | 'className' | 'gender' | 'isRepresentative' | 'status'>;
+type StudentDetails = Omit<Student, 'id' | 'name' | 'studentNo' | 'classId' | 'className' | 'gender' | 'committeeRoleIds' | 'status'>;
 
 interface ClassRow {
   id: string;
@@ -32,7 +33,6 @@ interface StudentRow {
   class_id: string;
   class_name: string;
   student_no: string;
-  is_representative: number;
   enrollment_status: EnrollmentStatus;
   joined_at: string;
   left_at: string | null;
@@ -43,7 +43,6 @@ interface MembershipRow {
   class_id: string;
   student_id: string;
   student_no: string;
-  is_representative: number;
   status: EnrollmentStatus;
   joined_at: string;
   left_at: string | null;
@@ -56,7 +55,7 @@ export interface StudentWriteInput {
   classId: string;
   gender?: 'male' | 'female';
   enrollmentStatus?: EnrollmentStatus;
-  isRepresentative?: boolean;
+  committeeRoleIds?: string[];
   status?: Student['status'];
   behaviorTags?: string[];
   parent?: Student['parent'];
@@ -76,26 +75,16 @@ const isVisibleStatus = (status: EnrollmentStatus) => status === 'active' || sta
 
 const getClassRow = (classId: string) => database.prepare('SELECT * FROM classes WHERE id = ?').get(classId) as ClassRow | undefined;
 
-const toClassView = (row: ClassRow): SchoolClass => {
-  const representatives = database.prepare(`
-    SELECT student_id FROM class_memberships
-    WHERE class_id = ? AND status IN ('active', 'suspended') AND is_representative = 1
-    ORDER BY joined_at, rowid
-  `).all(row.id) as { student_id: string }[];
-  return {
+const toClassView = (row: ClassRow): SchoolClass => ({
     id: row.id,
     name: row.name,
     grade: row.grade,
     term: row.term,
     headTeacher: row.head_teacher,
     chineseTeacher: row.chinese_teacher,
-    textbookVersion: row.textbook_version,
     studentCount: row.student_count ?? 0,
-    representatives: representatives.map(item => item.student_id),
-    defaultSubmitTime: row.default_submit_time,
     status: row.status
-  };
-};
+});
 
 const defaultDetails = (): StudentDetails => ({
   behaviorTags: [],
@@ -116,7 +105,7 @@ const parseDetails = (json: string): StudentDetails => {
   }
 };
 
-const toRosterStudent = (row: StudentRow): RosterStudent => ({
+const toRosterStudent = (row: StudentRow, committeeRoleIds: string[] = []): RosterStudent => ({
   ...parseDetails(row.profile_json),
   id: row.student_id,
   studentId: row.student_id,
@@ -126,7 +115,7 @@ const toRosterStudent = (row: StudentRow): RosterStudent => ({
   studentNo: row.student_no,
   classId: row.class_id,
   className: row.class_name,
-  isRepresentative: Boolean(row.is_representative),
+  committeeRoleIds,
   enrollmentStatus: row.enrollment_status
 });
 
@@ -141,7 +130,6 @@ const studentSelect = `
     m.class_id,
     c.name AS class_name,
     m.student_no,
-    m.is_representative,
     m.status AS enrollment_status,
     m.joined_at,
     m.left_at
@@ -160,7 +148,17 @@ const listJoinedStudents = (classId?: string, includeInactive = false) => {
   if (!includeInactive) conditions.push("m.status IN ('active', 'suspended')");
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const rows = database.prepare(`${studentSelect} ${where} ORDER BY m.joined_at DESC, m.rowid DESC`).all(...parameters) as StudentRow[];
-  return rows.map(toRosterStudent);
+  const assignments = database.prepare(`
+    SELECT class_id AS classId, student_id AS studentId, role_id AS roleId FROM committee_assignments
+    ${classId ? 'WHERE class_id = ?' : ''}
+    ORDER BY created_at, rowid
+  `).all(...(classId ? [classId] : [])) as CommitteeAssignment[];
+  const rolesByMembership = new Map<string, string[]>();
+  assignments.forEach(item => {
+    const key = `${item.classId}:${item.studentId}`;
+    rolesByMembership.set(key, [...(rolesByMembership.get(key) ?? []), item.roleId]);
+  });
+  return rows.map(row => toRosterStudent(row, rolesByMembership.get(`${row.class_id}:${row.student_id}`) ?? []));
 };
 
 const createDetails = (input: StudentWriteInput): StudentDetails => ({
@@ -199,22 +197,113 @@ const refreshClassCount = (classId: string) => {
 
 export const getRosterSnapshot = (): RosterSnapshot => ({
   classes: listClasses(),
-  students: listJoinedStudents()
+  students: listJoinedStudents(),
+  committeeRoles: listCommitteeRoles()
 });
+
+export const listCommitteeRoles = (): CommitteeRole[] => database.prepare(`
+  SELECT id, name, sort_order AS sortOrder, is_default AS isDefault
+  FROM committee_roles ORDER BY sort_order, created_at, rowid
+`).all().map(row => {
+  const typed = row as Omit<CommitteeRole, 'isDefault'> & { isDefault: number };
+  return { ...typed, isDefault: Boolean(typed.isDefault) };
+});
+
+export const createCommitteeRole = (name: string) => {
+  const now = new Date().toISOString();
+  const role: CommitteeRole = {
+    id: randomUUID(),
+    name: name.trim(),
+    sortOrder: (database.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM committee_roles').get() as { next: number }).next,
+    isDefault: false
+  };
+  try {
+    database.prepare(`
+      INSERT INTO committee_roles (id, name, sort_order, is_default, created_at, updated_at)
+      VALUES (?, ?, ?, 0, ?, ?)
+    `).run(role.id, role.name, role.sortOrder, now, now);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) throw new Error('DUPLICATE_COMMITTEE_ROLE');
+    throw error;
+  }
+  return role;
+};
+
+export const updateCommitteeRole = (roleId: string, name: string) => {
+  let result: Database.RunResult;
+  try {
+    result = database.prepare('UPDATE committee_roles SET name = ?, updated_at = ? WHERE id = ?')
+      .run(name.trim(), new Date().toISOString(), roleId);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) throw new Error('DUPLICATE_COMMITTEE_ROLE');
+    throw error;
+  }
+  if (!result.changes) return null;
+  return listCommitteeRoles().find(item => item.id === roleId) ?? null;
+};
+
+export const deleteCommitteeRole = (roleId: string) => {
+  if (database.prepare('SELECT 1 FROM committee_assignments WHERE role_id = ? LIMIT 1').get(roleId)) {
+    throw new Error('COMMITTEE_ROLE_IN_USE');
+  }
+  const role = database.prepare('SELECT is_default FROM committee_roles WHERE id = ?').get(roleId) as { is_default: number } | undefined;
+  if (!role) return false;
+  if (role.is_default) throw new Error('DEFAULT_COMMITTEE_ROLE');
+  database.prepare('DELETE FROM committee_roles WHERE id = ?').run(roleId);
+  return true;
+};
+
+const assertCommitteeRoles = (roleIds: string[]) => {
+  if (!roleIds.length) return;
+  const placeholders = roleIds.map(() => '?').join(', ');
+  const count = (database.prepare(`SELECT COUNT(*) AS count FROM committee_roles WHERE id IN (${placeholders})`).get(...roleIds) as { count: number }).count;
+  if (count !== new Set(roleIds).size) throw new Error('COMMITTEE_ROLE_NOT_FOUND');
+};
+
+const replaceStudentCommitteeRoles = (classId: string, studentId: string, roleIds: string[]) => {
+  assertCommitteeRoles(roleIds);
+  database.prepare('DELETE FROM committee_assignments WHERE class_id = ? AND student_id = ?').run(classId, studentId);
+  const insert = database.prepare(`
+    INSERT INTO committee_assignments (class_id, student_id, role_id, created_at) VALUES (?, ?, ?, ?)
+  `);
+  const now = new Date().toISOString();
+  [...new Set(roleIds)].forEach(roleId => insert.run(classId, studentId, roleId, now));
+};
+
+export const replaceClassCommitteeAssignments = (classId: string, assignments: Omit<CommitteeAssignment, 'classId'>[]) => {
+  assertClassExists(classId);
+  const students = new Set(listJoinedStudents(classId).map(item => item.studentId));
+  if (assignments.some(item => !students.has(item.studentId))) throw new Error('COMMITTEE_STUDENT_NOT_IN_CLASS');
+  assertCommitteeRoles(assignments.map(item => item.roleId));
+  database.transaction(() => {
+    database.prepare('DELETE FROM committee_assignments WHERE class_id = ?').run(classId);
+    const insert = database.prepare(`
+      INSERT INTO committee_assignments (class_id, student_id, role_id, created_at) VALUES (?, ?, ?, ?)
+    `);
+    const now = new Date().toISOString();
+    const seen = new Set<string>();
+    assignments.forEach(item => {
+      const key = `${item.studentId}:${item.roleId}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      insert.run(classId, item.studentId, item.roleId, now);
+    });
+  })();
+  return listJoinedStudents(classId);
+};
 
 export const listClasses = () => {
   const rows = database.prepare('SELECT * FROM classes ORDER BY created_at, rowid').all() as ClassRow[];
   return rows.map(toClassView);
 };
 
-export const createClass = (input: Omit<SchoolClass, 'id' | 'studentCount' | 'representatives'>) => {
+export const createClass = (input: Omit<SchoolClass, 'id' | 'studentCount'>) => {
   const schoolClass: SchoolClass = {
     ...input,
     id: randomUUID(),
     name: input.name.trim(),
     term: input.term.trim(),
-    studentCount: 0,
-    representatives: []
+    studentCount: 0
   };
   const now = new Date().toISOString();
   try {
@@ -230,8 +319,8 @@ export const createClass = (input: Omit<SchoolClass, 'id' | 'studentCount' | 're
       schoolClass.term,
       schoolClass.headTeacher,
       schoolClass.chineseTeacher,
-      schoolClass.textbookVersion,
-      schoolClass.defaultSubmitTime,
+      '',
+      '08:00',
       schoolClass.status,
       0,
       now,
@@ -252,8 +341,6 @@ export const updateClass = (classId: string, patch: Partial<SchoolClass>) => {
     ['term', 'term'],
     ['headTeacher', 'head_teacher'],
     ['chineseTeacher', 'chinese_teacher'],
-    ['textbookVersion', 'textbook_version'],
-    ['defaultSubmitTime', 'default_submit_time'],
     ['status', 'status']
   ];
 
@@ -265,17 +352,6 @@ export const updateClass = (classId: string, patch: Partial<SchoolClass>) => {
         database.prepare(`
           UPDATE classes SET ${updates.map(([, column]) => `${column} = ?`).join(', ')}, updated_at = ? WHERE id = ?
         `).run(...values, new Date().toISOString(), classId);
-      }
-      if (patch.representatives) {
-        database.prepare(`
-          UPDATE class_memberships SET is_representative = 0
-          WHERE class_id = ? AND status IN ('active', 'suspended')
-        `).run(classId);
-        const markRepresentative = database.prepare(`
-          UPDATE class_memberships SET is_representative = 1
-          WHERE class_id = ? AND student_id = ? AND status IN ('active', 'suspended')
-        `);
-        patch.representatives.forEach(studentId => markRepresentative.run(classId, studentId));
       }
     })();
   } catch (error) {
@@ -303,6 +379,7 @@ export const createStudent = (input: StudentWriteInput) => {
   if (database.prepare('SELECT id FROM students WHERE id = ?').get(studentId)) throw new Error('DUPLICATE_STUDENT_ID');
   const membershipId = randomUUID();
   const now = new Date().toISOString();
+  assertCommitteeRoles(input.committeeRoleIds ?? []);
 
   database.transaction(() => {
     database.prepare(`
@@ -319,17 +396,17 @@ export const createStudent = (input: StudentWriteInput) => {
     );
     database.prepare(`
       INSERT INTO class_memberships (
-        id, class_id, student_id, student_no, is_representative, status, joined_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        id, class_id, student_id, student_no, status, joined_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
     `).run(
       membershipId,
       input.classId,
       studentId,
       studentNo,
-      input.isRepresentative ? 1 : 0,
       input.enrollmentStatus ?? 'active',
       now
     );
+    replaceStudentCommitteeRoles(input.classId, studentId, input.committeeRoleIds ?? []);
     refreshClassCount(input.classId);
   })();
   return listJoinedStudents(input.classId).find(item => item.studentId === studentId)!;
@@ -345,6 +422,7 @@ export const updateStudent = (studentId: string, input: StudentWriteInput) => {
   assertClassExists(input.classId);
   const studentNo = input.studentNo.trim();
   assertUniqueStudentNo(input.classId, studentNo, currentMembership.class_id === input.classId ? currentMembership.id : undefined);
+  assertCommitteeRoles(input.committeeRoleIds ?? []);
   const now = new Date().toISOString();
 
   database.transaction(() => {
@@ -359,24 +437,26 @@ export const updateStudent = (studentId: string, input: StudentWriteInput) => {
       studentId
     );
     if (currentMembership.class_id === input.classId) {
+      const nextEnrollmentStatus = input.enrollmentStatus ?? currentMembership.status;
       database.prepare(`
-        UPDATE class_memberships SET student_no = ?, is_representative = ?, status = ?, left_at = ? WHERE id = ?
+        UPDATE class_memberships SET student_no = ?, status = ?, left_at = ? WHERE id = ?
       `).run(
         studentNo,
-        (input.isRepresentative ?? Boolean(currentMembership.is_representative)) ? 1 : 0,
-        input.enrollmentStatus ?? currentMembership.status,
-        isVisibleStatus(input.enrollmentStatus ?? currentMembership.status) ? null : now,
+        nextEnrollmentStatus,
+        isVisibleStatus(nextEnrollmentStatus) ? null : now,
         currentMembership.id
       );
+      replaceStudentCommitteeRoles(input.classId, studentId, isVisibleStatus(nextEnrollmentStatus) ? input.committeeRoleIds ?? [] : []);
     } else {
       database.prepare(`
-        UPDATE class_memberships SET status = 'transferred', is_representative = 0, left_at = ? WHERE id = ?
+        UPDATE class_memberships SET status = 'transferred', left_at = ? WHERE id = ?
       `).run(now, currentMembership.id);
       database.prepare(`
         INSERT INTO class_memberships (
-          id, class_id, student_id, student_no, is_representative, status, joined_at
-        ) VALUES (?, ?, ?, ?, 0, ?, ?)
+          id, class_id, student_id, student_no, status, joined_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
       `).run(randomUUID(), input.classId, studentId, studentNo, input.enrollmentStatus ?? 'active', now);
+      replaceStudentCommitteeRoles(input.classId, studentId, []);
     }
     refreshClassCount(currentMembership.class_id);
     refreshClassCount(input.classId);
@@ -393,7 +473,7 @@ export const withdrawStudent = (studentId: string) => {
   if (!membership) return false;
   database.transaction(() => {
     database.prepare(`
-      UPDATE class_memberships SET status = 'withdrawn', is_representative = 0, left_at = ? WHERE id = ?
+      UPDATE class_memberships SET status = 'withdrawn', left_at = ? WHERE id = ?
     `).run(new Date().toISOString(), membership.id);
     refreshClassCount(membership.class_id);
   })();
@@ -401,11 +481,7 @@ export const withdrawStudent = (studentId: string) => {
 };
 
 export const findStudentByNo = (classId: string, studentNo: string) => {
-  const row = database.prepare(`${studentSelect}
-    WHERE m.class_id = ? AND m.student_no = ? AND m.status IN ('active', 'suspended')
-    ORDER BY m.joined_at DESC, m.rowid DESC LIMIT 1
-  `).get(classId, studentNo) as StudentRow | undefined;
-  return row ? toRosterStudent(row) : null;
+  return listJoinedStudents(classId).find(student => student.studentNo === studentNo) ?? null;
 };
 
 export const matchSubmissions = (classId: string, submittedStudentNos: string[]) => {

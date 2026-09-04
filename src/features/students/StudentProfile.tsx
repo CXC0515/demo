@@ -88,8 +88,8 @@ export default function StudentProfile({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">{selectedStudent.name}</h2>
-              {selectedStudent.isRepresentative && (
-                <span className="px-1.5 py-0.2 bg-amber-100 text-amber-800 text-[10px] font-bold rounded">语文课代表</span>
+              {selectedStudent.committeeRoleIds.length > 0 && (
+                <span className="px-1.5 py-0.2 bg-amber-100 text-amber-800 text-[10px] font-bold rounded">班委</span>
               )}
             </div>
             <p className="text-xs text-slate-400">学号：{selectedStudent.studentNo} · {selectedStudent.className}</p>
@@ -300,7 +300,7 @@ export default function StudentProfile({
             <p className="text-[11px] text-slate-500 leading-relaxed font-sans">
               <b>关怀建议:</b> 
               {selectedStudent.familyStatusTag === '留守儿童' ? ' 父母长年在外务工，隔代监护容易产生溺爱和学习滞后。在语文作业收缴提醒和早自习背诵时，任课老师需倾注更多温和鼓励。' :
-               selectedStudent.familyStatusTag === '单亲关注' ? ' 父母离异重组，孩子容易敏感内敛。课堂上可创造课代表收发、优秀作业范文投屏展示的机会，建立班级归属感。' :
+               selectedStudent.familyStatusTag === '单亲关注' ? ' 父母离异重组，孩子容易敏感内敛。课堂上可创造协助收发、优秀作业范文投屏展示的机会，建立班级归属感。' :
                ' 该生家庭教育重视度高，亲子沟通顺畅。日常表现平稳，教学中多鼓励其发挥语文骨干引领作用即可。'}
             </p>
           </div>

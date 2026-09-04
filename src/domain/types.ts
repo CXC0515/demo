@@ -6,6 +6,13 @@
 export type StudentStatus = 'good' | 'warning' | 'risk' | 'outstanding';
 export type EnrollmentStatus = 'active' | 'transferred' | 'withdrawn' | 'suspended';
 
+export interface TeacherProfile {
+  nickname: string;
+  realName: string;
+  schoolName: string;
+  title: string;
+}
+
 export interface ParentInfo {
   name: string;
   phone: string;
@@ -44,7 +51,7 @@ export interface Student {
   classId: string;
   className: string;
   gender: 'male' | 'female';
-  isRepresentative: boolean;
+  committeeRoleIds: string[];
   status: StudentStatus;
   behaviorTags: string[];
   parent: ParentInfo;
@@ -63,7 +70,6 @@ export interface ClassMembership {
   classId: string;
   studentId: string;
   studentNo: string;
-  isRepresentative: boolean;
   status: EnrollmentStatus;
   joinedAt: string;
   leftAt?: string;
@@ -77,6 +83,20 @@ export interface RosterStudent extends Student {
 export interface RosterSnapshot {
   classes: SchoolClass[];
   students: RosterStudent[];
+  committeeRoles: CommitteeRole[];
+}
+
+export interface CommitteeRole {
+  id: string;
+  name: string;
+  sortOrder: number;
+  isDefault: boolean;
+}
+
+export interface CommitteeAssignment {
+  classId: string;
+  studentId: string;
+  roleId: string;
 }
 
 export interface ClassroomSeatAssignment {
@@ -117,10 +137,7 @@ export interface SchoolClass {
   term: string;
   headTeacher: string;
   chineseTeacher: string;
-  textbookVersion: string;
   studentCount: number;
-  representatives: string[]; // Student IDs
-  defaultSubmitTime: string; // e.g., "08:00"
   status: 'active' | 'archived';
 }
 

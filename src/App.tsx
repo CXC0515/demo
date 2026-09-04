@@ -10,18 +10,22 @@ import { createNavGroups, PageId } from './app/navigation';
 // Import Types and Mock Data
 import {
   Student, SchoolClass, WorkbenchTask, ScheduleItem, SchedulePeriod,
-  TimerReminder, ReviewItem, WorkflowState, TeacherObservation, RosterStudent, KnowledgeNode
+  TimerReminder, ReviewItem, WorkflowState, TeacherObservation, RosterStudent, KnowledgeNode, CommitteeRole, CommitteeAssignment, TeacherProfile
 } from './domain/types';
 import { createEmptyWorkflowState } from './domain/gradingTask';
 import { listGradingTasks, saveGradingTask } from './services/gradingTaskApi';
 import {
   createRosterClass,
+  createRosterCommitteeRole,
   createRosterStudent,
   deleteRosterStudent,
+  deleteRosterCommitteeRole,
   getRoster,
   importRosterStudents,
+  previewRosterStudentsImport,
+  saveClassCommitteeAssignments,
   toggleRosterClassArchive,
-  updateRosterClass,
+  updateRosterClass, updateRosterCommitteeRole,
   updateRosterStudent
 } from './services/rosterApi';
 
@@ -57,6 +61,22 @@ const getLocalDate = () => {
   return `${year}-${month}-${day}`;
 };
 
+const defaultTeacherProfile: TeacherProfile = {
+  nickname: '王老师',
+  realName: '王明',
+  schoolName: '江城实验中学',
+  title: '一级教师'
+};
+
+const readTeacherProfile = (): TeacherProfile => {
+  try {
+    const stored = JSON.parse(localStorage.getItem('teacher-profile') ?? '{}') as Partial<TeacherProfile>;
+    return { ...defaultTeacherProfile, ...stored };
+  } catch {
+    return defaultTeacherProfile;
+  }
+};
+
 const createInitialWorkflowState = (task: WorkbenchTask) => {
   return createEmptyWorkflowState(task);
 };
@@ -82,6 +102,7 @@ export default function App() {
   // Class and student state is hydrated from the authoritative roster service.
   const [classes, setClasses] = useState<SchoolClass[]>([]);
   const [students, setStudents] = useState<RosterStudent[]>([]);
+  const [committeeRoles, setCommitteeRoles] = useState<CommitteeRole[]>([]);
   const [rosterLoading, setRosterLoading] = useState(true);
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [tasks, setTasks] = useState<WorkbenchTask[]>([]);
@@ -93,6 +114,7 @@ export default function App() {
   const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([]);
   const [workflowStates, setWorkflowStates] = useState<Record<string, WorkflowState>>({});
   const [knowledgeNodes, setKnowledgeNodes] = useState<KnowledgeNode[]>([]);
+  const [teacherProfile, setTeacherProfile] = useState<TeacherProfile>(readTeacherProfile);
 
   const loadKnowledgeCatalog = useCallback(async () => {
     const graph = await getKnowledgeGraph();
@@ -119,6 +141,7 @@ export default function App() {
       const snapshot = await getRoster();
       setClasses(snapshot.classes);
       setStudents(snapshot.students);
+      setCommitteeRoles(snapshot.committeeRoles);
       const preferredClass = snapshot.classes.find(item => item.status === 'active');
       if (preferredClass) setSelectedClassId(preferredClass.id);
       if (snapshot.students.length) setSelectedStudentId(snapshot.students[0].id);
@@ -251,10 +274,7 @@ export default function App() {
       setClasses(current => current.map(item => item.id === created.classId
         ? {
             ...item,
-            studentCount: item.studentCount + 1,
-            representatives: created.isRepresentative
-              ? [...new Set([...item.representatives, created.id])]
-              : item.representatives
+            studentCount: item.studentCount + 1
           }
         : item));
       setSelectedStudentId(created.id);
@@ -292,8 +312,8 @@ export default function App() {
     }
   };
 
-  const handleBulkImport = async (classId: string, rows: { studentNo: string; name: string; gender?: 'male' | 'female' }[]) => {
-    const result = await importRosterStudents(classId, rows);
+  const handleBulkImport = async (classId: string, grid: Parameters<typeof importRosterStudents>[1]) => {
+    const result = await importRosterStudents(classId, grid);
     const snapshot = await getRoster();
     setClasses(snapshot.classes);
     setStudents(snapshot.students);
@@ -310,7 +330,7 @@ export default function App() {
         ...student,
         classId: targetClassId,
         className: targetClass.name,
-        isRepresentative: false
+        committeeRoleIds: []
       })));
       const snapshot = await getRoster();
       setClasses(snapshot.classes);
@@ -319,6 +339,31 @@ export default function App() {
     } catch (error) {
       triggerToast(`批量调班失败：${error instanceof Error ? error.message : '未知错误'}`);
     }
+  };
+
+  const handleSaveCommitteeAssignments = async (classId: string, assignments: Omit<CommitteeAssignment, 'classId'>[]) => {
+    const saved = await saveClassCommitteeAssignments(classId, assignments);
+    const savedById = new Map(saved.map(item => [item.id, item]));
+    setStudents(current => current.map(item => savedById.get(item.id) ?? item));
+    triggerToast('班委任职已保存');
+  };
+
+  const handleCreateCommitteeRole = async (name: string) => {
+    const role = await createRosterCommitteeRole(name);
+    setCommitteeRoles(current => [...current, role]);
+    triggerToast(`已添加班委职位“${role.name}”`);
+  };
+
+  const handleUpdateCommitteeRole = async (roleId: string, name: string) => {
+    const role = await updateRosterCommitteeRole(roleId, name);
+    setCommitteeRoles(current => current.map(item => item.id === role.id ? role : item));
+    triggerToast('班委职位已更新');
+  };
+
+  const handleDeleteCommitteeRole = async (roleId: string) => {
+    await deleteRosterCommitteeRole(roleId);
+    setCommitteeRoles(current => current.filter(item => item.id !== roleId));
+    triggerToast('班委职位已删除');
   };
 
   const handleBulkAddTags = async (studentIds: string[], newTags: string[]) => {
@@ -478,6 +523,7 @@ export default function App() {
       selectedClassId={selectedClassId}
       showToast={showToast}
       toastMessage={toastMessage}
+      teacherProfile={teacherProfile}
       onSelectClass={setSelectedClassId}
       onSelectPage={setActivePage}
       onToggleGroup={toggleGroup}
@@ -513,6 +559,7 @@ export default function App() {
             <VirtualClassroom
               students={students}
               classes={classes}
+              committeeRoles={committeeRoles}
               selectedClassId={selectedClassId}
               onSelectClass={setSelectedClassId}
               onManageStudent={(studentId) => {
@@ -534,6 +581,7 @@ export default function App() {
                   author: '王老师'
                 });
               }}
+              onUpdateStudent={handleUpdateStudent}
             />
           )}
 
@@ -541,9 +589,11 @@ export default function App() {
             <ClassManagement
               classes={classes}
               students={students}
+              committeeRoles={committeeRoles}
               onAddClass={handleAddClass}
               onUpdateClass={handleUpdateClass}
               onArchiveClass={handleArchiveClass}
+              onSaveCommitteeAssignments={handleSaveCommitteeAssignments}
               onEnterClassroom={(classId) => {
                 setSelectedClassId(classId);
                 handleNavigate('classroom');
@@ -555,10 +605,12 @@ export default function App() {
             <StudentManagement
               students={students}
               classes={classes}
+              committeeRoles={committeeRoles}
               onAddStudent={handleAddStudent}
               onUpdateStudent={handleUpdateStudent}
               onDeleteStudent={handleDeleteStudent}
               onBulkImport={handleBulkImport}
+              onPreviewBulkImport={previewRosterStudentsImport}
               onBulkMoveClass={handleBulkMoveClass}
               onBulkAddTags={handleBulkAddTags}
               targetStudentId={studentManagementTargetId}
@@ -635,6 +687,7 @@ export default function App() {
             <DiagnosisWorkspace
               students={students}
               classes={classes}
+              committeeRoles={committeeRoles}
               selectedClassId={selectedClassId}
               selectedStudentId={selectedStudentId}
               onSelectClass={setSelectedClassId}
@@ -646,6 +699,7 @@ export default function App() {
                 triggerToast('已打开该学生档案');
               }}
               onAddObservation={handleAddObservation}
+              onUpdateStudent={handleUpdateStudent}
               onNavigate={handleNavigate}
               onShowToast={triggerToast}
               requestedTab={diagnosisRequestedTab}
@@ -693,9 +747,18 @@ export default function App() {
               requestedSection={settingsRequestedSection}
               onRequestedSectionHandled={() => setSettingsRequestedSection(null)}
               classes={classes}
+              committeeRoles={committeeRoles}
               selectedClassId={selectedClassId}
               onSelectClass={setSelectedClassId}
               onShowToast={triggerToast}
+              onCreateCommitteeRole={handleCreateCommitteeRole}
+              onUpdateCommitteeRole={handleUpdateCommitteeRole}
+              onDeleteCommitteeRole={handleDeleteCommitteeRole}
+              teacherProfile={teacherProfile}
+              onSaveTeacherProfile={profile => {
+                setTeacherProfile(profile);
+                localStorage.setItem('teacher-profile', JSON.stringify(profile));
+              }}
             />
           )}
 

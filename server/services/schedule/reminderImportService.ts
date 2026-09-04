@@ -74,8 +74,8 @@ export const buildReminderImportPrompt = (text: string, classNames: string[], re
   'name 是简洁、可执行的事项名称。不得凭空补充原文没有的任务。',
   'timeKind 只能是 none、point、range：没有时间写 none；单一时间点或截止时间写 point；明确的起止时间写 range。',
   'startAt/endAt 使用 YYYY-MM-DDTHH:mm；只有日期没有时刻时，timeKind 仍为 point，startAt 使用当天 23:59，并在 warnings 说明“原文未给具体时刻”。',
-  '原文给了具体时刻或时间段、但没有说日期时，日期默认采用基准时间的“今天”；timeKind 必须保持 point 或 range，并把 dateSource 写为 assumed_today，warnings 加“日期按今天补全”。例如“下午两点到四点开会”应生成今天 14:00 到 16:00 的 range，不能写 none。',
-  '只有原文连时刻、时间段和日期都没有时才写 none；明确日期写 dateSource=explicit，完全无时间写 dateSource=none。range 必须同时给出 startAt 和 endAt；point 只给 startAt。',
+  '原文只有时刻或时间段、但没有明确日期时，不要猜测日期：timeKind 写 none、dateSource 写 none、startAt/endAt 写 null，界面统一显示“时间待定”。',
+  '明确日期写 dateSource=explicit；完全无时间或缺少日期写 dateSource=none。range 必须同时给出 startAt 和 endAt；point 只给 startAt。',
   '识别重复表达：出现“每天、每周、每周三、每月、每年、隔N天/周/月”等时必须返回 recurrence，不能只生成一次性日程。unit 分别是 day/week/month/year，interval 默认 1；周一至周日用 weekdays 的 1-7；每月最后一天用 monthDays=[0]。没有重复表达时 recurrence=null。',
   '周期日程的 startAt 是从基准时间起第一个尚未过去的执行时间，dateSource 写 recurrence，不要写 assumed_today。例如“每周三去新镇下午两点开会”应返回 unit=week、interval=1、weekdays=[3]，startAt 为最近一个尚未过去的周三14:00。这只是规则示例，不得把其他周期固定为周三。',
   'important、urgent 仅在原文有明确依据时为 true，不得因为临近时间自动猜测。',
@@ -116,11 +116,16 @@ export const createReminderDrafts = async (
   const parsed = aiResultSchema.parse(extractJson(content));
   const classesByName = new Map(classes.map(item => [normalizeClassName(item.name), item]));
   const drafts = parsed.reminders.map(item => {
-    const warnings = [...item.warnings];
+    const warnings = item.warnings.filter(warning => warning !== '日期按今天补全');
     const matchedClass = item.className ? classesByName.get(normalizeClassName(item.className)) : undefined;
     let timeKind = item.timeKind;
     let startAt = item.startAt ?? undefined;
     let endAt = item.endAt ?? undefined;
+    if (item.dateSource === 'assumed_today') {
+      timeKind = 'none';
+      startAt = undefined;
+      endAt = undefined;
+    }
     if (timeKind === 'point' && !startAt) { timeKind = 'none'; warnings.push('缺少可确认的时间点'); }
     if (timeKind === 'range' && (!startAt || !endAt || endAt <= startAt)) { timeKind = 'none'; startAt = undefined; endAt = undefined; warnings.push('时间段不完整或先后顺序异常'); }
     if (timeKind === 'none') { startAt = undefined; endAt = undefined; }
@@ -138,7 +143,6 @@ export const createReminderDrafts = async (
       id: randomUUID(), name: item.name, classId: matchedClass?.id ?? '', className: matchedClass?.name ?? '',
       time: displayTime(timeKind, startAt, endAt), repeatRule: recurrenceLabel(recurrence), recurrence, status: 'active' as const,
       important: item.important, urgent: item.urgent, timeKind, startAt, endAt, dueAt: startAt,
-      assumptionWarning: item.dateSource === 'assumed_today' ? '日期按今天补全' : undefined,
       selected: !startAt || new Date(endAt || startAt).getTime() >= now.getTime(),
       sourceExcerpt: item.sourceExcerpt, confidence: item.confidence,
       warnings: item.className && !matchedClass ? [...warnings, `班级“${item.className}”未能唯一匹配`] : warnings

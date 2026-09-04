@@ -1,6 +1,6 @@
 import { ChevronDown, GraduationCap, HelpCircle, Menu, Sparkles, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import type { SchoolClass } from '../domain/types';
+import type { SchoolClass, TeacherProfile } from '../domain/types';
 import type { NavGroup, PageId } from './navigation';
 
 interface AppLayoutProps {
@@ -13,6 +13,7 @@ interface AppLayoutProps {
   selectedClassId: string;
   showToast: boolean;
   toastMessage: string | null;
+  teacherProfile: TeacherProfile;
   children: ReactNode;
   onSelectClass: (classId: string) => void;
   onSelectPage: (pageId: PageId) => void;
@@ -29,6 +30,7 @@ export default function AppLayout({
   selectedClassId,
   showToast,
   toastMessage,
+  teacherProfile,
   children,
   onSelectClass,
   onSelectPage,
@@ -90,9 +92,9 @@ export default function AppLayout({
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="hidden sm:inline text-xs font-semibold text-slate-700 dark:text-slate-200">王老师</span>
+            <span className="hidden sm:inline text-xs font-semibold text-slate-700 dark:text-slate-200">{teacherProfile.nickname}</span>
             <div className="w-8 h-8 rounded-full bg-slate-200/90 dark:bg-zinc-800 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center text-xs">
-              王
+              {(teacherProfile.nickname.trim() || teacherProfile.realName.trim() || '师')[0]}
             </div>
           </div>
         </div>
@@ -187,7 +189,7 @@ export default function AppLayout({
               <HelpCircle className="w-3.5 h-3.5" />
               当前班级
             </span>
-            <p className="leading-normal">{selectedClass?.name}，{selectedClass?.studentCount} 人。课代表：{selectedClass?.representatives.length || 0} 名。待复核 {pendingReviewCount} 条。</p>
+            <p className="leading-normal">{selectedClass?.name}，{selectedClass?.studentCount} 人。待复核 {pendingReviewCount} 条。</p>
           </div>
         </aside>
 

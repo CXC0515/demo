@@ -3,24 +3,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Users, UserPlus, FileSpreadsheet, Edit, Trash2, Tag,
-  ArrowLeftRight, Filter, Search, X, Eye, HelpCircle, Award, Sparkles
+  ArrowLeftRight, ArrowUpDown, Filter, Search, X, Eye, HelpCircle, Sparkles
 } from 'lucide-react';
-import { Student, SchoolClass, StudentStatus, ParentInfo, RosterStudent } from '../../domain/types';
-import { RosterImportResult } from '../../services/rosterApi';
+import { CommitteeRole, Student, SchoolClass, StudentStatus, ParentInfo, RosterStudent } from '../../domain/types';
+import { RosterImportGrid, RosterImportPreview, RosterImportResult } from '../../services/rosterApi';
+import { SortDirection, sortStudents, StudentSortKey } from '../../domain/studentSorting';
+import RosterImportDialog from './RosterImportDialog';
+import { dailyBehaviorTags } from '../../domain/behaviorTags';
 
 interface StudentManagementProps {
   students: RosterStudent[];
   classes: SchoolClass[];
+  committeeRoles: CommitteeRole[];
   onAddStudent: (newStudent: Student) => Promise<boolean>;
   onUpdateStudent: (updatedStudent: Student) => Promise<boolean>;
   onDeleteStudent: (studentId: string) => void;
   onBulkImport: (
     classId: string,
-    rows: { studentNo: string; name: string; gender?: 'male' | 'female' }[]
+    grid: RosterImportGrid
   ) => Promise<RosterImportResult>;
+  onPreviewBulkImport: (classId: string, grid: RosterImportGrid) => Promise<RosterImportPreview>;
   onBulkMoveClass: (studentIds: string[], targetClassId: string) => void;
   onBulkAddTags: (studentIds: string[], tags: string[]) => void;
   targetStudentId?: string | null;
@@ -30,10 +35,12 @@ interface StudentManagementProps {
 export default function StudentManagement({
   students,
   classes,
+  committeeRoles,
   onAddStudent,
   onUpdateStudent,
   onDeleteStudent,
   onBulkImport,
+  onPreviewBulkImport,
   onBulkMoveClass,
   onBulkAddTags,
   targetStudentId,
@@ -48,13 +55,10 @@ export default function StudentManagement({
   const [showBulkMoveModal, setShowBulkMoveModal] = useState(false);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [showImportToast, setShowImportToast] = useState(false);
-  const [importCount, setImportCount] = useState(0);
-  const [importRejectedCount, setImportRejectedCount] = useState(0);
-  const [importClassId, setImportClassId] = useState('c5');
-  const [importText, setImportText] = useState('');
-  const [importError, setImportError] = useState<string | null>(null);
-  const [isImporting, setIsImporting] = useState(false);
+  const [importClassId, setImportClassId] = useState('');
+  const [importSummary, setImportSummary] = useState<{changed:number;rejected:number}|null>(null);
+  const [sortKey, setSortKey] = useState<StudentSortKey>('studentNo');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [otherRelation, setOtherRelation] = useState('');
 
   // Form states for Student add/edit
@@ -63,7 +67,7 @@ export default function StudentManagement({
     studentNo: '',
     classId: 'c1',
     gender: 'male',
-    isRepresentative: false,
+    committeeRoleIds: [],
     status: 'good',
     behaviorTags: [],
     parent: { name: '', phone: '', relation: '父亲', remark: '' },
@@ -79,7 +83,6 @@ export default function StudentManagement({
   const [bulkNewTag, setBulkNewTag] = useState('');
   const familyAttentionTags = ['留守儿童', '双职工家庭', '隔代教养', '单亲家庭', '重组家庭', '家长期望较高', '作业陪伴不足', '沟通需谨慎'];
   const relationOptions = ['母亲', '父亲', '姥姥', '奶奶', '姥爷', '爷爷', '其他'];
-  const dailyBehaviorTags = ['课堂积极', '注意力易分散', '作业拖延', '书写认真', '情绪敏感', '同伴关系良好'];
   const selectedFamilyTags = (formData.familyStatusTag || '').split('、').filter(Boolean);
   const selectedBehaviorTags = formData.behaviorTags || [];
 
@@ -90,17 +93,21 @@ export default function StudentManagement({
 
     setSelectedClassId(targetStudent.classId);
     setSearchQuery('');
-    setSelectedStudentId(targetStudent.id);
+    setSelectedStudentId(null);
+    setIsEditMode(true);
+    setOtherRelation(relationOptions.includes(targetStudent.parent.relation) ? '' : targetStudent.parent.relation);
+    setFormData({ ...targetStudent });
+    setShowAddEditModal(true);
     onTargetStudentHandled?.();
   }, [onTargetStudentHandled, students, targetStudentId]);
 
   // Filter students
-  const filteredStudents = students.filter(s => {
+  const filteredStudents = useMemo(() => sortStudents(students.filter(s => {
     const matchesClass = selectedClassId === 'all' || s.classId === selectedClassId;
     const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           s.studentNo.includes(searchQuery);
     return matchesClass && matchesSearch;
-  });
+  }), sortKey, sortDirection), [searchQuery, selectedClassId, sortDirection, sortKey, students]);
 
   const selectedStudent = students.find(s => s.id === selectedStudentId);
 
@@ -145,7 +152,7 @@ export default function StudentManagement({
       studentNo: '',
       classId: defaultClassId,
       gender: 'male',
-      isRepresentative: false,
+      committeeRoleIds: [],
       status: 'good',
       behaviorTags: ['勤奋踏实'],
       parent: { name: '', phone: '', relation: '父亲', remark: '' },
@@ -195,47 +202,12 @@ export default function StudentManagement({
       ? classes.find(item => item.id === 'c5' && item.status === 'active')?.id ?? classes.find(item => item.status === 'active')?.id ?? ''
       : selectedClassId;
     setImportClassId(targetClassId);
-    setImportText('');
-    setImportError(null);
     setShowImportModal(true);
   };
 
-  const handleImport = async () => {
-    const lines = importText.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
-    const dataLines = lines[0]?.includes('学号') ? lines.slice(1) : lines;
-    const rows: { studentNo: string; name: string; gender?: 'male' | 'female' }[] = [];
-    for (let index = 0; index < dataLines.length; index += 1) {
-      const line = dataLines[index];
-      const columns = line.split(line.includes('\t') ? '\t' : ',').map(item => item.trim());
-      if (columns.length < 2 || !columns[0] || !columns[1]) {
-        setImportError(`第 ${index + 1} 行缺少学号或姓名`);
-        return;
-      }
-      const gender = columns[2] === '女' || columns[2]?.toLowerCase() === 'female'
-        ? 'female' as const
-        : columns[2] === '男' || columns[2]?.toLowerCase() === 'male'
-          ? 'male' as const
-          : undefined;
-      rows.push({ studentNo: columns[0], name: columns[1], gender });
-    }
-    if (!rows.length) {
-      setImportError('请至少输入一名学生。');
-      return;
-    }
-    setIsImporting(true);
-    setImportError(null);
-    try {
-      const result = await onBulkImport(importClassId, rows);
-      setImportCount(result.imported.length);
-      setImportRejectedCount(result.rejected.length);
-      setShowImportModal(false);
-      setShowImportToast(true);
-      setTimeout(() => setShowImportToast(false), 4000);
-    } catch (error) {
-      setImportError(error instanceof Error ? error.message : '名册导入失败');
-    } finally {
-      setIsImporting(false);
-    }
+  const toggleSort = (key: StudentSortKey) => {
+    if (sortKey === key) setSortDirection(current => current === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDirection('asc'); }
   };
 
   const handleApplyBulkMove = () => {
@@ -297,6 +269,12 @@ export default function StudentManagement({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <label className="md:hidden">
+              <span className="sr-only">学生排序</span>
+              <select value={`${sortKey}:${sortDirection}`} onChange={event=>{const [key,direction]=event.target.value.split(':') as [StudentSortKey,SortDirection];setSortKey(key);setSortDirection(direction)}} className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs">
+                <option value="studentNo:asc">学号升序</option><option value="studentNo:desc">学号降序</option><option value="name:asc">姓名拼音升序</option><option value="name:desc">姓名拼音降序</option><option value="status:asc">学情状态升序</option><option value="status:desc">学情状态降序</option>
+              </select>
+            </label>
             <button
               onClick={handleOpenImport}
               className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-850 dark:hover:bg-zinc-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer border border-slate-200 dark:border-zinc-700"
@@ -360,12 +338,12 @@ export default function StudentManagement({
                     aria-label="选择当前列表全部学生"
                   />
                 </th>
-                <th className="px-3 py-3 whitespace-nowrap">学生</th>
-                <th className="px-3 py-3 whitespace-nowrap">学号</th>
-                <th className="px-3 py-3 whitespace-nowrap">班级</th>
-                <th className="px-3 py-3 whitespace-nowrap">性别</th>
-                <th className="px-3 py-3 whitespace-nowrap">在班状态</th>
-                <th className="px-3 py-3 whitespace-nowrap">学情状态</th>
+                <SortHeader label="学生" sortKey="name" activeKey={sortKey} direction={sortDirection} onSort={toggleSort}/>
+                <SortHeader label="学号" sortKey="studentNo" activeKey={sortKey} direction={sortDirection} onSort={toggleSort}/>
+                <SortHeader label="班级" sortKey="className" activeKey={sortKey} direction={sortDirection} onSort={toggleSort}/>
+                <SortHeader label="性别" sortKey="gender" activeKey={sortKey} direction={sortDirection} onSort={toggleSort}/>
+                <SortHeader label="在班状态" sortKey="enrollmentStatus" activeKey={sortKey} direction={sortDirection} onSort={toggleSort}/>
+                <SortHeader label="学情状态" sortKey="status" activeKey={sortKey} direction={sortDirection} onSort={toggleSort}/>
                 <th className="px-3 py-3">日常表现</th>
               </tr>
             </thead>
@@ -391,9 +369,7 @@ export default function StudentManagement({
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2 whitespace-nowrap">
                         <span className="font-semibold text-slate-800 dark:text-slate-100">{student.name}</span>
-                        {student.isRepresentative && (
-                          <span className="shrink-0 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-semibold rounded">课代表</span>
-                        )}
+                        {student.committeeRoleIds.map(roleId => <span key={roleId} className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800">{committeeRoles.find(role=>role.id===roleId)?.name}</span>)}
                       </div>
                     </td>
                     <td className="px-3 py-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">{student.studentNo}</td>
@@ -438,7 +414,7 @@ export default function StudentManagement({
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 min-w-0 whitespace-nowrap">
                     <span className="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">{student.name}</span>
-                    {student.isRepresentative && <span className="shrink-0 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-semibold rounded">课代表</span>}
+                    {student.committeeRoleIds.slice(0,1).map(roleId => <span key={roleId} className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800">{committeeRoles.find(role=>role.id===roleId)?.name}</span>)}
                   </div>
                   <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-semibold">
                     {student.enrollmentStatus === 'active' ? '在班' : student.enrollmentStatus === 'suspended' ? '暂缓' : '已离班'}
@@ -465,7 +441,7 @@ export default function StudentManagement({
               <div className="min-w-0">
                 <div className="flex items-center gap-2 whitespace-nowrap">
                   <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 truncate">{selectedStudent.name}</h3>
-                  {selectedStudent.isRepresentative && <span className="shrink-0 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-semibold rounded">课代表</span>}
+                  {selectedStudent.committeeRoleIds.map(roleId => <span key={roleId} className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800">{committeeRoles.find(role=>role.id===roleId)?.name}</span>)}
                 </div>
                 <p className="mt-1 text-xs font-mono text-slate-400">{selectedStudent.studentNo}</p>
               </div>
@@ -533,62 +509,18 @@ export default function StudentManagement({
         </>
       )}
       {showImportModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl border border-slate-100 dark:border-zinc-800">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">批量导入学生名册</h3>
-              <button type="button" onClick={() => setShowImportModal(false)} className="p-1 text-slate-400 hover:text-slate-600" aria-label="关闭">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500">目标班级</label>
-              <select
-                value={importClassId}
-                onChange={(event) => setImportClassId(event.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-sm"
-              >
-                {classes.filter(item => item.status === 'active').map(item => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500">名册内容</label>
-              <textarea
-                value={importText}
-                onChange={(event) => setImportText(event.target.value)}
-                placeholder={'学号\t姓名\t性别\n05\t张三\t男\n06\t李四\t女'}
-                rows={10}
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 font-mono text-sm resize-y"
-              />
-              <p className="text-[11px] text-slate-400">可直接粘贴 Excel 三列，也支持逗号分隔；性别列可省略。</p>
-            </div>
-            {importError && <p className="text-xs font-semibold text-red-600">{importError}</p>}
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setShowImportModal(false)} className="px-4 py-2 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold">取消</button>
-              <button
-                type="button"
-                onClick={() => void handleImport()}
-                disabled={isImporting || !importClassId}
-                className="px-4 py-2 rounded-lg bg-emerald-700 text-white text-xs font-semibold disabled:opacity-50"
-              >
-                {isImporting ? '正在导入...' : '确认导入'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <RosterImportDialog classes={classes} initialClassId={importClassId} onClose={()=>setShowImportModal(false)} onPreview={onPreviewBulkImport} onImport={onBulkImport} onComplete={result=>{setShowImportModal(false);setImportSummary({changed:result.created.length+result.updated.length,rejected:result.rejected.length});setTimeout(()=>setImportSummary(null),4000)}}/>
       )}
 
       {/* Roster Import Toast Notification */}
-      {showImportToast && (
+      {importSummary && (
         <div className="fixed bottom-6 right-6 bg-slate-900/90 dark:bg-emerald-950/90 text-white backdrop-blur-md px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2 z-50 animate-fade-in border border-emerald-500/20">
           <Sparkles className="w-5 h-5 text-emerald-400" />
           <div className="text-xs">
             <span className="font-bold block text-emerald-400">名册导入完成</span>
-            <span>成功导入 <b>{importCount}</b> 人{importRejectedCount ? `，${importRejectedCount} 行未导入` : ''}。</span>
+            <span>成功新增或更新 <b>{importSummary.changed}</b> 人{importSummary.rejected ? `，${importSummary.rejected} 行未处理` : ''}。</span>
           </div>
-          <button onClick={() => setShowImportToast(false)} className="text-white/60 hover:text-white ml-3">
+          <button onClick={() => setImportSummary(null)} className="text-white/60 hover:text-white ml-3">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -627,7 +559,7 @@ export default function StudentManagement({
                     onChange={(e) => setFormData({
                       ...formData,
                       classId: e.target.value,
-                      isRepresentative: e.target.value === formData.classId ? formData.isRepresentative : false
+                      committeeRoleIds: e.target.value === formData.classId ? formData.committeeRoleIds : []
                     })}
                     className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-zinc-700 focus:outline-none"
                   >
@@ -802,19 +734,11 @@ export default function StudentManagement({
                 </div>
               </div>
 
-              {/* Representatives / Status */}
+              {/* Committee / Status */}
               <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-400 block">课表职责</label>
-                  <label className="flex items-center gap-1.5 pt-2">
-                    <input
-                      type="checkbox"
-                      checked={formData.isRepresentative || false}
-                      onChange={(e) => setFormData({ ...formData, isRepresentative: e.target.checked })}
-                      className="accent-emerald-700"
-                    />
-                    <span className="text-xs">设为课代表</span>
-                  </label>
+                  <label className="text-xs font-bold text-slate-400 block">班委职责</label>
+                  <div className="flex flex-wrap gap-2 pt-2">{committeeRoles.map(role=>{const checked=(formData.committeeRoleIds??[]).includes(role.id);return <button type="button" key={role.id} onClick={()=>setFormData({...formData,committeeRoleIds:checked?(formData.committeeRoleIds??[]).filter(id=>id!==role.id):[...(formData.committeeRoleIds??[]),role.id]})} className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${checked?'border-emerald-700 bg-emerald-700 text-white':'border-slate-200 text-slate-500'}`}>{role.name}</button>})}</div>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-400 block">日常表现评估</label>
@@ -913,5 +837,10 @@ export default function StudentManagement({
 
     </div>
   );
+}
+
+function SortHeader({label,sortKey,activeKey,direction,onSort}:{label:string;sortKey:StudentSortKey;activeKey:StudentSortKey;direction:SortDirection;onSort:(key:StudentSortKey)=>void}) {
+  const active=sortKey===activeKey;
+  return <th className="whitespace-nowrap px-3 py-3" aria-sort={active?(direction==='asc'?'ascending':'descending'):'none'}><button type="button" onClick={()=>onSort(sortKey)} className={`inline-flex items-center gap-1 ${active?'text-emerald-700':'hover:text-slate-600'}`}>{label}<ArrowUpDown className="h-3 w-3"/></button></th>;
 }
 

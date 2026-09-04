@@ -21,8 +21,6 @@ const primaryClass = roster.createClass({
   term: '2026 秋季学期',
   headTeacher: '测试教师',
   chineseTeacher: '测试教师',
-  textbookVersion: '统编版七年级上册',
-  defaultSubmitTime: '08:00',
   status: 'active'
 });
 
@@ -40,8 +38,6 @@ test('saves a real classroom layout and enforces class membership', () => {
     term: '2026 秋季学期',
     headTeacher: '测试教师',
     chineseTeacher: '测试教师',
-    textbookVersion: '统编版七年级上册',
-    defaultSubmitTime: '08:00',
     status: 'active'
   });
   const outsider = roster.createStudent({ studentId: 'seat-outsider', classId: otherClass.id, studentNo: '6001', name: '外班学生' });

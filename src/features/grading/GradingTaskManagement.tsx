@@ -80,7 +80,7 @@ export default function GradingTaskManagement({ tasks, classes, defaultClassId, 
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4">
+    <div className="w-full space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="glass-panel flex rounded-2xl bg-slate-100/60 p-2 dark:bg-zinc-900/60">
           {([['all', '全部任务'], ['active', '进行中'], ['completed', '已完成']] as const).map(([id, label]) => (

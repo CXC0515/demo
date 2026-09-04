@@ -21,17 +21,20 @@ import {
   Sparkles,
   X
 } from 'lucide-react';
-import { ClassroomLayout, SchoolClass, Student } from '../../domain/types';
+import { ClassroomLayout, CommitteeRole, SchoolClass, Student } from '../../domain/types';
 import { exportClassroomLayout, getClassroomLayout, saveClassroomLayout } from '../../services/classroomApi';
+import BehaviorTagEditor from '../students/BehaviorTagEditor';
 
 interface VirtualClassroomProps {
   students: Student[];
   classes: SchoolClass[];
+  committeeRoles: CommitteeRole[];
   selectedClassId: string;
   onSelectClass: (classId: string) => void;
   onManageStudent: (studentId: string) => void;
   onViewStudentProfile: (studentId: string) => void;
   onAddObservation: (studentId: string, text: string) => Promise<void>;
+  onUpdateStudent: (student: Student) => Promise<boolean>;
 }
 
 const statusMeta: Record<Student['status'], { label: string; dot: string; badge: string }> = {
@@ -49,11 +52,13 @@ const cloneLayout = (layout: ClassroomLayout): ClassroomLayout => ({
 export default function VirtualClassroom({
   students,
   classes,
+  committeeRoles,
   selectedClassId,
   onSelectClass,
   onManageStudent,
   onViewStudentProfile,
-  onAddObservation
+  onAddObservation,
+  onUpdateStudent
 }: VirtualClassroomProps) {
   const [layout, setLayout] = useState<ClassroomLayout | null>(null);
   const [draft, setDraft] = useState<ClassroomLayout | null>(null);
@@ -85,6 +90,7 @@ export default function VirtualClassroom({
   );
   const unassignedStudents = classStudents.filter(student => !seatedStudentIds.has(student.id));
   const selectedStudent = selectedStudentId ? studentById.get(selectedStudentId) : undefined;
+  const committeeRoleById = useMemo(() => new Map(committeeRoles.map(role => [role.id, role.name])), [committeeRoles]);
 
   useEffect(() => {
     let active = true;
@@ -453,7 +459,7 @@ export default function VirtualClassroom({
                               <span className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full ${statusMeta[student.status].dot}`} />
                               <span className="max-w-full truncate text-xs font-bold text-slate-800 dark:text-slate-100">{student.name}</span>
                               <span className="mt-0.5 text-[10px] text-slate-400">{student.studentNo}</span>
-                              {student.isRepresentative && <Award className="absolute bottom-1 right-1.5 h-3.5 w-3.5 text-amber-500" aria-label="课代表" />}
+                              {student.committeeRoleIds.length > 0 && <Award className="absolute bottom-1 right-1.5 h-3.5 w-3.5 text-amber-500" aria-label="班委" />}
                             </span>
                           ) : (
                             <span className="m-auto text-[11px] text-slate-400">空位</span>
@@ -508,15 +514,14 @@ export default function VirtualClassroom({
           >
             <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 p-5 dark:border-zinc-800">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-base font-bold text-emerald-800">{selectedStudent.name[0]}</div>
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2 whitespace-nowrap">
+                  <div className="flex flex-wrap items-center gap-2">
                     <h3 className="truncate text-lg font-bold text-slate-900 dark:text-slate-100">{selectedStudent.name}</h3>
-                    {selectedStudent.isRepresentative && (
-                      <span className="inline-flex shrink-0 items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-                        <Award className="h-3 w-3" />课代表
+                    {selectedStudent.committeeRoleIds.map(roleId => committeeRoleById.get(roleId)).filter(Boolean).map(roleName => (
+                      <span key={roleName} className="inline-flex shrink-0 items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                        <Award className="h-3 w-3" />{roleName}
                       </span>
-                    )}
+                    ))}
                   </div>
                   <p className="mt-1 text-xs font-mono text-slate-400">{selectedStudent.studentNo} · {selectedStudent.className}</p>
                 </div>
@@ -534,10 +539,7 @@ export default function VirtualClassroom({
 
               <section>
                 <h4 className="mb-2 text-xs font-bold text-slate-500">日常表现</h4>
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedStudent.behaviorTags.map(tag => <span key={tag} className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600 dark:bg-zinc-800 dark:text-slate-300">{tag}</span>)}
-                  {!selectedStudent.behaviorTags.length && <span className="text-xs text-slate-400">暂无记录</span>}
-                </div>
+                <BehaviorTagEditor compact selectedTags={selectedStudent.behaviorTags} onChange={behaviorTags => onUpdateStudent({ ...selectedStudent, behaviorTags })} />
               </section>
 
               <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
