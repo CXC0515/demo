@@ -10,7 +10,6 @@ import {
   CheckCheck,
   ChevronRight,
   CircleAlert,
-  Clock3,
   Eye,
   FileText,
   Filter,
@@ -408,7 +407,7 @@ const SuggestionItem = ({
   );
 };
 
-const ContinuousPageReader = ({
+const OcrPageReader = ({
   resourceId,
   pages,
   chunks,
@@ -423,8 +422,7 @@ const ContinuousPageReader = ({
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const suppressScrollSelectionRef = useRef(false);
-  const [showExcluded, setShowExcluded] = useState(false);
-  const visiblePages = pages.filter((page) => page.included || showExcluded || page.pageNumber === selectedPage);
+  const visiblePages = pages.filter((page) => page.included && page.parseStatus === "ready");
   useEffect(() => {
     const target = scrollRef.current?.querySelector<HTMLElement>(`[data-resource-page="${selectedPage}"]`);
     if (target && Math.abs(target.getBoundingClientRect().top - (scrollRef.current?.getBoundingClientRect().top ?? 0)) > 120) {
@@ -433,7 +431,7 @@ const ContinuousPageReader = ({
       const timer = window.setTimeout(() => { suppressScrollSelectionRef.current = false; }, 600);
       return () => window.clearTimeout(timer);
     }
-  }, [resourceId, selectedPage, showExcluded]);
+  }, [resourceId, selectedPage]);
   const updateCurrentPage = () => {
     if (suppressScrollSelectionRef.current) return;
     const container = scrollRef.current;
@@ -450,8 +448,8 @@ const ContinuousPageReader = ({
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-slate-200/50 dark:bg-zinc-950">
       <div className="z-20 flex shrink-0 items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-2.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
-        <span className="inline-flex items-center gap-2 text-xs font-black text-slate-700 dark:text-slate-200"><Eye className="h-4 w-4" />当前第 {selectedPage} 页</span>
-        <label className="inline-flex items-center gap-2 text-xs text-slate-500"><input type="checkbox" checked={showExcluded} onChange={(event) => setShowExcluded(event.target.checked)} className="accent-emerald-700" />显示已排除页面</label>
+        <span className="inline-flex items-center gap-2 text-xs font-black text-slate-700 dark:text-slate-200"><Eye className="h-4 w-4" />OCR 第 {selectedPage} 页</span>
+        <span className="text-[10px] text-slate-400">仅显示已解析且未排除的页面 · 共 {visiblePages.length} 页</span>
       </div>
       <div ref={scrollRef} onScroll={updateCurrentPage} className="min-h-0 flex-1 scroll-smooth overflow-y-auto p-3">
         <div className="mx-auto max-w-5xl space-y-4">
@@ -464,13 +462,8 @@ const ContinuousPageReader = ({
                   <div className="flex items-center gap-2"><strong className="text-xs">第 {page.pageNumber} 页</strong>{!page.included && <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">已排除</span>}</div>
                   <div className="flex items-center gap-2 text-[10px] text-slate-400"><span>{page.parseStatus === "ready" ? "已解析" : page.parseStatus === "processing" ? "解析中" : page.parseStatus === "failed" ? "解析失败" : "未解析"}</span><span>·</span><span>{page.ragStatus === "indexed" ? `RAG 已入库 ${page.ragChunkCount} 块` : page.ragStatus === "indexing" ? "RAG 入库中" : page.ragStatus === "excluded" ? "不参与 RAG" : "RAG 未入库"}</span></div>
                 </header>
-                <div className={`grid gap-3 p-3 ${page.parseStatus === "ready" ? "lg:grid-cols-2" : "grid-cols-1"}`}>
-                  <figure>
-                    <figcaption className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-400">原始页面</figcaption>
-                    <img loading="lazy" src={imageUrl} alt={`原始资料第 ${page.pageNumber} 页`} className="w-full rounded-lg border border-slate-200 bg-white object-contain dark:border-zinc-700" style={{ aspectRatio: "210 / 297" }} />
-                  </figure>
-                  {page.parseStatus === "ready" && (
-                    <figure>
+                <div className="p-3">
+                    <figure className="mx-auto max-w-3xl">
                       <figcaption className="mb-2 text-[10px] font-black uppercase tracking-wide text-emerald-700">OCR 识别版</figcaption>
                       <div className="relative overflow-hidden rounded-lg border border-emerald-200 bg-white">
                         <img loading="lazy" src={imageUrl} alt={`第 ${page.pageNumber} 页 OCR 识别底图`} className="w-full object-contain opacity-25" style={{ aspectRatio: "210 / 297" }} />
@@ -480,7 +473,6 @@ const ContinuousPageReader = ({
                       </div>
                       <details className="mt-2 rounded-lg bg-slate-50 p-2 text-xs dark:bg-zinc-950"><summary className="cursor-pointer font-bold text-slate-600 dark:text-slate-300">查看提取文本（{pageChunks.length} 块）</summary><div className="mt-2 max-h-48 space-y-2 overflow-y-auto text-slate-500">{pageChunks.map((chunk) => <p key={chunk.id}>{chunk.text}</p>)}</div></details>
                     </figure>
-                  )}
                 </div>
               </article>
             );
@@ -506,8 +498,9 @@ export default function ResourceLibraryEditor({
   const [kind, setKind] = useState<"all" | ResourceKind>("all");
   const [dialog, setDialog] = useState<"upload" | "edit" | null>(null);
   const [inspectorTab, setInspectorTab] = useState<
-    "overview" | "pages" | "structure" | "rag" | "review"
+    "overview" | "pages" | "rag" | "review"
   >("overview");
+  const [readingMode, setReadingMode] = useState<"pdf" | "ocr">("pdf");
   const [pageStart, setPageStart] = useState(1);
   const [pageEnd, setPageEnd] = useState(20);
   const [selectedSuggestions, setSelectedSuggestions] = useState<string[]>([]);
@@ -719,14 +712,37 @@ export default function ResourceLibraryEditor({
               </button>
             </header>
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px] flex-1 min-h-0">
-              <ContinuousPageReader resourceId={detail.id} pages={detail.pages} chunks={detail.chunks} selectedPage={selectedPage} onSelectPage={onOpenPage} />
+              <div className="flex min-h-0 flex-col bg-slate-200/50 dark:bg-zinc-950">
+                <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
+                  <div className="inline-flex rounded-lg bg-slate-100 p-1 dark:bg-zinc-800">
+                    <button onClick={() => setReadingMode("pdf")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${readingMode === "pdf" ? "bg-white text-slate-900 shadow-sm dark:bg-zinc-700 dark:text-white" : "text-slate-500"}`}>PDF 原文</button>
+                    <button onClick={() => {
+                      setReadingMode("ocr");
+                      const current = detail.pages.find((page) => page.pageNumber === selectedPage);
+                      if (!current?.included || current.parseStatus !== "ready") {
+                        const firstReady = detail.pages.find((page) => page.included && page.parseStatus === "ready");
+                        if (firstReady) onOpenPage(firstReady.pageNumber);
+                      }
+                    }} className={`rounded-md px-3 py-1.5 text-xs font-bold ${readingMode === "ocr" ? "bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-300" : "text-slate-500"}`}>OCR 识别</button>
+                  </div>
+                  <span className="text-xs font-bold text-slate-500">第 {selectedPage} 页</span>
+                </div>
+                <div className="min-h-0 flex-1 p-3">
+                  {readingMode === "pdf" ? (
+                    <object key={`${detail.id}-${selectedPage}`} data={`${detail.publicUrl}#page=${selectedPage}&view=FitH`} type="application/pdf" className="h-full min-h-[560px] w-full rounded-lg bg-white shadow-sm">
+                      <a href={`${detail.publicUrl}#page=${selectedPage}`} target="_blank" rel="noreferrer" className="text-emerald-700">打开 PDF</a>
+                    </object>
+                  ) : (
+                    <OcrPageReader resourceId={detail.id} pages={detail.pages} chunks={detail.chunks} selectedPage={selectedPage} onSelectPage={onOpenPage} />
+                  )}
+                </div>
+              </div>
               <aside className="flex min-h-0 flex-col border-l border-slate-200/70 dark:border-zinc-800">
-                <div className="grid grid-cols-5 border-b border-slate-200/70 dark:border-zinc-800">
+                <div className="grid grid-cols-4 border-b border-slate-200/70 dark:border-zinc-800">
                   {(
                     [
                       ["overview", "概览"],
                       ["pages", "页面"],
-                      ["structure", "结构"],
                       ["rag", "RAG"],
                       ["review", `待审核 ${pending.length}`],
                     ] as const
@@ -877,34 +893,6 @@ export default function ResourceLibraryEditor({
                         <p><span className="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1" />已解析　<span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1" />处理中　<span className="inline-block w-2 h-2 rounded-full bg-slate-300 mr-1" />未解析</p>
                         <p>上传原件保存在服务端原件目录；解析文本与引用索引保存在资料库数据库中。未来在线版可增加桌面同步目录。</p>
                       </div>
-                    </div>
-                  )}
-                  {inspectorTab === "structure" && (
-                    <div className="space-y-1">
-                      {detail.chunks
-                        .filter((chunk) => chunk.level !== "document")
-                        .map((chunk) => (
-                          <button
-                            key={chunk.id}
-                            onClick={() => onOpenPage(chunk.pageStart)}
-                            className={`w-full text-left rounded-lg px-2.5 py-2 hover:bg-slate-50 dark:hover:bg-zinc-900 ${chunk.level === "content" ? "pl-6" : ""}`}
-                          >
-                            <span
-                              className={`block truncate ${chunk.level === "section" ? "text-sm font-bold text-slate-700 dark:text-slate-200" : "text-xs text-slate-500"}`}
-                            >
-                              {chunk.title}
-                            </span>
-                            <span className="text-[10px] text-slate-400">
-                              第 {chunk.pageStart} 页
-                            </span>
-                          </button>
-                        ))}
-                      {!detail.chunks.length && (
-                        <div className="py-16 text-center text-sm text-slate-400">
-                          <Clock3 className="w-6 h-6 mx-auto mb-2" />
-                          等待解析
-                        </div>
-                      )}
                     </div>
                   )}
                   {inspectorTab === "rag" && (
