@@ -149,6 +149,9 @@ const toSuggestion = (row: JsonObject): DiscoverySuggestion => ({
     ? String(row.existing_node_id)
     : undefined,
   targetNodeId: row.target_node_id ? String(row.target_node_id) : undefined,
+  primaryMotherId: row.primary_mother_id
+    ? String(row.primary_mother_id)
+    : undefined,
   createdNodeId: row.created_node_id ? String(row.created_node_id) : undefined,
   createdAt: String(row.created_at),
   reviewedAt: row.reviewed_at ? String(row.reviewed_at) : undefined,
@@ -937,8 +940,8 @@ export class ResourceRepository {
     const insert = this.database.prepare(`
       INSERT INTO discovery_suggestions
       (id, resource_id, kind, status, proposed_type, proposed_name, description, aliases_json, confidence, rationale, source_chunk_ids_json,
-       existing_node_id, target_node_id, created_node_id, created_at, reviewed_at)
-      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)
+       existing_node_id, target_node_id, primary_mother_id, created_node_id, created_at, reviewed_at)
+      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)
     `);
     this.database.transaction(() => {
       if (pageRange) remove.run(resourceId, pageRange.start, pageRange.end);
@@ -957,6 +960,7 @@ export class ResourceRepository {
           JSON.stringify(item.sourceChunkIds),
           item.existingNodeId ?? null,
           item.targetNodeId ?? null,
+          item.primaryMotherId ?? null,
           item.createdAt,
         ),
       );
@@ -1462,6 +1466,7 @@ export class ResourceRepository {
     id: string,
     decision: "accepted" | "ignored" | "merged",
     mergeTargetId?: string,
+    primaryMotherId?: string | null,
   ) {
     const row = this.database
       .prepare("SELECT * FROM discovery_suggestions WHERE id = ?")
@@ -1487,6 +1492,12 @@ export class ResourceRepository {
             aliases: suggestion.aliases,
             subject: resource?.subject ?? "",
             grade: resource?.grade ?? "",
+            primaryMotherId:
+              suggestion.proposedType === "knowledge"
+                ? primaryMotherId === undefined
+                  ? suggestion.primaryMotherId
+                  : primaryMotherId ?? undefined
+                : undefined,
             source: "ai-confirmed",
           }).id;
         if (nodeId && sourceChunk)

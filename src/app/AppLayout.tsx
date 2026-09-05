@@ -1,4 +1,4 @@
-import { ChevronDown, GraduationCap, HelpCircle, Menu, Sparkles, X } from 'lucide-react';
+import { Boxes, ChevronDown, GraduationCap, HelpCircle, Menu, Network, Sparkles, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import type { SchoolClass, TeacherProfile } from '../domain/types';
 import type { NavGroup, PageId } from './navigation';
@@ -46,7 +46,7 @@ export default function AppLayout({
   return (
     <div className="h-dvh overflow-hidden bg-slate-100 dark:bg-zinc-950 text-slate-800 dark:text-slate-100 font-sans flex flex-col antialiased">
       <header className="app-shell-header flex-none bg-white/75 dark:bg-zinc-900/75 backdrop-blur-2xl border-b border-slate-200/70 dark:border-zinc-800/80 px-3 sm:px-6 flex items-center justify-between z-30">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <button
             type="button"
             onClick={() => setMobileNavOpen(true)}
@@ -56,18 +56,40 @@ export default function AppLayout({
           >
             <Menu className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-[20px] bg-emerald-700 dark:bg-emerald-600 flex items-center justify-center text-white shadow-lg shadow-emerald-900/10">
-            <GraduationCap className="w-5.5 h-5.5" />
+          <div className="hidden items-center gap-3 sm:flex">
+            <div className="w-10 h-10 rounded-[20px] bg-emerald-700 dark:bg-emerald-600 flex items-center justify-center text-white shadow-lg shadow-emerald-900/10">
+              <GraduationCap className="w-5.5 h-5.5" />
+            </div>
+            <div>
+              <h1 className="text-sm font-black text-slate-800 dark:text-slate-100 tracking-tight flex items-center gap-1.5">
+                教师 AI 助手
+                <span className="text-[10px] bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 font-bold px-1.5 py-0.2 rounded-full border border-emerald-500/10">
+                  PRO v1.5
+                </span>
+              </h1>
+              <p className="hidden text-[10px] text-slate-400 sm:block">教学证据采集、作业 AI 批改、学情诊断和学生画像平台</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-sm font-black text-slate-800 dark:text-slate-100 tracking-tight flex items-center gap-1.5">
-              教师 AI 助手
-              <span className="text-[10px] bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 font-bold px-1.5 py-0.2 rounded-full border border-emerald-500/10">
-                PRO v1.5
-              </span>
-            </h1>
-            <p className="hidden sm:block text-[10px] text-slate-400">教学证据采集、作业 AI 批改、学情诊断和学生画像平台</p>
-          </div>
+          {isImmersiveWorkspace && (
+            <div className="flex min-w-0 items-center rounded-xl border border-slate-200/80 bg-slate-100/80 p-0.5 sm:hidden dark:border-zinc-700/80 dark:bg-zinc-800/80">
+              <button
+                type="button"
+                onClick={() => selectPage('knowledge-graph')}
+                className={`flex min-h-9 items-center gap-1 rounded-[10px] px-2.5 text-[11px] font-bold ${activePage === 'knowledge-graph' ? 'bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-200' : 'text-slate-500 dark:text-zinc-400'}`}
+              >
+                <Network className="h-3.5 w-3.5" />
+                知识图谱
+              </button>
+              <button
+                type="button"
+                onClick={() => selectPage('library-editor')}
+                className={`flex min-h-9 items-center gap-1 rounded-[10px] px-2.5 text-[11px] font-bold ${activePage === 'library-editor' ? 'bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-200' : 'text-slate-500 dark:text-zinc-400'}`}
+              >
+                <Boxes className="h-3.5 w-3.5" />
+                资料编辑
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
@@ -92,7 +114,7 @@ export default function AppLayout({
             </select>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="hidden items-center gap-2 sm:flex">
             <span className="hidden sm:inline text-xs font-semibold text-slate-700 dark:text-slate-200">{teacherProfile.nickname}</span>
             <div className="w-8 h-8 rounded-full bg-slate-200/90 dark:bg-zinc-800 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center text-xs">
               {(teacherProfile.nickname.trim() || teacherProfile.realName.trim() || '师')[0]}

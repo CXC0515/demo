@@ -110,6 +110,7 @@ const reviewSchema = z
   .object({
     decision: z.enum(["accepted", "ignored", "merged"]),
     mergeTargetId: z.string().min(1).optional(),
+    primaryMotherId: z.string().min(1).nullable().optional(),
   })
   .refine((value) => value.decision !== "merged" || value.mergeTargetId, {
     message: "MERGE_TARGET_REQUIRED",
@@ -720,6 +721,7 @@ router.post(
       request.params.suggestionId,
       parsed.data.decision,
       parsed.data.mergeTargetId,
+      parsed.data.primaryMotherId,
     );
     if (!suggestion) {
       response.status(404).json({ code: "SUGGESTION_NOT_FOUND" });

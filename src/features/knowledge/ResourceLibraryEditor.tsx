@@ -29,6 +29,7 @@ import {
 import {
   DiscoverySuggestion,
   KnowledgeEntity,
+  KnowledgeRelationType,
   LibraryResource,
   ResourceChunk,
   ResourceDetail,
@@ -49,6 +50,7 @@ import {
 import {
   entityLabels,
   entityTones,
+  relationLabels,
   resourceKindLabels,
   resourceStatusLabels,
   resourceStatusTones,
@@ -367,21 +369,37 @@ const MetadataDialog = ({
 const SuggestionItem = ({
   item,
   nodes,
+  subject,
   onReview,
   selected,
   onToggle,
 }: {
   item: DiscoverySuggestion;
   nodes: KnowledgeEntity[];
+  subject: string;
   onReview: (
     decision: "accepted" | "ignored" | "merged",
-    target?: string,
+    options?: { mergeTargetId?: string; primaryMotherId?: string | null },
   ) => void;
   selected: boolean;
   onToggle: () => void;
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [mergeTarget, setMergeTarget] = useState("");
+  const [primaryMotherId, setPrimaryMotherId] = useState(
+    item.primaryMotherId ?? "",
+  );
+  const possibleMothers = nodes.filter(
+    (node) =>
+      node.subject === subject &&
+      ["domain", "topic", "knowledge"].includes(node.type),
+  );
+  const relationTarget = item.targetNodeId
+    ? nodes.find((node) => node.id === item.targetNodeId)
+    : undefined;
+  const relationSource = item.existingNodeId
+    ? nodes.find((node) => node.id === item.existingNodeId)
+    : undefined;
   const entityType = [
     "knowledge",
     "question-type",
@@ -410,6 +428,8 @@ const SuggestionItem = ({
           >
             {item.kind === "source-link"
               ? "已有匹配"
+              : item.kind === "relation"
+                ? relationLabels[item.proposedType as KnowledgeRelationType]
               : entityLabels[entityType]}
           </span>
           <span className="block text-sm font-bold text-slate-800 dark:text-slate-100 mt-1 truncate">
@@ -420,7 +440,14 @@ const SuggestionItem = ({
           </span>
         </button>
         <button
-          onClick={() => onReview("accepted")}
+          onClick={() =>
+            onReview(
+              "accepted",
+              item.kind === "node" && item.proposedType === "knowledge"
+                ? { primaryMotherId: primaryMotherId || null }
+                : undefined,
+            )
+          }
           className="w-8 h-8 rounded-lg grid place-items-center text-emerald-700 hover:bg-emerald-50"
           title="同意"
         >
@@ -438,6 +465,31 @@ const SuggestionItem = ({
         <div className="ml-6 mt-3 p-3 rounded-lg bg-slate-50 dark:bg-zinc-900/60 text-xs text-slate-600 dark:text-slate-300 space-y-2">
           <p>{item.description || "暂无说明"}</p>
           <p className="text-slate-400">{item.rationale}</p>
+          {item.kind === "relation" && item.proposedType === "parent" && (
+            <p className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 font-bold text-violet-800 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-200">
+              子节点：{relationSource?.name ?? "待确认"} → 主要母节点：
+              {relationTarget?.name ?? "待确认"}
+            </p>
+          )}
+          {item.kind === "node" && item.proposedType === "knowledge" && (
+            <label className="block space-y-1.5">
+              <span className="font-bold text-slate-500 dark:text-zinc-300">
+                建议主要母节点
+              </span>
+              <select
+                value={primaryMotherId}
+                onChange={(event) => setPrimaryMotherId(event.target.value)}
+                className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-emerald-600 dark:border-zinc-700 dark:bg-zinc-900"
+              >
+                <option value="">主要母节点待确认</option>
+                {possibleMothers.map((node) => (
+                  <option key={node.id} value={node.id}>
+                    {entityLabels[node.type]} · {node.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {(item.kind === "node" || item.kind === "source-link") && (
             <div className="flex gap-2">
               <select
@@ -454,7 +506,9 @@ const SuggestionItem = ({
               </select>
               <button
                 disabled={!mergeTarget}
-                onClick={() => onReview("merged", mergeTarget)}
+                onClick={() =>
+                  onReview("merged", { mergeTargetId: mergeTarget })
+                }
                 className="btn-secondary px-3 disabled:opacity-40"
               >
                 合并
@@ -623,10 +677,10 @@ export default function ResourceLibraryEditor({
   const review = async (
     id: string,
     decision: "accepted" | "ignored" | "merged",
-    target?: string,
+    options?: { mergeTargetId?: string; primaryMotherId?: string | null },
   ) => {
     try {
-      await reviewSuggestion(id, decision, target);
+      await reviewSuggestion(id, decision, options);
       await onDataChanged(detail?.id);
       onShowToast(
         decision === "accepted"
@@ -1074,6 +1128,7 @@ export default function ResourceLibraryEditor({
                           <SuggestionItem
                             item={item}
                             nodes={nodes}
+                            subject={detail?.subject ?? ""}
                             selected={selectedSuggestions.includes(item.id)}
                             onToggle={() =>
                               setSelectedSuggestions((current) =>
@@ -1082,8 +1137,8 @@ export default function ResourceLibraryEditor({
                                   : [...current, item.id],
                               )
                             }
-                            onReview={(decision, target) =>
-                              void review(item.id, decision, target)
+                            onReview={(decision, options) =>
+                              void review(item.id, decision, options)
                             }
                           />
                         </React.Fragment>

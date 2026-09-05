@@ -151,7 +151,7 @@ export default function KnowledgeLibrary({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 sm:gap-4 animate-fade-in" id="knowledge-library-page">
-      <div className="adaptive-workspace-topbar flex flex-none items-end justify-between gap-3">
+      <div className="adaptive-workspace-topbar hidden flex-none items-end justify-between gap-3 sm:flex">
         <div className="adaptive-workspace-heading">
           <p className="hidden text-xs font-bold text-emerald-700 uppercase sm:block">资料库</p>
           <h2 className="text-xl font-black text-slate-900 dark:text-slate-50 sm:mt-1 sm:text-2xl">

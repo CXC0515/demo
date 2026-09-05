@@ -35,26 +35,24 @@ const relationTypes = [
   "explains",
 ] as const;
 
+const discoverySchema = z.object({
+  kind: z.enum(["node", "relation", "source-link"]),
+  proposedType: z.union([z.enum(entityTypes), z.enum(relationTypes)]),
+  proposedName: z.string().trim().min(1).max(120),
+  description: z.string().max(1000).default(""),
+  aliases: z.array(z.string().trim().min(1).max(80)).max(10).default([]),
+  confidence: z.number().min(0).max(1),
+  rationale: z.string().max(500).default(""),
+  sourceChunkIds: z.array(z.string().min(1)).min(1).max(12),
+  existingNodeId: z.string().nullable().default(null),
+  targetNodeId: z.string().nullable().default(null),
+  primaryMotherId: z.string().nullable().default(null),
+});
+
 const modelResultSchema = z.object({
   summary: z.string().max(2000).default(""),
   tags: z.array(z.string().trim().min(1).max(30)).max(12).default([]),
-  discoveries: z
-    .array(
-      z.object({
-        kind: z.enum(["node", "relation", "source-link"]),
-        proposedType: z.union([z.enum(entityTypes), z.enum(relationTypes)]),
-        proposedName: z.string().trim().min(1).max(120),
-        description: z.string().max(1000).default(""),
-        aliases: z.array(z.string().trim().min(1).max(80)).max(10).default([]),
-        confidence: z.number().min(0).max(1),
-        rationale: z.string().max(500).default(""),
-        sourceChunkIds: z.array(z.string().min(1)).min(1).max(12),
-        existingNodeId: z.string().nullable().default(null),
-        targetNodeId: z.string().nullable().default(null),
-      }),
-    )
-    .max(80)
-    .default([]),
+  discoveries: z.array(z.unknown()).max(80).default([]),
 });
 
 export interface ResourceAnalysisResult {
@@ -162,6 +160,8 @@ export class ResourceAnalyzer {
         id: node.id,
         name: node.name,
         type: node.type,
+        subject: node.subject,
+        primaryMotherId: node.primaryMotherId ?? null,
         aliases: node.aliases,
         description: node.description,
       }));
@@ -169,8 +169,12 @@ export class ResourceAnalyzer {
         "你是教师个人资料库的内容分析器。请理解资料，但只能根据提供的原文提出可追溯建议。",
         "对象严格区分：knowledge 知识点、question-type 题型、method 解法、example 例题、ability 能力点、error 错误类型。章节和原文块不是知识节点。",
         "优先匹配已有节点。匹配时 kind=source-link 且 existingNodeId 必须引用目录真实 ID；确实没有对应项才建议 kind=node。",
-        "关系建议 kind=relation，existingNodeId 是关系起点，targetNodeId 是终点。所有来源必须引用真实 sourceChunkIds。不要把每个标题都当知识点。",
-        '请输出 JSON：{"summary":"","tags":[],"discoveries":[{"kind":"node|relation|source-link","proposedType":"knowledge|question-type|method|example|ability|error|parent|prerequisite|related|confusable|examines|applies-to|demonstrates|explains","proposedName":"","description":"","aliases":[],"confidence":0.8,"rationale":"","sourceChunkIds":[],"existingNodeId":null,"targetNodeId":null}]}。',
+        "已有图谱中的 domain、topic、knowledge 构成知识主干。每个 knowledge 知识点最多有一个主要母节点，主要母节点必须是同学科的 domain、topic 或 knowledge。",
+        "提出新的 knowledge 节点时，必须结合已有知识主干判断 primaryMotherId；能够明确归属时引用目录中的真实 ID，不确定时必须为 null，不得猜测。题型、解法、例题、能力点和错误类型不进入主要母链，primaryMotherId 必须为 null。",
+        "为两个已有知识节点提出母子关系时使用 kind=relation、proposedType=parent，existingNodeId 是子节点，targetNodeId 是主要母节点。其他关系中 existingNodeId 是关系起点，targetNodeId 是终点。",
+        "kind 只能是 node、relation、source-link 三者之一。主要母节点不是新的 kind，必须填写在 node 的 primaryMotherId 字段，或使用 proposedType=parent 的 relation。",
+        "所有来源必须引用真实 sourceChunkIds。不要把每个标题都当知识点。不要为了填满结构而创造原文没有支持的节点或关系。",
+        '请输出 JSON：{"summary":"","tags":[],"discoveries":[{"kind":"node|relation|source-link","proposedType":"knowledge|question-type|method|example|ability|error|parent|prerequisite|related|confusable|examines|applies-to|demonstrates|explains","proposedName":"","description":"","aliases":[],"confidence":0.8,"rationale":"","sourceChunkIds":[],"existingNodeId":null,"targetNodeId":null,"primaryMotherId":null}]}。',
         `资料：${JSON.stringify({ title: resource.title, kind: resource.kind, subject: resource.subject, grade: resource.grade })}`,
         `已有图谱：${JSON.stringify(catalog)}`,
         `原文块：${JSON.stringify(contentChunks.map((chunk) => ({ id: chunk.id, page: chunk.pageStart, text: chunk.text.slice(0, 2500) })))}`,
@@ -204,7 +208,29 @@ export class ResourceAnalyzer {
       const result = modelResultSchema.parse(extractJson(content));
       const validChunkIds = new Set(contentChunks.map((chunk) => chunk.id));
       const validNodeIds = new Set(nodes.map((node) => node.id));
-      const suggestions = result.discoveries.flatMap((item) => {
+      const validMotherIds = new Set(
+        nodes
+          .filter(
+            (node) =>
+              node.subject === resource.subject &&
+              ["domain", "topic", "knowledge"].includes(node.type),
+          )
+          .map((node) => node.id),
+      );
+      const discoveries = result.discoveries.flatMap((rawItem, index) => {
+        const parsed = discoverySchema.safeParse(rawItem);
+        if (parsed.success) return [parsed.data];
+        console.warn(
+          JSON.stringify({
+            event: "resource_ai_discovery_ignored",
+            resourceId: resource.id,
+            discoveryIndex: index,
+            reason: parsed.error.issues[0]?.message ?? "INVALID_DISCOVERY",
+          }),
+        );
+        return [];
+      });
+      const suggestions = discoveries.flatMap((item) => {
         const sourceChunkIds = item.sourceChunkIds.filter((id) =>
           validChunkIds.has(id),
         );
@@ -213,6 +239,16 @@ export class ResourceAnalyzer {
           return [];
         if (item.targetNodeId && !validNodeIds.has(item.targetNodeId))
           return [];
+        if (item.primaryMotherId && !validMotherIds.has(item.primaryMotherId))
+          return [];
+        if (item.proposedType !== "knowledge" && item.primaryMotherId)
+          return [];
+        if (
+          item.kind === "relation" &&
+          (!item.existingNodeId || !item.targetNodeId)
+        )
+          return [];
+        if (item.kind === "source-link" && !item.existingNodeId) return [];
         return [
           {
             id: randomUUID(),
@@ -228,6 +264,7 @@ export class ResourceAnalyzer {
             sourceChunkIds,
             existingNodeId: item.existingNodeId ?? undefined,
             targetNodeId: item.targetNodeId ?? undefined,
+            primaryMotherId: item.primaryMotherId ?? undefined,
             createdAt: new Date().toISOString(),
           },
         ];

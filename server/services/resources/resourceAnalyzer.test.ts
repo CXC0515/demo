@@ -117,3 +117,120 @@ test("unconfigured analyzer still proposes traceable matches to existing nodes",
   assert.equal(result.suggestions[0].existingNodeId, "kn-metaphor");
   assert.deepEqual(result.suggestions[0].sourceChunkIds, ["chunk-1"]);
 });
+
+test("configured analyzer receives the mother chain and preserves an AI-proposed primary mother", async () => {
+  const mathResource: LibraryResource = {
+    ...resource,
+    id: "math-resource",
+    title: "八年级数学",
+    subject: "数学",
+    grade: "八年级",
+  };
+  const chunks = [
+    {
+      id: "math-chunk-1",
+      resourceId: mathResource.id,
+      level: "content" as const,
+      title: "三角形的中线",
+      summary: "",
+      text: "连接三角形一个顶点与它对边中点的线段叫做三角形的中线。",
+      tags: [],
+      pageStart: 18,
+      pageEnd: 18,
+      order: 1,
+    },
+  ];
+  const nodes: KnowledgeEntity[] = [
+    {
+      id: "kd-math-geometry",
+      code: "MATH-D-000001",
+      name: "图形与几何",
+      type: "domain",
+      description: "",
+      aliases: [],
+      subject: "数学",
+      grade: "通用",
+      stageIds: [],
+      tags: [],
+      source: "base",
+      trainable: false,
+      sortOrder: 0,
+      version: 1,
+      status: "active",
+      createdAt: "",
+      updatedAt: "",
+    },
+    {
+      id: "kt-math-triangle",
+      code: "MATH-T-000001",
+      name: "三角形",
+      type: "topic",
+      description: "",
+      aliases: [],
+      subject: "数学",
+      grade: "通用",
+      stageIds: [],
+      tags: [],
+      primaryMotherId: "kd-math-geometry",
+      source: "base",
+      trainable: false,
+      sortOrder: 0,
+      version: 1,
+      status: "active",
+      createdAt: "",
+      updatedAt: "",
+    },
+  ];
+  const originalFetch = globalThis.fetch;
+  let requestBody = "";
+  globalThis.fetch = async (_input, init) => {
+    requestBody = String(init?.body ?? "");
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "识别到三角形的中线",
+                tags: ["三角形"],
+                discoveries: [
+                  {
+                    kind: "node",
+                    proposedType: "knowledge",
+                    proposedName: "三角形的中线",
+                    description: "三角形中线的定义",
+                    aliases: [],
+                    confidence: 0.98,
+                    rationale: "原文给出定义",
+                    sourceChunkIds: ["math-chunk-1"],
+                    existingNodeId: null,
+                    targetNodeId: null,
+                    primaryMotherId: "kt-math-triangle",
+                  },
+                  {
+                    kind: "mother-node",
+                    proposedType: "parent",
+                    proposedName: "无效建议不应拖垮整批结果",
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+  try {
+    const result = await new ResourceAnalyzer({
+      apiKey: "test-key",
+      baseUrl: "https://model.example/v1",
+      visionModel: "test-model",
+    }).analyze(mathResource, chunks, nodes);
+    assert.equal(result.suggestions[0].primaryMotherId, "kt-math-triangle");
+    assert.match(requestBody, /primaryMotherId/);
+    assert.match(requestBody, /kd-math-geometry/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

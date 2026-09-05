@@ -290,6 +290,13 @@ const migrations = [
       ALTER TABLE resource_processing_jobs ADD COLUMN metrics_json TEXT NOT NULL DEFAULT '{}';
     `,
   },
+  {
+    version: 7,
+    sql: `
+      ALTER TABLE discovery_suggestions ADD COLUMN primary_mother_id TEXT
+        REFERENCES knowledge_nodes(id) ON DELETE SET NULL;
+    `,
+  },
 ];
 
 export const runResourceMigrations = (database: Database.Database) => {
