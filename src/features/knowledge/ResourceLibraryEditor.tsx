@@ -6,6 +6,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "katex/dist/katex.min.css";
 import {
+  ArrowLeft,
   BookOpen,
   Check,
   CheckCheck,
@@ -59,6 +60,8 @@ interface ResourceLibraryEditorProps {
   nodes: KnowledgeEntity[];
   selectedPage: number;
   loading: boolean;
+  narrowLayout: boolean;
+  openReaderOnCompact: boolean;
   onSelectResource: (id: string) => void;
   onOpenPage: (page: number) => void;
   onDataChanged: (resourceId?: string) => Promise<void>;
@@ -76,7 +79,7 @@ const emptyMetadata: ResourceMetadataInput = {
 };
 
 const fieldClass =
-  "w-full px-3 py-2 rounded-xl bg-white/80 dark:bg-zinc-900/70 border border-slate-200 dark:border-zinc-800 text-sm outline-none focus:border-emerald-600";
+  "w-full px-3 py-2 rounded-xl bg-white/80 dark:bg-zinc-900/70 border border-slate-200 dark:border-zinc-800 text-base sm:text-sm outline-none focus:border-emerald-600";
 
 const describeParseError = (code?: string) =>
   ({
@@ -226,7 +229,7 @@ const MetadataDialog = ({
       <form
         onSubmit={submit}
         onMouseDown={(event) => event.stopPropagation()}
-        className="glass-panel w-full max-w-xl rounded-2xl overflow-hidden shadow-2xl"
+        className="glass-panel flex max-h-[calc(100dvh-2rem)] w-full max-w-xl flex-col overflow-hidden rounded-2xl shadow-2xl"
       >
         <div className="px-5 py-4 border-b border-slate-200/70 dark:border-zinc-800 flex items-center justify-between">
           <div>
@@ -246,12 +249,12 @@ const MetadataDialog = ({
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="p-5 grid grid-cols-2 gap-4">
+        <div className="grid flex-1 grid-cols-1 gap-4 overflow-y-auto p-4 sm:grid-cols-2 sm:p-5">
           {!resource && (
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
-              className="col-span-2 h-28 border border-dashed border-slate-300 dark:border-zinc-700 rounded-xl hover:border-emerald-600 hover:bg-emerald-50/40 transition-colors grid place-items-center text-center"
+              className="h-28 border border-dashed border-slate-300 dark:border-zinc-700 rounded-xl hover:border-emerald-600 hover:bg-emerald-50/40 transition-colors grid place-items-center text-center sm:col-span-2"
             >
               <input
                 ref={inputRef}
@@ -273,7 +276,7 @@ const MetadataDialog = ({
               </span>
             </button>
           )}
-          <label className="col-span-2 space-y-1">
+          <label className="space-y-1 sm:col-span-2">
             <span className="text-xs font-bold text-slate-500">资料名称</span>
             <input
               required
@@ -550,6 +553,8 @@ export default function ResourceLibraryEditor({
   nodes,
   selectedPage,
   loading,
+  narrowLayout,
+  openReaderOnCompact,
   onSelectResource,
   onOpenPage,
   onDataChanged,
@@ -564,6 +569,7 @@ export default function ResourceLibraryEditor({
   const [readingMode, setReadingMode] = useState<"pdf" | "ocr">("pdf");
   const [pdfPage, setPdfPage] = useState(selectedPage);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [compactSurface, setCompactSurface] = useState<"library" | "reader">("library");
   const [pageStart, setPageStart] = useState(1);
   const [pageEnd, setPageEnd] = useState(20);
   const [selectedSuggestions, setSelectedSuggestions] = useState<string[]>([]);
@@ -591,6 +597,13 @@ export default function ResourceLibraryEditor({
   useEffect(() => {
     if (detail) setPdfPage(Math.min(selectedPage, detail.pageCount ?? selectedPage));
   }, [detail?.id]);
+  useEffect(() => {
+    if (narrowLayout && openReaderOnCompact && detail) setCompactSurface("reader");
+  }, [detail?.id, narrowLayout, openReaderOnCompact]);
+  const selectResource = (resourceId: string) => {
+    setCompactSurface("reader");
+    onSelectResource(resourceId);
+  };
   const navigatePage = (page: number) => {
     onOpenPage(page);
     if (readingMode === "pdf") setPdfPage(page);
@@ -642,12 +655,12 @@ export default function ResourceLibraryEditor({
     }
   };
   return (
-    <div className="grid h-[calc(100vh-190px)] min-h-[680px] grid-cols-1 gap-4 lg:grid-cols-[240px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)]">
-      <aside className="glass-panel flex min-h-0 flex-col overflow-hidden rounded-2xl">
+    <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:min-h-[680px] lg:grid-cols-[240px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)]">
+      <aside className={`glass-panel min-h-0 flex-col overflow-hidden rounded-2xl ${compactSurface === "reader" ? "hidden lg:flex" : "flex"}`}>
         <div className="p-3 border-b border-slate-200/70 dark:border-zinc-800 space-y-3">
           <button
             onClick={() => setDialog("upload")}
-            className="btn-primary w-full py-2.5 text-sm flex items-center justify-center gap-2"
+            className="btn-primary flex min-h-11 w-full items-center justify-center gap-2 py-2.5 text-sm"
           >
             <Plus className="w-4 h-4" />
             上传资料
@@ -658,7 +671,7 @@ export default function ResourceLibraryEditor({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="搜索资料"
-              className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 text-sm outline-none"
+              className="min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-base outline-none sm:text-sm dark:border-zinc-800 dark:bg-zinc-900/60"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -682,8 +695,8 @@ export default function ResourceLibraryEditor({
           {filtered.map((resource) => (
             <button
               key={resource.id}
-              onClick={() => onSelectResource(resource.id)}
-              className={`w-full p-3.5 text-left transition-colors ${detail?.id === resource.id ? "bg-emerald-700/10 border-l-2 border-emerald-700" : "hover:bg-slate-50 dark:hover:bg-zinc-900/50 border-l-2 border-transparent"}`}
+              onClick={() => selectResource(resource.id)}
+              className={`min-h-16 w-full p-3.5 text-left transition-colors ${detail?.id === resource.id ? "bg-emerald-700/10 border-l-2 border-emerald-700" : "hover:bg-slate-50 dark:hover:bg-zinc-900/50 border-l-2 border-transparent"}`}
             >
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-zinc-800 grid place-items-center shrink-0">
@@ -694,16 +707,16 @@ export default function ResourceLibraryEditor({
                     {resource.title}
                   </p>
                   <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[10px] text-slate-400">
+                    <span className="text-xs text-slate-400">
                       {resourceKindLabels[resource.kind]}
                     </span>
                     <span
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${resourceStatusTones[resource.status]}`}
+                      className={`rounded px-1.5 py-0.5 text-xs font-bold ${resourceStatusTones[resource.status]}`}
                     >
                       {resourceStatusLabels[resource.status]}
                     </span>
                     {resource.isPrimary && (
-                      <span className="text-[10px] font-bold text-emerald-700">
+                      <span className="text-xs font-bold text-emerald-700">
                         主要来源
                       </span>
                     )}
@@ -722,13 +735,13 @@ export default function ResourceLibraryEditor({
         </div>
       </aside>
 
-      <section className="glass-panel min-h-0 min-w-0 overflow-hidden rounded-2xl">
+      <section className={`glass-panel h-full min-h-0 min-w-0 overflow-hidden rounded-2xl ${compactSurface === "library" ? "hidden lg:block" : "block"}`}>
         {loading && !detail ? (
           <div className="h-full grid place-items-center text-slate-400">
             <LoaderCircle className="w-6 h-6 animate-spin" />
           </div>
         ) : !detail ? (
-          <div className="h-full min-h-[690px] grid place-items-center text-center">
+          <div className="grid h-full min-h-80 place-items-center text-center lg:min-h-[690px]">
             <div>
               <FileText className="w-10 h-10 mx-auto text-slate-300" />
               <p className="font-bold text-slate-600 dark:text-slate-300 mt-3">
@@ -738,14 +751,23 @@ export default function ResourceLibraryEditor({
           </div>
         ) : (
           <div className="h-full flex flex-col">
-            <header className="px-4 py-3 border-b border-slate-200/70 dark:border-zinc-800 flex items-center gap-3">
+            <header className="flex min-h-14 items-center gap-2 border-b border-slate-200/70 px-2 py-2 sm:gap-3 sm:px-4 sm:py-3 dark:border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setCompactSurface("library")}
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-slate-500 hover:bg-slate-100 lg:hidden dark:hover:bg-zinc-800"
+                aria-label="返回资料列表"
+                title="返回资料列表"
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </button>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <h3 className="font-black text-slate-900 dark:text-slate-50 truncate">
                     {detail.title}
                   </h3>
                   <span
-                    className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${resourceStatusTones[detail.status]}`}
+                    className={`hidden shrink-0 rounded-md px-2 py-0.5 text-xs font-bold sm:inline-flex ${resourceStatusTones[detail.status]}`}
                   >
                     {resourceStatusLabels[detail.status]}
                   </span>
@@ -757,7 +779,7 @@ export default function ResourceLibraryEditor({
               </div>
               <button
                 onClick={() => setDialog("edit")}
-                className="w-9 h-9 rounded-lg grid place-items-center hover:bg-slate-100 dark:hover:bg-zinc-800"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800"
                 title="编辑资料"
               >
                 <Pencil className="w-4 h-4" />
@@ -768,6 +790,7 @@ export default function ResourceLibraryEditor({
                   try {
                     await deleteLibraryResource(detail.id);
                     await onDataChanged();
+                    if (narrowLayout) setCompactSurface("library");
                     onShowToast("资料已删除");
                   } catch (error) {
                     onShowToast(
@@ -775,7 +798,7 @@ export default function ResourceLibraryEditor({
                     );
                   }
                 }}
-                className="w-9 h-9 rounded-lg grid place-items-center text-rose-500 hover:bg-rose-50"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-rose-500 hover:bg-rose-50"
                 title="删除资料"
               >
                 <Trash2 className="w-4 h-4" />
@@ -785,7 +808,7 @@ export default function ResourceLibraryEditor({
               <div className="flex min-h-0 flex-col bg-slate-200/50 dark:bg-zinc-950">
                 <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
                   <div className="inline-flex rounded-lg bg-slate-100 p-1 dark:bg-zinc-800">
-                    <button onClick={() => { setReadingMode("pdf"); onOpenPage(pdfPage); }} className={`rounded-md px-3 py-1.5 text-xs font-bold ${readingMode === "pdf" ? "bg-white text-slate-900 shadow-sm dark:bg-zinc-700 dark:text-white" : "text-slate-500"}`}>PDF 原文</button>
+                    <button onClick={() => { setReadingMode("pdf"); onOpenPage(pdfPage); }} className={`min-h-10 rounded-md px-3 py-1.5 text-xs font-bold sm:min-h-0 ${readingMode === "pdf" ? "bg-white text-slate-900 shadow-sm dark:bg-zinc-700 dark:text-white" : "text-slate-500"}`}>PDF 原文</button>
                     <button onClick={() => {
                       setReadingMode("ocr");
                       const current = detail.pages.find((page) => page.pageNumber === selectedPage);
@@ -793,23 +816,27 @@ export default function ResourceLibraryEditor({
                         const firstReady = detail.pages.find((page) => page.included && page.parseStatus === "ready");
                         if (firstReady) onOpenPage(firstReady.pageNumber);
                       }
-                    }} className={`rounded-md px-3 py-1.5 text-xs font-bold ${readingMode === "ocr" ? "bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-300" : "text-slate-500"}`}>OCR 识别</button>
+                    }} className={`min-h-10 rounded-md px-3 py-1.5 text-xs font-bold sm:min-h-0 ${readingMode === "ocr" ? "bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-300" : "text-slate-500"}`}>OCR 识别</button>
                   </div>
-                  <div className="flex items-center gap-2"><span className="text-xs font-bold text-slate-500">第 {selectedPage} 页</span><button onClick={() => setInspectorOpen(true)} className="btn-secondary px-2.5 py-1.5 text-xs lg:hidden">详情</button></div>
+                  <div className="flex items-center gap-2"><span className="whitespace-nowrap text-xs font-bold text-slate-500">第 {selectedPage} 页</span><button onClick={() => setInspectorOpen(true)} className="btn-secondary min-h-10 px-3 py-1.5 text-xs lg:hidden">详情</button></div>
                 </div>
-                <div className="relative min-h-0 flex-1 p-3">
-                  <div className={readingMode === "pdf" ? "h-full" : "invisible pointer-events-none absolute inset-3 h-auto"}>
-                    <object key={`${detail.id}-${pdfPage}`} data={`${detail.publicUrl}#page=${pdfPage}&view=FitH`} type="application/pdf" className="h-full min-h-[560px] w-full rounded-lg bg-white shadow-sm">
+                <div className="relative min-h-0 flex-1 p-2 sm:p-3">
+                  <div className={readingMode === "pdf" ? "h-full" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
+                    <object key={`${detail.id}-${pdfPage}`} data={`${detail.publicUrl}#page=${pdfPage}&view=FitH`} type="application/pdf" className="h-full w-full rounded-lg bg-white shadow-sm">
                       <a href={`${detail.publicUrl}#page=${pdfPage}`} target="_blank" rel="noreferrer" className="text-emerald-700">打开 PDF</a>
                     </object>
                   </div>
-                  <div className={readingMode === "ocr" ? "h-full" : "invisible pointer-events-none absolute inset-3 h-auto"}>
+                  <div className={readingMode === "ocr" ? "h-full" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
                     <OcrPageReader resourceId={detail.id} pages={detail.pages} chunks={detail.chunks} selectedPage={selectedPage} onSelectPage={onOpenPage} />
                   </div>
                 </div>
               </div>
               {inspectorOpen && <button aria-label="关闭详情" onClick={() => setInspectorOpen(false)} className="fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-[1px] lg:hidden" />}
-              <aside className={`${inspectorOpen ? "fixed inset-y-4 right-4 z-50 flex w-[min(360px,calc(100vw-2rem))] rounded-2xl bg-white shadow-2xl dark:bg-zinc-900" : "hidden"} min-h-0 flex-col overflow-hidden border-l border-slate-200/70 dark:border-zinc-800 lg:static lg:z-auto lg:flex lg:w-auto lg:rounded-none lg:bg-transparent lg:shadow-none`}>
+              <aside className={`${inspectorOpen ? "fixed inset-x-0 bottom-0 z-50 flex max-h-[82dvh] rounded-t-3xl bg-white shadow-2xl dark:bg-zinc-900" : "hidden"} min-h-0 flex-col overflow-hidden border-l border-slate-200/70 dark:border-zinc-800 lg:static lg:z-auto lg:flex lg:max-h-none lg:w-auto lg:rounded-none lg:bg-transparent lg:shadow-none`}>
+                <div className="flex items-center justify-between border-b border-slate-200/70 px-4 py-2 lg:hidden dark:border-zinc-800">
+                  <span className="text-sm font-black text-slate-700 dark:text-slate-100">资料详情</span>
+                  <button onClick={() => setInspectorOpen(false)} className="grid h-11 w-11 place-items-center rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800" aria-label="关闭详情面板"><X className="h-5 w-5" /></button>
+                </div>
                 <div className="grid grid-cols-4 border-b border-slate-200/70 dark:border-zinc-800">
                   {(
                     [
@@ -822,12 +849,11 @@ export default function ResourceLibraryEditor({
                     <button
                       key={value}
                       onClick={() => setInspectorTab(value)}
-                      className={`py-3 text-xs font-bold border-b-2 ${inspectorTab === value ? "border-emerald-700 text-emerald-700" : "border-transparent text-slate-400"}`}
+                      className={`min-h-11 border-b-2 py-3 text-xs font-bold ${inspectorTab === value ? "border-emerald-700 text-emerald-700" : "border-transparent text-slate-400"}`}
                     >
                       {label}
                     </button>
                   ))}
-                  <button onClick={() => setInspectorOpen(false)} className="absolute right-2 top-11 grid h-8 w-8 place-items-center rounded-lg bg-white shadow lg:hidden dark:bg-zinc-800" aria-label="关闭详情面板"><X className="h-4 w-4" /></button>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto p-4">
                   {inspectorTab === "overview" && (

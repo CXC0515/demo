@@ -47,6 +47,16 @@ export default function KnowledgeLibrary({
   const [detail, setDetail] = useState<ResourceDetail | null>(null);
   const [selectedPage, setSelectedPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [narrowLayout, setNarrowLayout] = useState(false);
+  const [openReaderOnCompact, setOpenReaderOnCompact] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1023px)");
+    const update = () => setNarrowLayout(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   const loadResourceDetail = useCallback(async (resourceId: string) => {
     if (!resourceId) {
@@ -133,46 +143,52 @@ export default function KnowledgeLibrary({
   const openSource = (resourceId: string, pageNumber: number) => {
     setSelectedResourceId(resourceId);
     setSelectedPage(pageNumber);
+    setOpenReaderOnCompact(true);
     onSwitchMode("editor");
     setLoading(true);
     void loadResourceDetail(resourceId).finally(() => setLoading(false));
   };
 
   return (
-    <div className="space-y-4 animate-fade-in" id="knowledge-library-page">
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-bold text-emerald-700 uppercase">资料库</p>
-          <h2 className="text-2xl font-black text-slate-900 dark:text-slate-50 mt-1">
+    <div className="flex h-full min-h-0 flex-col gap-3 sm:gap-4 animate-fade-in" id="knowledge-library-page">
+      <div className="adaptive-workspace-topbar flex flex-none items-end justify-between gap-3">
+        <div className="adaptive-workspace-heading">
+          <p className="hidden text-xs font-bold text-emerald-700 uppercase sm:block">资料库</p>
+          <h2 className="text-xl font-black text-slate-900 dark:text-slate-50 sm:mt-1 sm:text-2xl">
             {mode === "graph" ? "知识图谱" : "资料编辑"}
           </h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 sm:mt-1 sm:text-sm">
             {mode === "graph"
               ? `${graph.nodes.length} 个节点 · ${graph.relations.length} 条关系 · ${graph.sourceLinks.length} 个已确认来源`
               : `${resources.length} 份资料 · ${resources.filter((item) => item.status === "processing").length} 项正在解析`}
           </p>
         </div>
-        <div className="glass-panel rounded-xl p-1 flex items-center gap-1 self-start lg:self-auto">
+        <div className="glass-panel flex shrink-0 items-center gap-1 rounded-xl p-1">
           <button
             onClick={() => onSwitchMode("graph")}
-            className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 ${mode === "graph" ? "bg-emerald-700 text-white shadow-sm" : "text-slate-500 hover:bg-white/70 dark:hover:bg-zinc-800"}`}
+            className={`flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-bold ${mode === "graph" ? "bg-emerald-700 text-white shadow-sm" : "text-slate-500 hover:bg-white/70 dark:hover:bg-zinc-800"}`}
           >
             <Network className="w-4 h-4" />
             知识图谱
           </button>
           <button
-            onClick={() => onSwitchMode("editor")}
-            className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 ${mode === "editor" ? "bg-emerald-700 text-white shadow-sm" : "text-slate-500 hover:bg-white/70 dark:hover:bg-zinc-800"}`}
+            onClick={() => {
+              setOpenReaderOnCompact(false);
+              onSwitchMode("editor");
+            }}
+            className={`flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-bold ${mode === "editor" ? "bg-emerald-700 text-white shadow-sm" : "text-slate-500 hover:bg-white/70 dark:hover:bg-zinc-800"}`}
           >
             <Boxes className="w-4 h-4" />
             资料编辑
           </button>
         </div>
       </div>
+      <div className={`min-h-0 flex-1 ${mode === "graph" ? "overflow-hidden lg:overflow-y-auto lg:pr-1" : "overflow-hidden"}`}>
       {mode === "graph" ? (
         <KnowledgeGraphWorkspace
           graph={graph}
           loading={loading}
+          narrowLayout={narrowLayout}
           onDataChanged={reloadGraph}
           onOpenSource={openSource}
           onShowToast={onShowToast}
@@ -184,12 +200,15 @@ export default function KnowledgeLibrary({
           nodes={graph.nodes}
           selectedPage={selectedPage}
           loading={loading}
+          narrowLayout={narrowLayout}
+          openReaderOnCompact={openReaderOnCompact}
           onSelectResource={selectResource}
           onOpenPage={setSelectedPage}
           onDataChanged={loadAll}
           onShowToast={onShowToast}
         />
       )}
+      </div>
     </div>
   );
 }

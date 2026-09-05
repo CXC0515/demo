@@ -37,6 +37,7 @@ export default function AppLayout({
   onToggleGroup
 }: AppLayoutProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const isImmersiveWorkspace = activePage === 'knowledge-graph' || activePage === 'library-editor';
   const selectPage = (pageId: PageId) => {
     onSelectPage(pageId);
     setMobileNavOpen(false);
@@ -44,7 +45,7 @@ export default function AppLayout({
 
   return (
     <div className="h-dvh overflow-hidden bg-slate-100 dark:bg-zinc-950 text-slate-800 dark:text-slate-100 font-sans flex flex-col antialiased">
-      <header className="h-16 flex-none bg-white/75 dark:bg-zinc-900/75 backdrop-blur-2xl border-b border-slate-200/70 dark:border-zinc-800/80 px-3 sm:px-6 flex items-center justify-between z-30">
+      <header className="app-shell-header flex-none bg-white/75 dark:bg-zinc-900/75 backdrop-blur-2xl border-b border-slate-200/70 dark:border-zinc-800/80 px-3 sm:px-6 flex items-center justify-between z-30">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -193,7 +194,7 @@ export default function AppLayout({
           </div>
         </aside>
 
-        <main className="flex-1 min-w-0 overflow-y-auto p-3 sm:p-4 lg:p-6 bg-slate-50 dark:bg-zinc-950">
+        <main className={`app-shell-main flex-1 min-w-0 p-3 sm:p-4 lg:p-6 bg-slate-50 dark:bg-zinc-950 ${isImmersiveWorkspace ? 'flex min-h-0 flex-col overflow-hidden' : 'overflow-y-auto'}`}>
           {children}
         </main>
       </div>

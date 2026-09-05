@@ -64,14 +64,14 @@ const KnowledgeTreeNode = memo(({ data }: NodeProps<TreeNode>) => {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span
-              className="inline-flex rounded px-1.5 py-0.5 text-[9px] font-black"
+              className="inline-flex rounded px-1.5 py-0.5 text-xs font-black"
               style={{ background: palette.fill, color: palette.text }}
             >
               {entityLabels[data.entity.type]}
             </span>
-            {data.entity.trainable ? <span className="text-[9px] font-bold text-slate-400">可训练</span> : null}
+            {data.entity.trainable ? <span className="text-xs font-bold text-slate-400">可训练</span> : null}
           </div>
-          <p className="mt-1.5 truncate text-[13px] font-black text-slate-800 dark:text-zinc-100">
+          <p className="mt-1.5 truncate text-sm font-black text-slate-800 dark:text-zinc-100">
             {data.entity.name}
           </p>
         </div>
@@ -117,6 +117,7 @@ const layoutTree = (nodes: TreeNode[], edges: Edge[]) => {
 };
 
 interface CanvasProps {
+  compact: boolean;
   subject: string;
   nodes: KnowledgeEntity[];
   stages: KnowledgeStage[];
@@ -126,7 +127,7 @@ interface CanvasProps {
   onShowDetails: () => void;
 }
 
-const KnowledgeTreeCanvasInner = ({ subject, nodes, stages, availableTags, selectedId, onSelect, onShowDetails }: CanvasProps) => {
+const KnowledgeTreeCanvasInner = ({ compact, subject, nodes, stages, availableTags, selectedId, onSelect, onShowDetails }: CanvasProps) => {
   const { fitView, setCenter } = useReactFlow<TreeNode, Edge>();
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
   const [searchOpen, setSearchOpen] = useState(false);
@@ -273,12 +274,16 @@ const KnowledgeTreeCanvasInner = ({ subject, nodes, stages, availableTags, selec
   useEffect(() => setRenderNodes(projectedNodes), [projectedNodes, setRenderNodes]);
 
   useEffect(() => {
-    const timer = window.setTimeout(
-      () => fitView({ padding: 0.16, duration: 300, maxZoom: 1.05 }),
-      30,
-    );
+    const timer = window.setTimeout(() => {
+      const selectedNode = projectedNodes.find((node) => node.id === selectedId) ?? projectedNodes[0];
+      if (compact && selectedNode) {
+        setCenter(selectedNode.position.x + NODE_WIDTH / 2, selectedNode.position.y + NODE_HEIGHT / 2, { zoom: 1, duration: 0 });
+        return;
+      }
+      fitView({ padding: 0.16, duration: 300, maxZoom: 1.05 });
+    }, 30);
     return () => window.clearTimeout(timer);
-  }, [visibleIds, fitView]);
+  }, [compact, visibleIds, fitView, setCenter]);
 
   useEffect(() => {
     if (!selectedId || lastSelectedId.current === selectedId) return;
@@ -292,41 +297,41 @@ const KnowledgeTreeCanvasInner = ({ subject, nodes, stages, availableTags, selec
   }, [selectedId, renderNodes, setCenter]);
 
   return (
-    <div className="relative h-[clamp(560px,72dvh,840px)] bg-slate-50/70 dark:bg-zinc-950/40">
-      <div className="absolute left-3 right-3 top-3 z-20 flex items-center gap-1 rounded-lg border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
-        <div className="flex min-w-0 items-center gap-2 pr-2">
-          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-emerald-700 text-white">
+    <div className="relative h-full min-h-0 bg-slate-50/70 lg:h-[clamp(560px,72dvh,840px)] dark:bg-zinc-950/40">
+      <div className="knowledge-canvas-toolbar absolute left-3 right-3 top-3 z-20 flex items-center gap-1 rounded-lg border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
+        <div className="knowledge-canvas-title flex min-w-0 items-center gap-2 pr-2">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-emerald-700 text-white">
             <Network className="h-4 w-4" />
           </span>
           <div className="min-w-0">
-            <p className="truncate text-[11px] font-black text-slate-700 dark:text-zinc-100">{subject}知识主干</p>
-            <p className="whitespace-nowrap text-[9px] text-slate-400">仅显示母子结构</p>
+            <p className="truncate text-sm font-black text-slate-700 dark:text-zinc-100">{subject}知识主干</p>
+            <p className="hidden whitespace-nowrap text-xs text-slate-400 sm:block">仅显示母子结构</p>
           </div>
         </div>
-        <span className="h-6 w-px shrink-0 bg-slate-200 dark:bg-zinc-700" />
-        <button
+        <span className="knowledge-canvas-separator h-6 w-px shrink-0 bg-slate-200 dark:bg-zinc-700" />
+        {!compact ? <button
           type="button"
           onClick={() => setCollapsedIds(allExpanded ? new Set(allStructuralNodes.filter((node) => node.type === "domain").map((node) => node.id)) : new Set())}
-          className="flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10px] font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"
+          className="flex h-9 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"
         >
           <Rows3 className="h-3.5 w-3.5" />
           {allExpanded ? "收起到板块" : "展开全部"}
-        </button>
+        </button> : null}
         <button
           type="button"
           title="筛选知识点"
           aria-label="筛选知识点"
           onClick={() => { setFilterOpen((open) => !open); setSearchOpen(false); }}
-          className={`relative grid h-7 w-7 shrink-0 place-items-center rounded-md ${filterOpen || activeFilterCount ? "bg-emerald-50 text-emerald-700" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"}`}
+          className={`relative grid h-11 w-11 shrink-0 place-items-center rounded-md ${filterOpen || activeFilterCount ? "bg-emerald-50 text-emerald-700" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"}`}
         >
           <Filter className="h-3.5 w-3.5" />
           {activeFilterCount ? <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-emerald-700 px-1 text-[8px] font-black text-white">{activeFilterCount}</span> : null}
         </button>
-        <button type="button" title="搜索知识点" aria-label="搜索知识点" onClick={() => { setSearchOpen((open) => !open); setFilterOpen(false); }} className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${searchOpen || query ? "bg-emerald-50 text-emerald-700" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"}`}>
+        <button type="button" title="搜索知识点" aria-label="搜索知识点" onClick={() => { setSearchOpen((open) => !open); setFilterOpen(false); }} className={`grid h-11 w-11 shrink-0 place-items-center rounded-md ${searchOpen || query ? "bg-emerald-50 text-emerald-700" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"}`}>
           <Search className="h-3.5 w-3.5" />
         </button>
-        <button type="button" disabled={!selectedId} onClick={onShowDetails} className="btn-primary ml-auto flex h-7 shrink-0 items-center gap-1.5 px-3 text-[10px] disabled:cursor-not-allowed disabled:opacity-40">
-          详情
+        <button type="button" disabled={!selectedId} onClick={onShowDetails} className="btn-primary ml-auto flex h-11 shrink-0 items-center gap-1.5 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-40">
+          <span className="hidden min-[360px]:inline">详情</span>
           <ChevronDown className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -357,19 +362,19 @@ const KnowledgeTreeCanvasInner = ({ subject, nodes, stages, availableTags, selec
         elementsSelectable
         minZoom={0.2}
         maxZoom={2.2}
-        fitView
+        fitView={!compact}
         fitViewOptions={{ padding: 0.16, maxZoom: 1.05 }}
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#cbd5e1" gap={24} size={1} />
-        <MiniMap
+        {!compact ? <MiniMap
           pannable
           zoomable
           position="bottom-right"
           nodeColor={(node) => nodePalette[(node.data as TreeNodeData).entity.type].accent}
           maskColor="rgba(241, 245, 249, 0.72)"
           className="!border !border-slate-200 !bg-white dark:!border-zinc-700 dark:!bg-zinc-900"
-        />
+        /> : null}
         <Controls position="bottom-left" showInteractive={false} />
         <div className="absolute bottom-3 left-14 z-10 flex gap-1">
           <button
@@ -380,7 +385,7 @@ const KnowledgeTreeCanvasInner = ({ subject, nodes, stages, availableTags, selec
               const selectedNode = renderNodes.find((node) => node.id === selectedId);
               if (selectedNode) setCenter(selectedNode.position.x + NODE_WIDTH / 2, selectedNode.position.y + NODE_HEIGHT / 2, { zoom: 1, duration: 280 });
             }}
-            className="grid h-8 w-8 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm hover:text-emerald-700 dark:border-zinc-700 dark:bg-zinc-900"
+            className="grid h-11 w-11 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm hover:text-emerald-700 lg:h-8 lg:w-8 dark:border-zinc-700 dark:bg-zinc-900"
           >
             <Focus className="h-4 w-4" />
           </button>
@@ -389,13 +394,13 @@ const KnowledgeTreeCanvasInner = ({ subject, nodes, stages, availableTags, selec
             title="适应全部节点"
             aria-label="适应全部节点"
             onClick={() => fitView({ padding: 0.16, duration: 280, maxZoom: 1.05 })}
-            className="grid h-8 w-8 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm hover:text-emerald-700 dark:border-zinc-700 dark:bg-zinc-900"
+            className="grid h-11 w-11 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm hover:text-emerald-700 lg:h-8 lg:w-8 dark:border-zinc-700 dark:bg-zinc-900"
           >
             <Maximize2 className="h-4 w-4" />
           </button>
         </div>
       </ReactFlow>
-      <div className="pointer-events-none absolute bottom-3 right-3 z-10 rounded-md bg-white/90 px-2 py-1 text-[10px] font-bold text-slate-400 shadow-sm dark:bg-zinc-900/90">
+      <div className="pointer-events-none absolute bottom-3 right-3 z-10 rounded-md bg-white/90 px-2 py-1 text-xs font-bold text-slate-400 shadow-sm dark:bg-zinc-900/90">
         {renderNodes.length} / {allStructuralNodes.length} 个主干节点
       </div>
     </div>
