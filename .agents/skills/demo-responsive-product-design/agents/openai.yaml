@@ -1,0 +1,7 @@
+interface:
+  display_name: "Responsive Product Design"
+  short_description: "Design and audit adaptive desktop-to-mobile product UI"
+  default_prompt: "Use $demo-responsive-product-design to redesign this interface for compact, medium, and wide layouts while preserving task state."
+
+policy:
+  allow_implicit_invocation: true
