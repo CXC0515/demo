@@ -91,7 +91,6 @@ export default function App() {
   const [lowConfidenceThreshold, setLowConfidenceThreshold] = useState<number>(0.75);
   const [ocrHumanReviewThreshold, setOcrHumanReviewThreshold] = useState<number>(0.70);
   const [ocrAutoPassThreshold, setOcrAutoPassThreshold] = useState<number>(0.90);
-  const [libraryMode, setLibraryMode] = useState<'graph' | 'editor'>('graph');
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
     teaching: true,
     homeSchool: true,
@@ -476,11 +475,9 @@ export default function App() {
     }
     setActivePage(pageId as PageId);
     if (pageId === 'library' && subPageId === 'editor') {
-      setLibraryMode('editor');
       setActivePage('library-editor');
     }
     if (pageId === 'library' && subPageId === 'graph') {
-      setLibraryMode('graph');
       setActivePage('knowledge-graph');
     }
   };
@@ -720,9 +717,8 @@ export default function App() {
 
           {(activePage === 'knowledge-graph' || activePage === 'library-editor') && (
             <KnowledgeLibrary
-              mode={activePage === 'library-editor' ? 'editor' : libraryMode}
+              mode={activePage === 'knowledge-graph' ? 'graph' : 'editor'}
               onSwitchMode={(mode) => {
-                setLibraryMode(mode);
                 setActivePage(mode === 'graph' ? 'knowledge-graph' : 'library-editor');
               }}
               onKnowledgeChanged={loadKnowledgeCatalog}
