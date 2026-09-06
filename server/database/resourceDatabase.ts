@@ -6,6 +6,7 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { runtimeConfig } from "../config/runtimeConfig";
 import { runResourceMigrations } from "./resourceMigrations";
 
 export const createResourceDatabase = (databasePath: string) => {
@@ -18,10 +19,11 @@ export const createResourceDatabase = (databasePath: string) => {
   return database;
 };
 
-const databasePath = path.resolve(
-  process.env.RESOURCE_DB_PATH ?? "var/data/resources.sqlite",
-);
+const databasePath = runtimeConfig.resourceDatabasePath;
 const database = createResourceDatabase(databasePath);
 
 export const getResourceDatabase = () => database;
 export const getResourceDatabasePath = () => databasePath;
+export const closeResourceDatabase = () => {
+  if (database.open) database.close();
+};

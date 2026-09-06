@@ -6,9 +6,10 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { runtimeConfig } from '../config/runtimeConfig';
 import { runRosterMigrations } from './rosterMigrations';
 
-const databasePath = path.resolve(process.env.ROSTER_DB_PATH ?? 'var/data/roster.sqlite');
+const databasePath = runtimeConfig.rosterDatabasePath;
 mkdirSync(path.dirname(databasePath), { recursive: true });
 
 const database = new Database(databasePath);

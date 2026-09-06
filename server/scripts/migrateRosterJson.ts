@@ -5,6 +5,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { dataFilePath } from '../config/runtimeConfig';
 import { ClassMembership, SchoolClass, Student } from '../../src/domain/types';
 import { closeRosterDatabase, getRosterDatabase } from '../database/rosterDatabase';
 
@@ -27,7 +28,7 @@ interface LegacyRosterStore {
   memberships: LegacyClassMembership[];
 }
 
-const sourcePath = path.resolve(process.argv[2] ?? 'var/data/roster.json');
+const sourcePath = path.resolve(process.argv[2] ?? dataFilePath('roster.json'));
 if (!existsSync(sourcePath)) throw new Error(`Roster JSON not found: ${sourcePath}`);
 
 const store = JSON.parse(readFileSync(sourcePath, 'utf8')) as LegacyRosterStore;

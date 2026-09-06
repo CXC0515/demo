@@ -5,8 +5,9 @@
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { runtimeConfig } from '../config/runtimeConfig';
 
-const artifactDirectory = path.resolve('var/data/parser-artifacts');
+const artifactDirectory = path.join(runtimeConfig.dataDirectory, 'parser-artifacts');
 mkdirSync(artifactDirectory, { recursive: true });
 
 const artifactPath = (assetId: string) => path.join(artifactDirectory, `${assetId}.json`);

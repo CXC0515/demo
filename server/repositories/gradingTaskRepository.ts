@@ -6,8 +6,9 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { WorkbenchTask } from '../../src/domain/types';
+import { runtimeConfig } from '../config/runtimeConfig';
 
-const dataDirectory = path.resolve('var/data');
+const dataDirectory = runtimeConfig.dataDirectory;
 const dataPath = path.join(dataDirectory, 'grading-tasks.json');
 mkdirSync(dataDirectory, { recursive: true });
 

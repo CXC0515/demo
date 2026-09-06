@@ -5,13 +5,13 @@
 
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
-import path from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import { deleteReminder, deleteScheduleItem, listReminders, listScheduleItems, listSchedulePeriods, saveReminder, saveReminderSeries, saveReminders, saveScheduleItem, saveScheduleItems, saveSchedulePeriods } from '../repositories/scheduleRepository';
 import { importScheduleDocument } from '../services/schedule/scheduleImportService';
 import { createReminderDrafts } from '../services/schedule/reminderImportService';
+import { uploadFilePath } from '../config/runtimeConfig';
 
 const router = Router();
 const scheduleSchema = z.object({
@@ -103,7 +103,7 @@ router.delete('/schedule/reminders/:id', (request, response) => {
   response.status(204).end();
 });
 
-const uploadDirectory = path.resolve('var/uploads/schedule');
+const uploadDirectory = uploadFilePath('schedule');
 mkdirSync(uploadDirectory, { recursive: true });
 const upload = multer({
   dest: uploadDirectory,

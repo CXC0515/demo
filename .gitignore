@@ -6,6 +6,7 @@ var/uploads/
 var/data/
 var/backups/
 var/test-fixtures/
+var-web/
 .DS_Store
 *.log
 .env*
