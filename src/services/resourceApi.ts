@@ -257,7 +257,7 @@ export const createKnowledgeRelation = async (input: {
 export const reviewSuggestion = async (
   suggestionId: string,
   decision: "accepted" | "ignored" | "merged",
-  mergeTargetId?: string,
+  options?: { mergeTargetId?: string; primaryMotherId?: string | null },
 ) =>
   (
     await requestJson<{ suggestion: DiscoverySuggestion }>(
@@ -265,7 +265,7 @@ export const reviewSuggestion = async (
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision, mergeTargetId }),
+        body: JSON.stringify({ decision, ...options }),
       },
     )
   ).suggestion;

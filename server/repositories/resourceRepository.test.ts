@@ -102,6 +102,38 @@ test("resource review creates an authoritative node and source link", () => {
   }
 });
 
+test("accepting a knowledge suggestion writes its confirmed primary mother", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "resource-mother-review-"));
+  const database = createResourceDatabase(path.join(directory, "resources.sqlite"));
+  try {
+    const repository = new ResourceRepository(database);
+    repository.seedBaseKnowledge();
+    const resource = repository.createResource({
+      id: randomUUID(), title: "八年级数学", fileName: "math.pdf", mimeType: "application/pdf",
+      kind: "textbook", subject: "数学", grade: "八年级", publisher: "", edition: "",
+      isPrimary: false, diskPath: path.join(directory, "math.pdf"), publicUrl: "/content", pageCount: 20,
+    });
+    const chunkId = `${resource.id}:content:18`;
+    repository.replaceChunks(resource.id, [{
+      id: chunkId, resourceId: resource.id, level: "content", title: "第 18 页",
+      summary: "", text: "三角形的中线", tags: [], pageStart: 18, pageEnd: 18, order: 1,
+    }]);
+    const suggestionId = randomUUID();
+    repository.replacePendingSuggestions(resource.id, [{
+      id: suggestionId, resourceId: resource.id, kind: "node", status: "pending",
+      proposedType: "knowledge", proposedName: "三角形的中线", description: "中线定义",
+      aliases: [], confidence: 0.98, rationale: "原文给出定义", sourceChunkIds: [chunkId],
+      primaryMotherId: "kt_math_triangles", createdAt: new Date().toISOString(),
+    }]);
+    repository.reviewSuggestion(suggestionId, "accepted");
+    const node = repository.listNodes().find((item) => item.name === "三角形的中线");
+    assert.equal(node?.primaryMotherId, "kt_math_triangles");
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("resource pages stay traceable across partial parses and exclusions", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "resource-pages-"));
   const database = createResourceDatabase(path.join(directory, "resources.sqlite"));

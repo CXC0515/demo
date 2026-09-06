@@ -841,6 +841,7 @@ export interface DiscoverySuggestion {
   sourceChunkIds: string[];
   existingNodeId?: string;
   targetNodeId?: string;
+  primaryMotherId?: string;
   createdNodeId?: string;
   createdAt: string;
   reviewedAt?: string;

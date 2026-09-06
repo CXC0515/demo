@@ -15,6 +15,7 @@ import {
   CircleDot,
   Edit3,
   Link2,
+  List,
   LoaderCircle,
   Merge,
   Plus,
@@ -54,6 +55,7 @@ const fieldClass =
 interface WorkspaceProps {
   graph: KnowledgeGraphSnapshot;
   loading: boolean;
+  narrowLayout: boolean;
   onDataChanged: () => Promise<void>;
   onOpenSource: (resourceId: string, pageNumber: number) => void;
   onShowToast: (message: string) => void;
@@ -458,7 +460,7 @@ const FocusPanel = ({ focus, loading, onSelect, onEdit, onRelation, onBackToGrap
   );
 };
 
-export default function KnowledgeGraphWorkspace({ graph, loading, onDataChanged, onOpenSource, onShowToast }: WorkspaceProps) {
+export default function KnowledgeGraphWorkspace({ graph, loading, narrowLayout, onDataChanged, onOpenSource, onShowToast }: WorkspaceProps) {
   const subjects = useMemo(() => graph.subjects.length ? graph.subjects : Array.from(new Set(graph.nodes.map((node) => node.subject).filter(Boolean))).map((name, index) => ({ id: name, code: `S${index + 1}`, name, sortOrder: index * 10, status: "active" as const })), [graph.nodes, graph.subjects]);
   const subjectNames = useMemo(() => subjects.map((item) => item.name), [subjects]);
   const availableTags = useMemo(() => Array.from(new Set([...graph.tags.map((tag) => tag.name), ...graph.nodes.flatMap((node) => node.tags)])), [graph.nodes, graph.tags]);
@@ -470,6 +472,7 @@ export default function KnowledgeGraphWorkspace({ graph, loading, onDataChanged,
   const [focus, setFocus] = useState<KnowledgeFocusSnapshot>();
   const [focusLoading, setFocusLoading] = useState(false);
   const [subjectManagerOpen, setSubjectManagerOpen] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<"index" | "detail" | null>(null);
   const graphSectionRef = useRef<HTMLElement>(null);
   const detailSectionRef = useRef<HTMLElement>(null);
   const subjectNodes = useMemo(() => graph.nodes.filter((node) => node.subject === subject && structuralTypes.has(node.type)), [graph.nodes, subject]);
@@ -483,6 +486,9 @@ export default function KnowledgeGraphWorkspace({ graph, loading, onDataChanged,
     if (!subjectNames.length) return;
     if (!subjectNames.includes(subject)) setSubject(subjectNames[0]);
   }, [subjectNames, subject]);
+  useEffect(() => {
+    if (!narrowLayout) setMobilePanel(null);
+  }, [narrowLayout]);
   useEffect(() => {
     if (subjectNodes.some((node) => node.id === selectedId)) return;
     const first = subjectNodes.find((node) => node.type === "domain" && !node.primaryMotherId) ?? subjectNodes[0];
@@ -514,8 +520,13 @@ export default function KnowledgeGraphWorkspace({ graph, loading, onDataChanged,
   };
 
   return (
-    <div className="grid min-h-[760px] grid-cols-1 gap-4 xl:grid-cols-[260px_minmax(0,1fr)]">
-      <aside className="glass-panel order-2 flex max-h-[620px] flex-col overflow-hidden rounded-xl xl:order-1 xl:max-h-none">
+    <div className="relative flex h-full min-h-0 flex-col gap-3 lg:grid lg:min-h-[760px] lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-4">
+      {narrowLayout && mobilePanel ? <button type="button" aria-label="关闭知识图谱面板" onClick={() => setMobilePanel(null)} className="fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-[1px] lg:hidden" /> : null}
+      <aside className={`glass-panel min-h-0 flex-col overflow-hidden ${narrowLayout ? mobilePanel === "index" ? "fixed inset-x-0 bottom-0 z-50 flex max-h-[82dvh] rounded-t-3xl shadow-2xl" : "hidden" : "hidden lg:order-1 lg:flex lg:max-h-none lg:rounded-xl"}`}>
+        <div className="flex items-center justify-between border-b border-slate-200/70 px-4 py-2 lg:hidden dark:border-zinc-800">
+          <span className="text-sm font-black text-slate-700 dark:text-slate-100">知识主干索引</span>
+          <button type="button" onClick={() => setMobilePanel(null)} className="grid h-11 w-11 place-items-center rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800" aria-label="关闭知识主干索引"><X className="h-5 w-5" /></button>
+        </div>
         <div className="space-y-3 border-b border-slate-200/70 p-3 dark:border-zinc-800">
           <div className="flex gap-2">
             <label className="min-w-0 flex-1">
@@ -524,25 +535,25 @@ export default function KnowledgeGraphWorkspace({ graph, loading, onDataChanged,
                 {subjects.map((value) => <option key={value.id} value={value.name}>{value.name}知识主干</option>)}
               </select>
             </label>
-            <button type="button" onClick={() => setDialog("create")} title="新增节点" className="btn-primary grid h-9 w-9 shrink-0 place-items-center"><Plus className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setDialog("create")} title="新增节点" className="btn-primary grid h-11 w-11 shrink-0 place-items-center"><Plus className="h-4 w-4" /></button>
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索知识主干" className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-emerald-600 dark:border-zinc-800 dark:bg-zinc-900" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索知识主干" className="min-h-11 w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-base outline-none focus:border-emerald-600 sm:text-sm dark:border-zinc-800 dark:bg-zinc-900" />
           </div>
           <div className="grid grid-cols-4 gap-1">
             {([['all', '全部'], ['domain', '板块'], ['topic', '主题'], ['knowledge', '知识点']] as const).map(([value, label]) => (
-              <button key={value} type="button" onClick={() => setType(value)} className={`rounded-md px-1 py-1.5 text-[10px] font-bold ${type === value ? "bg-slate-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "bg-slate-100 text-slate-500 dark:bg-zinc-800"}`}>{label}</button>
+              <button key={value} type="button" onClick={() => setType(value)} className={`min-h-10 rounded-md px-1 py-1.5 text-xs font-bold ${type === value ? "bg-slate-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "bg-slate-100 text-slate-500 dark:bg-zinc-800"}`}>{label}</button>
             ))}
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
-          <div className="flex items-center justify-between px-3 pb-2 pt-3 text-[10px] font-black text-slate-400"><span>主干索引</span><span>{filtered.length}</span></div>
+          <div className="flex items-center justify-between px-3 pb-2 pt-3 text-xs font-black text-slate-400"><span>主干索引</span><span>{filtered.length}</span></div>
           <div className="divide-y divide-slate-200/60 dark:divide-zinc-800">
             {filtered.map((node) => (
-              <button key={node.id} type="button" onClick={() => setSelectedId(node.id)} className={`w-full border-l-2 px-3 py-3 text-left ${selectedId === node.id ? "border-emerald-700 bg-emerald-700/10" : "border-transparent hover:bg-slate-50 dark:hover:bg-zinc-900"}`}>
-                <div className="flex items-center gap-2"><span className={`rounded border px-1.5 py-0.5 text-[9px] font-black ${entityTones[node.type]}`}>{entityLabels[node.type]}</span><span className="truncate text-xs font-black">{node.name}</span></div>
-                <p className="mt-1.5 truncate text-[10px] text-slate-400">{node.description || "暂无说明"}</p>
+              <button key={node.id} type="button" onClick={() => { setSelectedId(node.id); if (narrowLayout) setMobilePanel(null); }} className={`min-h-16 w-full border-l-2 px-3 py-3 text-left ${selectedId === node.id ? "border-emerald-700 bg-emerald-700/10" : "border-transparent hover:bg-slate-50 dark:hover:bg-zinc-900"}`}>
+                <div className="flex items-center gap-2"><span className={`rounded border px-1.5 py-0.5 text-xs font-black ${entityTones[node.type]}`}>{entityLabels[node.type]}</span><span className="truncate text-sm font-black">{node.name}</span></div>
+                <p className="mt-1.5 truncate text-xs text-slate-400">{node.description || "暂无说明"}</p>
               </button>
             ))}
           </div>
@@ -555,24 +566,35 @@ export default function KnowledgeGraphWorkspace({ graph, loading, onDataChanged,
         </div>
         {selected ? (
           <div className="grid grid-cols-4 border-t border-slate-200/70 p-2 dark:border-zinc-800">
-            <button type="button" onClick={() => setDialog("edit")} title="编辑节点" className="grid h-8 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><Edit3 className="h-4 w-4" /></button>
-            <button type="button" onClick={() => setDialog("relation")} title="辅助关系" className="grid h-8 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><Link2 className="h-4 w-4" /></button>
-            <button type="button" onClick={() => setDialog("merge")} title="合并节点" className="grid h-8 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><Merge className="h-4 w-4" /></button>
-            <button type="button" onClick={() => void archiveSelected()} title="归档节点" className="grid h-8 place-items-center rounded-md text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"><Archive className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setDialog("edit")} title="编辑节点" className="grid h-11 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><Edit3 className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setDialog("relation")} title="辅助关系" className="grid h-11 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><Link2 className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setDialog("merge")} title="合并节点" className="grid h-11 place-items-center rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800"><Merge className="h-4 w-4" /></button>
+            <button type="button" onClick={() => void archiveSelected()} title="归档节点" className="grid h-11 place-items-center rounded-md text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"><Archive className="h-4 w-4" /></button>
           </div>
         ) : null}
       </aside>
 
-      <div className="order-1 min-w-0 space-y-4 xl:order-2">
-        <section ref={graphSectionRef} className="glass-panel scroll-mt-4 overflow-hidden rounded-xl">
+      <div className="order-1 flex min-h-0 min-w-0 flex-1 flex-col gap-3 lg:order-2 lg:block lg:space-y-4">
+        <div className="flex flex-none items-center gap-2 lg:hidden">
+          <label className="min-w-0 flex-1">
+            <span className="sr-only">选择学科</span>
+            <select value={subject} onChange={(event) => setSubject(event.target.value)} className={`${fieldClass} min-h-11`}>
+              {subjects.map((value) => <option key={value.id} value={value.name}>{value.name}知识主干</option>)}
+            </select>
+          </label>
+          <button type="button" onClick={() => setMobilePanel("index")} className="btn-secondary flex min-h-11 items-center gap-2 px-3 text-sm font-bold"><List className="h-4 w-4" />索引</button>
+          <button type="button" onClick={() => setDialog("create")} className="btn-primary grid h-11 w-11 shrink-0 place-items-center" aria-label="新增节点"><Plus className="h-4 w-4" /></button>
+        </div>
+        <section ref={graphSectionRef} className="glass-panel flex min-h-0 flex-1 scroll-mt-4 flex-col overflow-hidden rounded-xl lg:block">
           {subjectNodes.length ? (
-            <Suspense fallback={<div className="grid h-[clamp(560px,72dvh,840px)] place-items-center"><LoaderCircle className="h-5 w-5 animate-spin text-slate-400" /></div>}>
-              <KnowledgeGraphCanvas subject={subject} nodes={subjectNodes} stages={graph.stages} availableTags={availableTags} selectedId={selectedId} onSelect={setSelectedId} onShowDetails={() => detailSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+            <Suspense fallback={<div className="grid h-full min-h-0 place-items-center lg:h-[clamp(560px,72dvh,840px)]"><LoaderCircle className="h-5 w-5 animate-spin text-slate-400" /></div>}>
+              <KnowledgeGraphCanvas compact={narrowLayout} subject={subject} nodes={subjectNodes} stages={graph.stages} availableTags={availableTags} selectedId={selectedId} onSelect={setSelectedId} onShowDetails={() => narrowLayout ? setMobilePanel("detail") : detailSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} />
             </Suspense>
-          ) : <div className="grid h-[clamp(560px,72dvh,840px)] place-items-center text-sm text-slate-400">这个学科还没有知识主干</div>}
+          ) : <div className="grid h-full min-h-0 place-items-center text-sm text-slate-400 lg:h-[clamp(560px,72dvh,840px)]">这个学科还没有知识主干</div>}
         </section>
-        <section ref={detailSectionRef} className="glass-panel scroll-mt-4 overflow-hidden rounded-xl">
-          <FocusPanel focus={focus} loading={focusLoading || loading} onSelect={setSelectedId} onEdit={() => setDialog("edit")} onRelation={() => setDialog("relation")} onBackToGraph={() => graphSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} onOpenSource={onOpenSource} />
+        <section ref={detailSectionRef} className={`glass-panel min-h-0 scroll-mt-4 overflow-y-auto ${narrowLayout ? mobilePanel === "detail" ? "fixed inset-x-0 bottom-0 z-50 max-h-[82dvh] rounded-t-3xl shadow-2xl" : "hidden" : "hidden lg:block lg:rounded-xl"}`}>
+          {narrowLayout ? <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200/70 bg-white px-4 py-2 lg:hidden dark:border-zinc-800 dark:bg-zinc-900"><span className="text-sm font-black">节点详情</span><button type="button" onClick={() => setMobilePanel(null)} className="grid h-11 w-11 place-items-center rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800" aria-label="关闭节点详情"><X className="h-5 w-5" /></button></div> : null}
+          <FocusPanel focus={focus} loading={focusLoading || loading} onSelect={setSelectedId} onEdit={() => setDialog("edit")} onRelation={() => setDialog("relation")} onBackToGraph={() => narrowLayout ? setMobilePanel(null) : graphSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} onOpenSource={onOpenSource} />
         </section>
       </div>
 
