@@ -1,5 +1,7 @@
 # 班级、座位、课表与日程功能交接记录
 
+> **历史文档提示（2026-09-06）：** 本文记录的是 PR #5 阶段状态，其中 `32dd`、`a57e` 等 worktree 已清理，数据数量和路径也已过期。当前 Git 基线、权威数据位置和部署入口请以 [PROJECT_HANDOFF.md](./PROJECT_HANDOFF.md) 为准；网页部署任务使用 [WEB_DEPLOYMENT_PROMPT.md](./WEB_DEPLOYMENT_PROMPT.md)。下文保留用于追溯历史决策，不应照抄其旧路径执行。
+
 ## 1. 文档目的
 
 本文记录 `codex/reminder-batch-workbench` 分支中已经落地的班级、座位、课表与日程功能，说明本地数据的真实位置、运行前提和后续开发基线，避免新 worktree 因缺少 `.env` 或 SQLite 数据而误判为数据丢失。
