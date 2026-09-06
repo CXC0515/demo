@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { DocumentParserConfig } from '../../config/documentParserConfig';
+import { uploadFilePath } from '../../config/runtimeConfig';
 import { MaterialParseWarning, NormalizedDocumentBlock } from '../../../src/domain/types';
 import { MaterialParser, MaterialParserError, MaterialParserInput } from './MaterialParser';
 
@@ -45,7 +46,7 @@ export class DocxMaterialParser implements MaterialParser {
   }
 
   async parse(input: MaterialParserInput) {
-    const outputDirectory = path.resolve('var/uploads/parsed', input.assetId);
+    const outputDirectory = uploadFilePath('parsed', input.assetId);
     await mkdir(outputDirectory, { recursive: true });
     const workerPath = path.resolve('server/workers/parse_docx.py');
     const stdout = await runWorker(this.config.pythonCommand, [

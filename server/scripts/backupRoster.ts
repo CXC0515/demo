@@ -7,8 +7,9 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { closeRosterDatabase, getRosterDatabase, getRosterDatabasePath } from '../database/rosterDatabase';
+import { runtimeConfig } from '../config/runtimeConfig';
 
-const backupDirectory = path.resolve(process.env.ROSTER_BACKUP_DIR ?? 'var/backups/roster');
+const backupDirectory = path.resolve(process.env.ROSTER_BACKUP_DIR?.trim() || path.join(runtimeConfig.backupDirectory, 'roster'));
 mkdirSync(backupDirectory, { recursive: true });
 
 const timestamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-');

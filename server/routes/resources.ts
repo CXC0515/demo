@@ -16,9 +16,10 @@ import {
   readPdfPageCount,
 } from "../services/resources/resourceProcessingService";
 import { getResourcePageImagePath } from "../services/resources/resourcePageRenderService";
+import { uploadFilePath } from "../config/runtimeConfig";
 
 const router = Router();
-const uploadDirectory = path.resolve("var/uploads/resources");
+const uploadDirectory = uploadFilePath("resources");
 mkdirSync(uploadDirectory, { recursive: true });
 const upload = multer({
   dest: uploadDirectory,
@@ -231,7 +232,7 @@ router.delete("/resources/:resourceId", (request, response) => {
   }
   resourceRepository.deleteResource(resource.id);
   rmSync(resource.diskPath, { force: true });
-  rmSync(path.resolve("var/uploads/parsed", resource.id), {
+  rmSync(uploadFilePath("parsed", resource.id), {
     recursive: true,
     force: true,
   });

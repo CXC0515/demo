@@ -5,8 +5,9 @@
 
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { runtimeConfig } from '../config/runtimeConfig';
 
-const dataDirectory = path.resolve('var/data');
+const dataDirectory = runtimeConfig.dataDirectory;
 const dataPath = path.join(dataDirectory, 'ai-grading-errors.jsonl');
 mkdirSync(dataDirectory, { recursive: true });
 

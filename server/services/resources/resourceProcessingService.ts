@@ -8,6 +8,7 @@ import path from "node:path";
 import { PDFDocument } from "pdf-lib";
 import type { ResourceProcessingMetrics } from "../../../src/domain/types";
 import { getModelConfig } from "../../config/modelConfig";
+import { uploadFilePath } from "../../config/runtimeConfig";
 import { resourceRepository } from "../../repositories/resourceRepository";
 import { MaterialParserError } from "../materials/MaterialParser";
 import { parseMaterial } from "../materials/materialParserRegistry";
@@ -35,8 +36,8 @@ const createPageRangePdf = async (
   );
   const pages = await output.copyPages(source, pageIndexes);
   pages.forEach((page) => output.addPage(page));
-  const temporaryPath = path.resolve(
-    "var/uploads/resources",
+  const temporaryPath = uploadFilePath(
+    "resources",
     `${resourceId}-pages-${pageStart}-${pageEnd}.pdf`,
   );
   await writeFile(temporaryPath, await output.save());
@@ -47,7 +48,7 @@ export const getResourcePagePdfPath = async (resourceId: string, pageNumber: num
   const resource = resourceRepository.getStoredResource(resourceId);
   if (!resource) throw new Error("RESOURCE_NOT_FOUND");
   if (!resource.pageCount || pageNumber < 1 || pageNumber > resource.pageCount) throw new Error("INVALID_PAGE_NUMBER");
-  const previewDirectory = path.resolve("var/uploads/parsed", resourceId, "previews");
+  const previewDirectory = uploadFilePath("parsed", resourceId, "previews");
   const previewPath = path.join(previewDirectory, `page-${pageNumber}.pdf`);
   try {
     await access(previewPath);

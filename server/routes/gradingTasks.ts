@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { AnalysisEvidenceRef, FirstSectionAnalysis, GradingMode, TrialGradingResult, VisionValidationResult } from '../../src/domain/types';
 import { getModelConfig, isModelConfigured } from '../config/modelConfig';
 import { getDocumentParserConfig, isPaddleCloudConfigured } from '../config/documentParserConfig';
+import { runtimeConfig, uploadFilePath } from '../config/runtimeConfig';
 import { deleteFirstSectionAnalysis, getFirstSectionAnalysis, saveFirstSectionAnalysis } from '../repositories/analysisRepository';
 import { appendMaterials, getMaterials, removeMaterialsForKind, replaceMaterialsForKind, StoredMaterial, updateMaterial } from '../repositories/materialRepository';
 import { getTaskRubrics, saveTaskRubric } from '../repositories/gradingRubricRepository';
@@ -45,7 +46,7 @@ const decodeUploadFileName = (fileName: string) => {
   return decoded.includes('\uFFFD') ? fileName : decoded;
 };
 const upload = multer({
-  dest: 'var/uploads',
+  dest: runtimeConfig.uploadDirectory,
   limits: { fileSize: 25 * 1024 * 1024, files: 20 },
   fileFilter: (_request, file, callback) => callback(null,
     file.mimetype === 'application/pdf'
@@ -215,7 +216,7 @@ router.get('/:taskId/materials/:assetId/evidence-crop', async (request, response
     return;
   }
   try {
-    const sourcePath = path.resolve('var/uploads/parsed', material.id, 'resources', sourcePage.fileName);
+    const sourcePath = uploadFilePath('parsed', material.id, 'resources', sourcePage.fileName);
     const image = sharp(sourcePath);
     const metadata = await image.metadata();
     if (!metadata.width || !metadata.height) throw new Error('SOURCE_PAGE_DIMENSIONS_MISSING');
@@ -280,7 +281,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
   try {
     const pageSources = sourceResources.map(resource => ({
       pageNumber: resource.pageNumber!,
-      sourceImagePath: path.resolve('var/uploads/parsed', material!.id, 'resources', resource.fileName)
+      sourceImagePath: uploadFilePath('parsed', material!.id, 'resources', resource.fileName)
     }));
     const expectedEvidenceIds = new Map(analysis.questions
       .filter(question => parsedRequest.data.questionNos.includes(question.displayNo))

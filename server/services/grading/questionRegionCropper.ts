@@ -8,6 +8,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { VisionEvidenceKind } from '../../../src/domain/types';
 import { PaddleParserArtifact } from '../../schemas/paddleParserArtifact';
+import { uploadFilePath } from '../../config/runtimeConfig';
 import { containsRegion, expandRegion, inspectCropEdges, PixelRegion } from './answerEvidenceValidator';
 
 export interface PageSource {
@@ -507,7 +508,7 @@ export const createVisionLocatedRegions = async (
   artifact?: PaddleParserArtifact,
   expectedQuestionKinds: Map<string, VisionEvidenceKind> = new Map()
 ): Promise<LocatedRegion[]> => {
-  const cropDirectory = path.resolve('var/uploads/validation', taskId, assetId);
+  const cropDirectory = uploadFilePath('validation', taskId, assetId);
   await mkdir(cropDirectory, { recursive: true });
   const pageByNumber = new Map(pageSources.map(page => [page.pageNumber, page]));
   const bestRegionByNo = new Map<string, VisionLocatedRegion>();

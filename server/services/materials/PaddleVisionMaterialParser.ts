@@ -16,6 +16,7 @@ import {
   RequestTimeoutError
 } from '@paddleocr/api-sdk';
 import { DocumentParserConfig } from '../../config/documentParserConfig';
+import { uploadFilePath } from '../../config/runtimeConfig';
 import { mergeParserArtifactPages } from '../../repositories/parserArtifactRepository';
 import { MaterialParser, MaterialParserError, MaterialParserInput } from './MaterialParser';
 import { enhanceRecognitionPage } from './recognitionImagePreprocessor';
@@ -81,7 +82,7 @@ export class PaddleVisionMaterialParser implements MaterialParser {
           inputImageUrl: page.inputImageUrl
         }))
       });
-      const resourceDirectory = path.resolve('var/uploads/parsed', input.assetId, 'resources');
+      const resourceDirectory = uploadFilePath('parsed', input.assetId, 'resources');
       await mkdir(resourceDirectory, { recursive: true });
       const resourcePlans = scheduleProfile ? [] : result.pages.flatMap((page, pageIndex) => [
         ...(page.inputImageUrl ? [{

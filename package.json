@@ -7,6 +7,7 @@
     "dev": "vite --port=3000 --host=0.0.0.0",
     "dev:api": "node node_modules/tsx/dist/cli.mjs watch server/index.ts",
     "server": "node node_modules/tsx/dist/cli.mjs server/index.ts",
+    "start": "NODE_ENV=production node --import tsx server/index.ts",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
@@ -19,7 +20,11 @@
     "test:vision-validation": "node --import tsx --test server/repositories/visionValidationRepository.test.ts server/services/materials/recognitionImagePreprocessor.test.ts server/services/grading/OpenAICompatibleVisionRecognizer.test.ts server/services/grading/FocusedPaddleRecognizer.test.ts server/services/grading/questionRegionCropper.test.ts server/services/grading/answerFieldSchema.test.ts server/services/evidence/sourceEvidenceResolver.test.ts",
     "test:resources": "node --import tsx --test server/repositories/resourceRepository.test.ts server/services/resources/resourceAnalyzer.test.ts",
     "migrate:roster-json": "node --import tsx server/scripts/migrateRosterJson.ts",
-    "backup:roster": "node --import tsx server/scripts/backupRoster.ts"
+    "backup:roster": "node --import tsx server/scripts/backupRoster.ts",
+    "backup:data": "node --import tsx server/scripts/backupAppData.ts",
+    "verify:data": "node --import tsx server/scripts/verifyAppData.ts",
+    "restore:data": "node --import tsx server/scripts/restoreAppData.ts",
+    "test:operations": "node --import tsx --test server/config/runtimeConfig.test.ts server/services/operations/dataSnapshot.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",
@@ -40,6 +45,7 @@
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "sharp": "^0.34.5",
+    "tsx": "^4.21.0",
     "vite": "^6.2.3",
     "zod": "^4.4.3"
   },
@@ -53,7 +59,6 @@
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
   }

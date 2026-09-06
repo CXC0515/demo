@@ -7,6 +7,7 @@ import { execFile } from "node:child_process";
 import { access, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { uploadFilePath } from "../../config/runtimeConfig";
 import { resourceRepository } from "../../repositories/resourceRepository";
 
 const execFileAsync = promisify(execFile);
@@ -15,7 +16,7 @@ export const getResourcePageImagePath = async (resourceId: string, pageNumber: n
   const resource = resourceRepository.getStoredResource(resourceId);
   if (!resource) throw new Error("RESOURCE_NOT_FOUND");
   if (!resource.pageCount || pageNumber < 1 || pageNumber > resource.pageCount) throw new Error("INVALID_PAGE_NUMBER");
-  const previewDirectory = path.resolve("var/uploads/parsed", resourceId, "page-images");
+  const previewDirectory = uploadFilePath("parsed", resourceId, "page-images");
   const outputBase = path.join(previewDirectory, `page-${pageNumber}`);
   const outputPath = `${outputBase}.jpg`;
   try {

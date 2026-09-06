@@ -4,34 +4,55 @@
  */
 
 import 'dotenv/config';
-import express from 'express';
-import { mkdirSync } from 'node:fs';
-import path from 'node:path';
-import gradingTasksRouter from './routes/gradingTasks';
-import rosterRouter from './routes/roster';
-import classroomRouter from './routes/classroom';
-import gradingTaskManagementRouter from './routes/gradingTaskManagement';
-import resourcesRouter from './routes/resources';
-import scheduleRouter from './routes/schedule';
-import { getModelConfig, isModelConfigured } from './config/modelConfig';
-import { resourceRepository } from './repositories/resourceRepository';
+import { assertProductionAssets, ensureRuntimeDirectories, runtimeConfig } from './config/runtimeConfig';
+import { logEvent } from './observability/logger';
 
-const app = express();
-const port = Number(process.env.API_PORT ?? 3001);
-const uploadDirectory = path.resolve('var/uploads');
-mkdirSync(uploadDirectory, { recursive: true });
+ensureRuntimeDirectories();
+assertProductionAssets();
+
+const { createApp } = await import('./app');
+const { closeRosterDatabase } = await import('./database/rosterDatabase');
+const { closeResourceDatabase } = await import('./database/resourceDatabase');
+const { resourceRepository } = await import('./repositories/resourceRepository');
+
 resourceRepository.markRunningJobsInterrupted();
+const app = createApp();
+const server = app.listen(runtimeConfig.port, runtimeConfig.host, () => {
+  logEvent('info', 'server_started', {
+    host: runtimeConfig.host,
+    port: runtimeConfig.port,
+    nodeEnv: runtimeConfig.nodeEnv,
+  });
+});
 
-app.use(express.json({ limit: '1mb' }));
-app.use('/uploads', express.static(uploadDirectory, { index: false, fallthrough: false }));
-app.get('/api/health', (_request, response) => response.json({ ok: true, multimodalConfigured: isModelConfigured(getModelConfig()) }));
-app.use('/api', rosterRouter);
-app.use('/api', classroomRouter);
-app.use('/api', gradingTaskManagementRouter);
-app.use('/api/grading-tasks', gradingTasksRouter);
-app.use('/api', resourcesRouter);
-app.use('/api', scheduleRouter);
+let shuttingDown = false;
+const shutdown = (reason: string, exitCode: number) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logEvent('info', 'server_shutdown_started', { reason });
+  const forceTimer = setTimeout(() => {
+    logEvent('error', 'server_shutdown_forced', { reason, timeoutMs: runtimeConfig.shutdownTimeoutMs });
+    server.closeAllConnections();
+    process.exit(exitCode || 1);
+  }, runtimeConfig.shutdownTimeoutMs);
+  forceTimer.unref();
+  server.close(() => {
+    clearTimeout(forceTimer);
+    closeRosterDatabase();
+    closeResourceDatabase();
+    logEvent('info', 'server_shutdown_completed', { reason });
+    process.exit(exitCode);
+  });
+  server.closeIdleConnections();
+};
 
-app.listen(port, () => {
-  console.log(`API server listening on http://localhost:${port}`);
+process.once('SIGINT', () => shutdown('SIGINT', 0));
+process.once('SIGTERM', () => shutdown('SIGTERM', 0));
+process.once('uncaughtException', (error) => {
+  logEvent('error', 'uncaught_exception', { error });
+  shutdown('uncaughtException', 1);
+});
+process.once('unhandledRejection', (error) => {
+  logEvent('error', 'unhandled_rejection', { error });
+  shutdown('unhandledRejection', 1);
 });
