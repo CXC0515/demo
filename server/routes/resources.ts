@@ -18,6 +18,7 @@ import {
 import { getResourcePageImagePath } from "../services/resources/resourcePageRenderService";
 import { assertPathInsideWorkspace, uploadFilePath } from "../context/workspaceContext";
 import { uploadRateLimit } from '../middleware/security';
+import { runtimeConfig } from '../config/runtimeConfig';
 
 const router = Router();
 const upload = multer({
@@ -28,7 +29,7 @@ const upload = multer({
       callback(null, directory);
     },
   }),
-  limits: { fileSize: 500 * 1024 * 1024, files: 1 },
+  limits: { fileSize: runtimeConfig.uploadLimits.resourceFileBytes, files: 1 },
   fileFilter: (_request, file, callback) =>
     callback(
       null,

@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { access, cp, lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { access, cp, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 
@@ -91,4 +91,79 @@ export const restoreProductSnapshot = async (snapshotInput: string, targetInput:
   const report = { formatVersion: 2, restoredAt: new Date().toISOString(), snapshotRoot, sourceRoot: manifest.sourceRoot, targetRoot };
   await writeFile(path.join(targetRoot, 'restore-report.json'), `${JSON.stringify(report, null, 2)}\n`, { flag: 'wx' });
   return report;
+};
+
+const sameSnapshotContent = (first: ProductSnapshotManifest, second: ProductSnapshotManifest) => {
+  if (first.files.length !== second.files.length) return false;
+  return first.files.every((file, index) => {
+    const other = second.files[index];
+    return other?.path === file.path && other.size === file.size && other.sha256 === file.sha256;
+  });
+};
+
+const snapshotTimestamp = (now: Date) => now.toISOString().replaceAll(':', '-').replaceAll('.', '-');
+
+export interface ManagedProductSnapshotResult {
+  status: 'created' | 'skipped';
+  snapshotPath?: string;
+  comparedWith?: string;
+  pruned: string[];
+}
+
+export const createManagedProductSnapshot = async (
+  sourceInput: string,
+  automaticRootInput: string,
+  retention = 2,
+  now = new Date(),
+): Promise<ManagedProductSnapshotResult> => {
+  if (!Number.isInteger(retention) || retention < 1) throw new Error('INVALID_SNAPSHOT_RETENTION');
+  const sourceRoot = path.resolve(sourceInput);
+  const automaticRoot = path.resolve(automaticRootInput);
+  if (sourceRoot === automaticRoot) throw new Error('INVALID_AUTOMATIC_BACKUP_ROOT');
+  await mkdir(automaticRoot, { recursive: true });
+
+  const stamp = snapshotTimestamp(now);
+  const suffix = randomUUID();
+  const pending = path.join(automaticRoot, `.pending-${stamp}-${suffix}`);
+  const incomplete = path.join(automaticRoot, `incomplete-${stamp}-${suffix}`);
+  try {
+    const current = await createProductSnapshot(sourceRoot, pending);
+    await verifyProductSnapshot(pending);
+    const existing = (await readdir(automaticRoot, { withFileTypes: true }))
+      .filter(entry => entry.isDirectory() && entry.name.startsWith('product-'))
+      .map(entry => path.join(automaticRoot, entry.name))
+      .sort();
+    const verifiedExisting: Array<{ path: string; manifest: ProductSnapshotManifest }> = [];
+    for (const candidate of existing) {
+      try {
+        verifiedExisting.push({ path: candidate, manifest: await verifyProductSnapshot(candidate) });
+      } catch {
+        // Keep damaged snapshots for diagnosis, but never let one prevent a new
+        // verified recovery point from being created.
+      }
+    }
+    const previous = verifiedExisting.at(-1);
+    const previousPath = previous?.path;
+    if (previousPath) {
+      if (sameSnapshotContent(current, previous.manifest)) {
+        await rm(pending, { recursive: true, force: true });
+        return { status: 'skipped', comparedWith: previousPath, pruned: [] };
+      }
+    }
+
+    const destination = path.join(automaticRoot, `product-${stamp}-${suffix}`);
+    await rename(pending, destination);
+    const successful = [...verifiedExisting.map(item => item.path), destination].sort();
+    const pruned = successful.slice(0, Math.max(0, successful.length - retention));
+    for (const target of pruned) await rm(target, { recursive: true, force: true });
+    return { status: 'created', snapshotPath: destination, comparedWith: previousPath, pruned };
+  } catch (error) {
+    try {
+      await lstat(pending);
+      await rename(pending, incomplete);
+    } catch (pendingError) {
+      if ((pendingError as NodeJS.ErrnoException).code !== 'ENOENT') throw pendingError;
+    }
+    throw error;
+  }
 };

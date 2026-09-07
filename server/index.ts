@@ -19,15 +19,21 @@ const { closeAuthDatabase } = await import('./database/authDatabase');
 const { getAuthDatabase } = await import('./database/authDatabase');
 const { createWorkspaceContext, runWithWorkspace } = await import('./context/workspaceContext');
 const { resourceRepository } = await import('./repositories/resourceRepository');
+const { markProcessingMaterialsInterrupted } = await import('./repositories/materialRepository');
+const { markRunningGradingBatchesInterrupted } = await import('./repositories/gradingBatchRepository');
 
 const memberships = getAuthDatabase().prepare(`
   SELECT user_id, workspace_id, role FROM app_workspace_members WHERE status = 'active'
 `).all() as Array<{ user_id: string; workspace_id: string; role: 'owner' | 'teacher' }>;
+const interrupted = { resourceJobs: 0, materials: 0, gradingBatches: 0 };
 for (const membership of memberships) {
   runWithWorkspace(createWorkspaceContext(membership.user_id, membership.workspace_id, membership.role), () => {
-    resourceRepository.markRunningJobsInterrupted();
+    interrupted.resourceJobs += resourceRepository.markRunningJobsInterrupted();
+    interrupted.materials += markProcessingMaterialsInterrupted();
+    interrupted.gradingBatches += markRunningGradingBatchesInterrupted();
   });
 }
+if (Object.values(interrupted).some(Boolean)) logEvent('warn', 'running_jobs_marked_interrupted', interrupted);
 const app = createApp();
 const server = app.listen(runtimeConfig.port, runtimeConfig.host, () => {
   logEvent('info', 'server_started', {

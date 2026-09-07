@@ -24,14 +24,15 @@
     "backup:data": "node --import tsx server/scripts/backupAppData.ts",
     "verify:data": "node --import tsx server/scripts/verifyAppData.ts",
     "restore:data": "node --import tsx server/scripts/restoreAppData.ts",
-    "test:operations": "node --import tsx --test server/config/runtimeConfig.test.ts server/services/operations/dataSnapshot.test.ts",
-    "test:workspace-isolation": "node --import tsx --test server/context/workspaceIsolation.test.ts",
+    "test:operations": "node --import tsx --test server/config/runtimeConfig.test.ts server/services/operations/dataSnapshot.test.ts server/services/operations/productSnapshot.test.ts",
+    "test:workspace-isolation": "node --import tsx --test server/context/workspaceIsolation.test.ts server/repositories/interruptedState.test.ts",
     "test:auth": "node --import tsx --test server/auth/authIntegration.test.ts",
     "auth:invite-owner": "node --import tsx server/scripts/bootstrapOwnerInvitation.ts",
     "migrate:legacy-workspace": "node --import tsx server/scripts/migrateLegacyWorkspace.ts",
     "backup:product": "node --import tsx server/scripts/backupProductData.ts",
     "verify:product": "node --import tsx server/scripts/verifyProductData.ts",
-    "restore:product": "node --import tsx server/scripts/restoreProductData.ts"
+    "restore:product": "node --import tsx server/scripts/restoreProductData.ts",
+    "backup:production": "node --import tsx server/scripts/backupProductionData.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",

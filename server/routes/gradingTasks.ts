@@ -4,7 +4,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
@@ -15,6 +15,7 @@ import { getModelConfig, isModelConfigured } from '../config/modelConfig';
 import { getDocumentParserConfig, isPaddleCloudConfigured } from '../config/documentParserConfig';
 import { assertPathInsideWorkspace, uploadFilePath } from '../context/workspaceContext';
 import { uploadRateLimit } from '../middleware/security';
+import { runtimeConfig } from '../config/runtimeConfig';
 import { deleteFirstSectionAnalysis, getFirstSectionAnalysis, saveFirstSectionAnalysis } from '../repositories/analysisRepository';
 import { appendMaterials, getMaterials, removeMaterialsForKind, replaceMaterialsForKind, StoredMaterial, updateMaterial } from '../repositories/materialRepository';
 import { getTaskRubrics, saveTaskRubric } from '../repositories/gradingRubricRepository';
@@ -55,7 +56,10 @@ const upload = multer({
       callback(null, directory);
     },
   }),
-  limits: { fileSize: 25 * 1024 * 1024, files: 20 },
+  limits: {
+    fileSize: runtimeConfig.uploadLimits.gradingFileBytes,
+    files: runtimeConfig.uploadLimits.gradingFileCount,
+  },
   fileFilter: (_request, file, callback) => callback(null,
     file.mimetype === 'application/pdf'
     || file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -497,11 +501,12 @@ router.post('/:taskId/vision-validation', async (request, response) => {
 
 router.post('/:taskId/materials', uploadRateLimit, upload.array('files'), (request, response) => {
   const kind = request.body.kind;
+  const files = (request.files as Express.Multer.File[] | undefined) ?? [];
   if (kind !== 'assignment' && kind !== 'reference-answer' && kind !== 'student-submission') {
+    files.forEach(file => rmSync(file.path, { force: true }));
     response.status(400).json({ code: 'INVALID_MATERIAL_KIND' });
     return;
   }
-  const files = (request.files as Express.Multer.File[] | undefined) ?? [];
   if (!files.length) {
     response.status(400).json({ code: 'NO_FILES' });
     return;

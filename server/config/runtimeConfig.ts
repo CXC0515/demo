@@ -24,7 +24,15 @@ export interface RuntimeConfig {
   resourceDatabasePath: string;
   distDirectory: string;
   shutdownTimeoutMs: number;
+  uploadLimits: {
+    resourceFileBytes: number;
+    gradingFileBytes: number;
+    gradingFileCount: number;
+    scheduleFileBytes: number;
+  };
 }
+
+const MEBIBYTE = 1024 * 1024;
 
 const positiveInteger = (value: string | undefined, fallback: number, name: string) => {
   if (!value?.trim()) return fallback;
@@ -89,6 +97,12 @@ export const loadRuntimeConfig = (
     resourceDatabasePath: resolved(environment.RESOURCE_DB_PATH, path.join(dataDirectory, 'resources.sqlite'), cwd),
     distDirectory: resolved(environment.APP_DIST_DIR, 'dist', cwd),
     shutdownTimeoutMs: positiveInteger(environment.SHUTDOWN_TIMEOUT_MS, 15_000, 'SHUTDOWN_TIMEOUT_MS'),
+    uploadLimits: {
+      resourceFileBytes: 80 * MEBIBYTE,
+      gradingFileBytes: 4 * MEBIBYTE,
+      gradingFileCount: 20,
+      scheduleFileBytes: 10 * MEBIBYTE,
+    },
   };
 };
 

@@ -13,6 +13,7 @@ import { importScheduleDocument } from '../services/schedule/scheduleImportServi
 import { createReminderDrafts } from '../services/schedule/reminderImportService';
 import { uploadFilePath } from '../context/workspaceContext';
 import { uploadRateLimit } from '../middleware/security';
+import { runtimeConfig } from '../config/runtimeConfig';
 
 const router = Router();
 const scheduleSchema = z.object({
@@ -112,7 +113,7 @@ const upload = multer({
       callback(null, directory);
     },
   }),
-  limits: { fileSize: 20 * 1024 * 1024, files: 1 },
+  limits: { fileSize: runtimeConfig.uploadLimits.scheduleFileBytes, files: 1 },
   fileFilter: (_request, file, callback) => callback(null, file.mimetype === 'application/pdf' || file.mimetype.startsWith('image/'))
 });
 router.post('/schedule/import', uploadRateLimit, upload.single('file'), async (request, response) => {
