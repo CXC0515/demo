@@ -1,9 +1,9 @@
 # DEMO 网页产品第一阶段方案
 
-> 状态：第 2 切片已实施并完成首次本地验收修正；尚未公网开放
-> 当前版本：`v0.6`
+> 状态：第 2 切片已完成本地验收；第 3 切片方案已沉淀但尚未实施
+> 当前版本：`v0.7`
 > 文档日期：2026-09-08
-> Git 基线：`origin/main@d1f2b87129cd71e354af210d759d14ccc5e754f6`
+> Git 基线：`origin/main@db34ba370b4cba3fb7a9a6f4778e0818604afd77`
 
 ## 0. 阅读和批注方式
 
@@ -26,7 +26,7 @@
 
 ## 1. 本版概要
 
-本版记录第 2 切片的实际实施结果及首次本地验收修正：邀请注册和登录明确拆分，注册阶段不创建会话，注册成功后返回登录页；教师资料采用注册时实际填写的姓名。首个所有者继续读取迁移候选数据，后续受邀教师只获得全新空工作区。公网 Tunnel、域名 DNS、自动开机和国内三网实测尚未实施，因此仍不能邀请外部用户。
+本版固定第 3 切片的公网试用边界：正式入口只使用根域名 `https://unreached.cn`，不默认创建 `app.unreached.cn`；MacBook 继续作为唯一源站，不购买服务器，不依赖一个月建站权益；外置盘、iCloud 和其他云盘均不纳入。自动备份仅在数据变化时创建并保留最近两份成功快照，现有历史快照不自动删除。完整实施方案见 `docs/WEB_PUBLIC_TRIAL_DEPLOYMENT_PLAN.md`。
 
 本版确认用户已经取得长期使用的 `unreached.cn`，并仅把一个月阿里云万小智 AI 建站权益视为临时赠送能力。默认部署路径仍为：
 
@@ -48,7 +48,7 @@ Cloudflare 全球网络与 Tunnel（免费起步）
 
 第一阶段不购买服务器。服务器仅在中国电信、联通、移动真实测试不达标，或备案/运营要求明确需要中国大陆云资源时，作为另行审批的备选方案。
 
-主要成本是域名/建站权益续费、MacBook 电费、已有 AI/OCR 调用费和可选的备份介质。Cloudflare Tunnel 免费起步。Agent Mail CLI 先用于人工发送少量邀请邮件；它能否承担自动邮箱验证和密码重置，要经过第 6.4 节的能力验证。
+主要成本是域名续费、MacBook 电费和已有 AI/OCR 调用费。Cloudflare Tunnel 免费起步。Agent Mail CLI 用于人工发送少量邀请和密码重置邮件，本阶段不把交互式 CLI 嵌入 Web 服务。
 
 一个月共享 ECS/建站权益不进入关键依赖：产品在它到期、停用或配额耗尽后仍必须正常运行。它最多用于备案、临时说明页或虚构数据技术验证。官方资料证明它能构建并安装带 Dockerfile 的 `.tar` 应用，却没有证明轻量共享实例提供独立 SSH、稳定持久卷、长任务进程保障和可恢复备份。不得把母文件夹真实数据直接上传试错。
 
@@ -86,7 +86,7 @@ Cloudflare 全球网络与 Tunnel（免费起步）
 
 | 项目 | 当前事实 | 证据位置 |
 | --- | --- | --- |
-| Git 基线 | 第 2 切片从 `origin/main@0cf1671` 创建独立 worktree | 本轮 `git fetch origin` 与 `git rev-parse` |
+| Git 基线 | 第 3 切片方案从 `origin/main@db34ba3` 创建独立文档 worktree | 2026-09-08 `git fetch origin` 与 `git rev-parse` |
 | 前端 | React 19 + Vite 6 + TypeScript | `package.json`、`src/` |
 | API | Express 5，由 `tsx` 运行 TypeScript | `package.json`、`server/index.ts` |
 | 持久数据 | 两个 SQLite、上传文件、JSON 状态、OCR/解析产物 | `server/database/`、`server/repositories/`、`var/` |
@@ -98,8 +98,8 @@ Cloudflare 全球网络与 Tunnel（免费起步）
 | 写入路径 | HTTP 业务写入由服务端工作区上下文解析；脚本保留显式旧格式路径用于迁移 | database、repository、parser 与 route 文件 |
 | 长任务 | OCR/AI 在请求或进程内推进，重启恢复不完整 | grading/resource 路由与服务 |
 | OCR/AI | PaddleOCR 云 API、OpenAI-compatible 服务；部分 DOCX/PDF 流程使用本机命令 | `server/config/`、`server/workers/` |
-| 健康检查 | 只报告 API 存活和多模态模型是否配置 | `GET /api/health` |
-| 真实数据状态 | 交接记录为约 322 MiB，两库完整性曾验证为 `ok` | `docs/PROJECT_HANDOFF.md` 与前序只读调查 |
+| 健康检查 | 存活接口与就绪接口已分离；就绪会检查认证库、工作区库与 AI/OCR 配置状态 | `server/app.ts` |
+| 真实数据状态 | 认证候选约 333 MiB；所有者工作区为 4 个班级、53 名学生、2 份资料和 522 个资料页面 | 2026-09-08 只读检查与迁移记录 |
 | 已有域名 | `unreached.cn` | 用户于 2026-09-07 确认 |
 | 已购建站权益 | 阿里云万小智 AI 建站约 1 个月，含共享 ECS、1 GiB 创意中心空间、10 GiB/年 CDN、免费 SSL、1 个绑定域名、1 个备案服务码 | 用户提供的订单规格；产品身份由规格与阿里云公开资料交叉判断 |
 | Agent Mail CLI | 已在用户级目录安装 `@tencent-qqmail/agently-cli@1.0.18`，skill 已安装给 Codex | 2026-09-07 安装与验证记录 |
@@ -132,7 +132,6 @@ Cloudflare 全球网络与 Tunnel（免费起步）
 
 - `unreached.cn` 的注册主体是个人还是单位，以及万小智选择的是中国内地还是中国香港节点；
 - 是否已经开启 macOS FileVault；
-- 备份异地副本选择：内置 iCloud Drive，或外接加密硬盘；
 - MacBook 是否可能合盖、断电、自动更新重启或离开稳定网络；
 - 首批 3–10 位试用者所在城市与运营商，便于安排三网验收。
 
@@ -168,7 +167,7 @@ Cloudflare 全球网络与 Tunnel（免费起步）
 - 使用已经购买并完成实名的 `unreached.cn`；
 - 将域名 DNS 托管到 Cloudflare；
 - MacBook 安装并运行 `cloudflared`；
-- `app.<域名>` 通过 Tunnel 指向只监听本机地址的 Express；
+- 根域名 `unreached.cn` 通过 Tunnel 指向只监听本机地址的 Express；
 - Express 同源提供页面、`/api` 和鉴权后的文件内容；
 - 不开放家庭路由器端口，不直接暴露 MacBook IP。
 
@@ -334,8 +333,8 @@ GET  /api/files/:assetId/...   登录、归属校验后的文件读取
 ### 8.1 上传限制
 
 - 资料库远程单文件：80 MiB；
-- 批改答卷远程单文件：25 MiB，单请求最多 20 个且增加总请求体上限；
-- 课表/名册：20 MiB；
+- 批改答卷远程单文件：4 MiB，单请求最多 20 个，使文件总量不超过约 80 MiB；
+- 课表/日程导入：10 MiB；
 - 仅允许明确文件类型，并同时检查扩展名、MIME 和文件签名；
 - 上传先写当前工作区临时目录，校验后原子移动；
 - 达到限制时返回明确中文提示和本地导入指引。
@@ -426,18 +425,19 @@ Cloudflare 文档当前显示免费/Pro 代理请求体常见上限为 100 MB，
 
 ### 11.1 备份层级
 
-1. 每 6 小时：所有 SQLite 在线备份 + 新增/变化文件快照；
-2. 每晚：生成完整校验清单和加密归档；
-3. 每周：把加密归档复制到异地位置；
-4. 每月：恢复到临时目录并执行自动校验与 UI 抽查。
+1. 每天检查一次产品数据是否变化；无变化不创建快照；
+2. 有变化时对所有 SQLite 执行在线备份，并复制上传和解析产物；
+3. 新快照完成 SHA-256 与 SQLite 校验后才成为成功恢复点；
+4. 自动备份只保留最近两份成功快照；升级/迁移前快照独立保存，不自动清理；
+5. 公网开放前至少完成一次恢复到新目录的演练。
 
-本机同一磁盘上的备份只能防误操作，不能防硬盘损坏、丢失或勒索。异地副本第一阶段可选 macOS 自带 iCloud Drive 中的加密备份归档，或外接加密硬盘；不把正在使用的 SQLite 直接放入同步盘。
+本阶段不使用外置盘、iCloud 或其他云盘。本机同一磁盘上的备份只能防误操作、错误升级和部分逻辑损坏，不能防硬盘损坏、整机丢失或勒索；这是已确认取舍。
 
 建议目标：
 
-- RPO（最多可接受的数据损失）：6 小时；
+- RPO（最多可接受的数据损失）：24 小时；
 - RTO（从故障到恢复可用）：2 小时；
-- 本地保留：7 天滚动 + 4 个周备份；
+- 本地自动保留：最近 2 份成功快照；
 - 删除备份前必须先有一个已验证的替代恢复点。
 
 ### 11.2 恢复验证
@@ -486,7 +486,7 @@ Cloudflare 文档当前显示免费/Pro 代理请求体常见上限为 100 MB，
 | 自动事务邮件 | 暂不购买 | 只有试用规模需要自动验证/找回密码时再选择 API/SMTP 服务 |
 | MacBook 电费 | 按当地电价和实际功耗 | 现有硬件，无服务器租金 |
 | AI/OCR | 沿用现有按量费用 | 由真实调用量决定 |
-| 异地备份 | ¥0 或一块硬盘成本 | 已有 iCloud 空间可先使用加密归档；否则使用加密外接盘 |
+| 本机备份 | ¥0 | 仅保留最近两份自动快照；不含异地灾备能力 |
 | 国内服务器 | ¥0 | 默认不购买，只有触发备选方案才重新报价与审批 |
 
 邮件是否稳定送达国内邮箱仍需真实测试。Agent Mail 的人工邀请路径避免现在就引入另一个邮件供应商，但代价是所有者需要人工确认邀请和重置邮件。
@@ -538,46 +538,28 @@ Cloudflare 文档当前显示免费/Pro 代理请求体常见上限为 100 MB，
 
 ## 15. 准备修改的文件和范围
 
-以下是用户批准代码实施后预计的范围。实施前会在独立 `codex/<功能名>` 分支/worktree 中逐项核对；如果发现必须超出范围，将停止并重新审批。
+第 1、2 切片的身份、隔离、受保护文件和产品快照已经完成。第 3 切片只按 `docs/WEB_PUBLIC_TRIAL_DEPLOYMENT_PLAN.md` 第 11 节的精确范围执行；如果发现必须超出范围，将停止并重新审批。
 
 ### 15.1 现有文件
 
 | 文件/区域 | 预计修改 |
 | --- | --- |
-| `package.json`、锁文件 | 生产启动、认证、安全、限速依赖和测试脚本 |
-| `.env.example` | 数据根目录、认证 URL/密钥、邮件、上传和并发配置；不写真实值 |
-| `server/index.ts` | 同源静态前端、认证入口、中间件顺序、健康检查、优雅退出 |
-| `server/database/*.ts` | 从进程级单库改为服务端工作区上下文选库 |
-| `server/repositories/*.ts` | 消除共享 `var` 单例，显式使用工作区数据根目录 |
-| `server/routes/*.ts` | 登录/权限校验、上传限制、受保护文件访问、异步任务提交 |
-| `server/services/**/*.ts` | 工作区路径、任务状态、OCR/AI 可恢复边界 |
-| `src/App.tsx`、`src/main.tsx` | 会话加载、未登录入口和认证后的应用壳层 |
-| `src/services/*.ts` | 统一认证错误、任务状态和受保护文件 URL |
-| `src/features/settings/*` | 所有者邀请与账号管理入口 |
-| 资料、批改、课表相关组件 | 上传限制提示、异步进度、失败与重试反馈 |
+| `package.json` | 生产备份和运维检查命令 |
+| `server/config/runtimeConfig.ts`、测试 | 集中定义生产上传限制和必要运行参数 |
+| `server/routes/resources.ts` | 资料库 80 MiB 限制、类型检查和失败清理 |
+| `server/routes/gradingTasks.ts` | 批改材料 4 MiB × 20 限制和失败清理 |
+| `server/routes/schedule.ts` | 日程导入 10 MiB 限制和失败清理 |
+| `server/index.ts`、相关 repository/service | 启动时收敛遗留任务状态，不引入持久队列 |
+| `server/services/operations/productSnapshot.ts`、测试 | 自动快照比较、验证和有限保留所需元数据 |
+| `docs/*.md` | 同步实际运行、迁移、风险和验收记录 |
 
 ### 15.2 预计新增文件/目录
 
 ```text
-server/auth/
-server/context/workspaceContext.ts
-server/database/authDatabase.ts
-server/database/workspaceDatabase.ts
-server/middleware/authenticated.ts
-server/middleware/security.ts
-server/routes/authAdministration.ts
-server/routes/protectedFiles.ts
-server/services/jobs/
-server/scripts/migrateLegacyWorkspace.ts
-server/scripts/verifyWorkspace.ts
-server/scripts/backupAllWorkspaces.ts
-server/scripts/restoreWorkspace.ts
-src/features/auth/
-src/services/authClient.ts
+server/scripts/backupProductionData.ts
 ops/launchd/
-ops/cloudflared/
-docs/WEB_OPERATIONS_RUNBOOK.md
-docs/WEB_DATA_MIGRATION_RUNBOOK.md
+scripts/（生产安装与检查脚本）
+docs/WEB_PUBLIC_TRIAL_DEPLOYMENT_PLAN.md
 ```
 
 实际 `launchd` 与 Tunnel 凭据只存在 MacBook 系统目录，不提交 Git；仓库只保存无密钥模板。
@@ -595,12 +577,11 @@ docs/WEB_DATA_MIGRATION_RUNBOOK.md
 
 ## 16. 实施顺序与审批切片
 
-为减少一次性改动风险，建议分为四个可独立验收的实施切片：
+为减少一次性改动风险，采用三个可独立验收的实施切片：
 
-1. **本地生产底座**：数据根目录、同源构建、健康检查、日志、优雅退出、备份/恢复脚本；只使用数据副本。
-2. **身份与工作区隔离**：Better Auth、邀请制注册、权限、每用户目录、受保护文件访问、旧数据归属迁移。
-3. **异步任务与上传边界**：持久任务状态、重启行为、并发保护、80 MiB 限制和本地大文件导入。
-4. **公网试用**：`unreached.cn`、Tunnel、Agent Mail 人工邀请、`launchd`、安全检查和国内三网验收；万小智权益仅作可选验证，不进入关键路径。
+1. **本地生产底座（已完成）**：数据根目录、同源构建、健康检查、日志、优雅退出、备份/恢复脚本；只使用数据副本。
+2. **身份与工作区隔离（已完成）**：Better Auth、邀请制注册、权限、每用户目录、受保护文件访问、旧数据归属迁移。
+3. **公网试用（待审批）**：上传边界和遗留任务状态、`var-product` 副本切换、`unreached.cn`、Tunnel、Agent Mail 人工邀请、`launchd`、自动备份、安全检查和国内三网验收。
 
 每个切片完成后给出修改清单、验证结果和已知风险。域名购买、第三方账号和公网开放涉及外部状态，执行前单独向用户确认。
 
@@ -726,11 +707,11 @@ docs/WEB_DATA_MIGRATION_RUNBOOK.md
 
 ## 22. 下一切片批准口径
 
-第 2 切片已按用户授权完成。下一步应先由用户审阅并验收本地登录、数据归属和跨账号隔离，再单独审批第 3 切片（MacBook 后台运行、Cloudflare Tunnel、`unreached.cn` DNS/HTTPS 与三网试用）。
+第 2 切片已完成本地验收。第 3 切片的完整范围、文件清单、系统变更、数据切换和验收标准已经沉淀在 `docs/WEB_PUBLIC_TRIAL_DEPLOYMENT_PLAN.md`，尚未获准实施。
 
-> 同意执行 `docs/WEB_PRODUCT_PHASE1_PLAN.md` v0.5 中的第 3 个实施切片。
+> 同意执行 `docs/WEB_PUBLIC_TRIAL_DEPLOYMENT_PLAN.md` v1.0。
 
-该授权只覆盖本机后台运行、Tunnel/DNS/HTTPS 配置和国内网络验收；购买第三方服务、使用母数据正式切换、推送 GitHub、创建 PR 和合并仍分别确认。
+实施授权将覆盖文档第 11–13 节列出的代码、数据副本、MacBook 后台运行和 Tunnel 配置；域名注册商名称服务器变更需要在展示目标值后确认。推送 GitHub、创建 PR、合并和删除仍分别确认。
 
 ## 23. 修改历史
 
@@ -742,4 +723,5 @@ docs/WEB_DATA_MIGRATION_RUNBOOK.md
 | v0.3 | 2026-09-07 | 已被 v0.4 取代 | Agent Mail CLI、skill 与 `xcheng@agent.qq.com` OAuth 安装验证完成；记录用户级安装路径和额度。将一个月万小智权益从部署备选降为非关键可选实验，长期方案只依赖 `unreached.cn`，不依赖共享 ECS、CDN、建站空间或续费。 |
 | v0.4 | 2026-09-07 | 已被 v0.5 取代 | 记录第 1 切片实际实施、真实数据副本恢复演练、完整测试结果与依赖审计；新增生产运行和数据迁移手册；明确当前仍禁止公网开放以及第 2 切片的审批范围。 |
 | v0.5 | 2026-09-07 | 已被 v0.6 取代 | 记录邀请认证、每教师工作区、受保护文件、安全中间件、依赖升级、所有者数据候选迁移和全产品备份恢复；明确尚未公网开放。 |
-| v0.6 | 2026-09-08 | 当前，待验收 | 根据首次本地体验拆分注册与登录、禁止注册阶段创建会话、以注册姓名初始化资料，并明确新教师工作区为空；补记临时数据浏览器验收结果。 |
+| v0.6 | 2026-09-08 | 已被 v0.7 取代 | 根据首次本地体验拆分注册与登录、禁止注册阶段创建会话、以注册姓名初始化资料，并明确新教师工作区为空；补记临时数据浏览器验收结果。 |
+| v0.7 | 2026-09-08 | 当前，待实施审批 | 固定根域名 `unreached.cn`，排除外置盘与云盘；改为有变化才创建且只保留最近两份自动快照；收紧公网批改和日程上传限制，并引用独立公网试用部署方案。 |
