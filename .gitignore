@@ -9,6 +9,7 @@ var/test-fixtures/
 var-web/
 var-web-auth-candidate/
 var-web-auth-restored/
+var-product/
 .DS_Store
 *.log
 .env*
