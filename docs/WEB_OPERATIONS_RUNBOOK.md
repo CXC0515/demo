@@ -1,7 +1,7 @@
 # DEMO 网页产品本地生产运行手册
 
-> 文档版本：`v1.1`
-> 日期：2026-09-07
+> 文档版本：`v1.2`
+> 日期：2026-09-08
 > 适用范围：网页产品第一阶段第 2 切片
 > 当前边界：具备本机邀请登录与工作区隔离，尚未配置公网入口
 
@@ -52,9 +52,28 @@ API_PORT=4317 \
 node --env-file=/Users/cxc/Projects/DEMO/.env --import tsx server/index.ts
 ```
 
-正式 HTTPS 尚未接通前，使用 `NODE_ENV=development APP_URL=http://127.0.0.1:4317` 做本机验收；不要用生产模式的 Secure Cookie 配置测试 HTTP。不要把 `--env-file` 追加在 `npm start --` 后面；那会把参数交给应用而不是 Node。
+正式 HTTPS 尚未接通前，不要用生产模式的 Secure Cookie 配置测试 HTTP。本机验收需要两个进程：API 使用候选数据，Vite 提供前端并代理 `/api`。先启动 API：
+
+```bash
+NODE_ENV=development \
+APP_DATA_ROOT=/Users/cxc/Projects/DEMO/var-web-auth-candidate \
+APP_URL=http://localhost:3000 \
+API_HOST=127.0.0.1 \
+API_PORT=4317 \
+node --env-file=/Users/cxc/Projects/DEMO/.env --import tsx server/index.ts
+```
+
+再在另一个终端启动前端：
+
+```bash
+API_PROXY_TARGET=http://127.0.0.1:4317 npm run dev
+```
+
+浏览器访问 `http://localhost:3000`。不要把 `--env-file` 追加在 `npm start --` 后面；那会把参数交给应用而不是 Node。
 
 `npm start` 仅适用于环境变量已经由进程管理器完整注入的情况。
+
+首次使用邀请链接完成注册。注册成功后页面必须回到普通登录表单，并显示“注册成功，请使用新账户登录”；此时尚无登录会话。用户再次输入密码并点击“登录”后才进入工作台。首个所有者读取迁移候选数据，之后邀请的教师进入全新空工作区。
 
 ## 4. 健康检查
 
@@ -133,4 +152,5 @@ npm run verify:data -- /Users/cxc/Projects/DEMO/var-web
 | 版本 | 日期 | 状态 | 修改概要 |
 | --- | --- | --- | --- |
 | v1.0 | 2026-09-07 | 已被 v1.1 取代 | 建立第 1 切片本地生产启动、健康检查、退出、日志和备份恢复操作基线。 |
-| v1.1 | 2026-09-07 | 当前 | 加入认证环境变量、本机验收边界和覆盖认证库/全部工作区的 v2 产品快照。 |
+| v1.1 | 2026-09-07 | 已被 v1.2 取代 | 加入认证环境变量、本机验收边界和覆盖认证库/全部工作区的 v2 产品快照。 |
+| v1.2 | 2026-09-08 | 当前 | 修正本机双进程启动说明；补充“注册后返回登录页”、无注册会话和新教师空工作区的验收步骤。 |

@@ -18,6 +18,7 @@ const authOptions = {
   trustedOrigins: [new URL(runtimeConfig.appUrl).origin],
   emailAndPassword: {
     enabled: true,
+    autoSignIn: false,
     minPasswordLength: 12,
     maxPasswordLength: 128,
     resetPasswordTokenExpiresIn: 30 * 60,

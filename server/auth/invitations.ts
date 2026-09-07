@@ -48,21 +48,22 @@ export const findPendingInvitation = (token: string, email: string) => getAuthDa
   WHERE token_hash = ? AND email = ? AND status = 'pending' AND expires_at > ?
 `).get(hashInvitationToken(token), normalizeEmail(email), new Date().toISOString()) as InvitationRow | undefined;
 
-export const consumeInvitation = (invitation: InvitationRow, userId: string) => {
+export const consumeInvitation = (invitation: InvitationRow, userId: string, registeredName: string) => {
   const now = new Date().toISOString();
+  const profileName = registeredName.trim();
   const paths = workspacePaths(invitation.workspace_id);
   mkdirSync(paths.dataDirectory, { recursive: true });
   mkdirSync(paths.uploadDirectory, { recursive: true });
   getAuthDatabase().transaction(() => {
     getAuthDatabase().prepare(`
       INSERT INTO app_workspaces (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)
-    `).run(invitation.workspace_id, `${invitation.display_name}的工作区`, now, now);
+    `).run(invitation.workspace_id, `${profileName}的工作区`, now, now);
     getAuthDatabase().prepare(`
       INSERT INTO app_workspace_members (user_id, workspace_id, role, created_at) VALUES (?, ?, ?, ?)
     `).run(userId, invitation.workspace_id, invitation.role, now);
     getAuthDatabase().prepare(`
       INSERT INTO app_teacher_profiles (user_id, profile_json, updated_at) VALUES (?, ?, ?)
-    `).run(userId, JSON.stringify({ nickname: invitation.display_name, realName: invitation.display_name }), now);
+    `).run(userId, JSON.stringify({ nickname: profileName, realName: profileName }), now);
     const result = getAuthDatabase().prepare(`
       UPDATE app_invitations SET status = 'consumed', consumed_by_user_id = ?, consumed_at = ?
       WHERE id = ? AND status = 'pending'

@@ -28,6 +28,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [account, setAccount] = useState<AccountState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const params = new URLSearchParams(window.location.search);
   const registrationToken = params.get('token') ?? '';
   const isPasswordReset = window.location.pathname === '/reset-password';
@@ -51,6 +52,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     event.preventDefault();
     setSubmitting(true);
     setError('');
+    setNotice('');
     try {
       if (isPasswordReset) {
         const result = await authClient.resetPassword({ newPassword: password, token: resetToken });
@@ -66,6 +68,11 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           body: JSON.stringify({ token: registrationToken, email, name, password }),
         });
         if (!response.ok) throw new Error((await readCode(response)) ?? 'REGISTRATION_FAILED');
+        window.history.replaceState({}, '', '/');
+        setName('');
+        setPassword('');
+        setNotice('注册成功，请使用新账户登录');
+        return;
       }
       const result = await authClient.signIn.email({ email, password });
       if (result.error) throw new Error('SIGN_IN_FAILED');
@@ -91,6 +98,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           {!isPasswordReset && <label className="block text-sm font-semibold text-slate-700">邮箱<input required type="email" value={email} readOnly={Boolean(invitedEmail)} onChange={event => setEmail(event.target.value)} className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-200 px-3 outline-none focus:border-emerald-600 read-only:bg-slate-50" autoComplete="email" /></label>}
           <label className="block text-sm font-semibold text-slate-700">密码<input required type="password" minLength={12} maxLength={128} value={password} onChange={event => setPassword(event.target.value)} className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-200 px-3 outline-none focus:border-emerald-600" autoComplete={registrationToken ? 'new-password' : 'current-password'} /><span className="mt-1 block text-xs font-normal text-slate-400">至少 12 个字符</span></label>
           {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          {notice && <p role="status" className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{notice}</p>}
           <button disabled={submitting} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 font-bold text-white hover:bg-emerald-800 disabled:opacity-60">{submitting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : registrationToken && !isPasswordReset ? <UserPlus className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}{isPasswordReset ? '保存新密码' : registrationToken ? '创建独立工作区' : '登录'}</button>
         </form>
         {!registrationToken && !isPasswordReset && <p className="mt-5 text-center text-xs text-slate-400">目前仅接受管理员邀请注册</p>}
