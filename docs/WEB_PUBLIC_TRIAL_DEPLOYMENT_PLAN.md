@@ -1,13 +1,13 @@
 # DEMO 公网试用部署方案
 
-> 文档版本：`v1.0`
+> 文档版本：`v1.1`
 > 日期：2026-09-08
 > 状态：方案已沉淀，尚未批准实施
 > Git 基线：`origin/main@db34ba370b4cba3fb7a9a6f4778e0818604afd77`
 
 ## 1. 原始问题和目标
 
-当前 DEMO 已能在本机通过邀请注册、登录和独立工作区使用，但仍是开发进程，不能稳定邀请互联网用户。第一阶段的目标是让少量教师直接通过浏览器访问 `https://unreached.cn`，同时满足：
+当前 DEMO 已能在本机通过邀请注册、登录和独立工作区使用，但仍是开发进程，不能稳定邀请互联网用户。第一阶段的目标是让少量教师直接通过浏览器访问 `https://td.unreached.cn`，同时满足：
 
 - 不购买服务器，MacBook 继续承担应用、计算和权威数据；
 - 试用者无需安装软件，桌面和手机使用同一个响应式产品；
@@ -19,7 +19,11 @@
 
 ### 2.1 已确认事实
 
-- 域名是根域名 `unreached.cn`；本方案不默认创建 `app.unreached.cn`。
+- 已购买根域名 `unreached.cn`；根域名留作未来主页或其他产品入口，教师工作台使用 `td.unreached.cn`。
+- 但是确实根域名可以留着未来做更多更重要的事情。所以这个教室工作台可以是tcdb.unreached.cn，tcdb是teacher dashboard的缩写，怎么样，或者干脆td都行。
+
+> [处理结果 2026-09-08] 已采纳。选择更短、较不易输错的 `td.unreached.cn`；`tcdb.unreached.cn` 不再作为默认入口。
+
 - 第一阶段不购买服务器，也不依赖只有一个月的阿里云建站、共享 ECS、1GB 存储或 10GB CDN 权益。
 - 外置盘完全不属于本方案：不读取、不写入、不配置、不作为恢复条件。
 - MacBook 是 Apple Silicon，已有 Homebrew、Node `v24.11.1`、npm `11.6.2`；尚未安装 `cloudflared`，也没有 DEMO 的 `launchd` 项。
@@ -60,7 +64,7 @@
 
 ```mermaid
 flowchart TD
-    U[受邀教师浏览器] -->|HTTPS https://unreached.cn| C[Cloudflare 免费全球网络]
+    U[受邀教师浏览器] -->|HTTPS https://td.unreached.cn| C[Cloudflare 免费全球网络]
     C --> T[MacBook 上的 cloudflared Tunnel]
     T -->|HTTP 127.0.0.1:4317| E[单实例 Node/Express]
     E --> F[Vite 生产构建 dist]
@@ -76,7 +80,7 @@ flowchart TD
 
 关键边界：
 
-- 浏览器只访问 `unreached.cn`，不直连 API 端口、上传目录或 AI 服务。
+- 浏览器只访问 `td.unreached.cn`，不直连 API 端口、上传目录或 AI 服务。
 - Tunnel 只转发到本机回环地址，不开放家庭路由器端口，也不公开 MacBook IP。
 - `workspaceId` 只由服务端会话产生；客户端参数不能决定文件路径。
 - 原始资料和派生内容只通过已认证 API 返回，不建立公共 `/uploads`。
@@ -89,10 +93,10 @@ flowchart TD
 唯一正式入口为：
 
 ```text
-https://unreached.cn
+https://td.unreached.cn
 ```
 
-DNS 托管到 Cloudflare，根域名记录指向命名 Tunnel。Cloudflare 在边缘终止 HTTPS，Tunnel 到 MacBook 的连接由 `cloudflared` 主动向外建立；MacBook 上的 Express 仍只监听 `127.0.0.1:4317`。
+`unreached.cn` 的 DNS 托管到 Cloudflare，`td` 子域名记录指向命名 Tunnel；根域名暂不指向教师工作台。Cloudflare 在边缘终止 HTTPS，Tunnel 到 MacBook 的连接由 `cloudflared` 主动向外建立；MacBook 上的 Express 仍只监听 `127.0.0.1:4317`。
 
 Cloudflare Tunnel 官方文档：<https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/>
 
@@ -141,7 +145,7 @@ Cloudflare 免费全球网络不等于 Cloudflare 中国网络。中国网络是
 - 应用 LaunchAgent：登录后启动生产 Node，异常退出自动重启；工作目录固定为 `/Users/cxc/Projects/DEMO`。
 - Tunnel LaunchAgent：启动命名 Tunnel，断线后自动重连。
 - 备份 LaunchAgent：每天检查一次；产品数据未变化则退出，不创建新快照。
-- 生产环境：`NODE_ENV=production`、`APP_URL=https://unreached.cn`、`API_HOST=127.0.0.1`、`API_PORT=4317`、`APP_DATA_ROOT=/Users/cxc/Projects/DEMO/var-product`。
+- 生产环境：`NODE_ENV=production`、`APP_URL=https://td.unreached.cn`、`API_HOST=127.0.0.1`、`API_PORT=4317`、`APP_DATA_ROOT=/Users/cxc/Projects/DEMO/var-product`。
 - `AUTH_SECRET` 生成不少于 32 字符的随机值，只写入现有 `.env`，终端和文档不打印值。
 - 日志仅保留结构化运行信息并脱敏；不记录 Cookie、令牌、邮箱、学生姓名、文件名或 OCR 正文。
 
@@ -231,7 +235,7 @@ MacBook 合盖休眠、断电、系统更新重启和家庭宽带中断都会造
 - 在用户目录创建 Cloudflare Tunnel 凭据和配置；凭据不进入仓库。
 - 在 `/Users/cxc/Library/LaunchAgents` 安装三个 DEMO 专用 plist。
 - 在现有 `/Users/cxc/Projects/DEMO/.env` 增加生产变量和随机 `AUTH_SECRET`，不展示既有密钥。
-- 在 Cloudflare 添加 `unreached.cn`，并在域名注册商处修改权威名称服务器和根域名 Tunnel 路由。
+- 在 Cloudflare 添加 `unreached.cn`，在域名注册商处修改权威名称服务器，并把 `td.unreached.cn` 路由到 Tunnel；根域名不绑定工作台。
 - 创建 `/Users/cxc/Projects/DEMO/var-product`、其自动备份及日志目录。
 
 这些都是实施范围，不由本方案文档批准自动授权。
@@ -241,7 +245,7 @@ MacBook 合盖休眠、断电、系统更新重启和家庭宽带中断都会造
 1. **代码与仓库模板**：再次 `git fetch origin`，从最新 `origin/main` 建独立 `codex/` 分支/worktree，完成代码、测试和本机候选演示。
 2. **数据切换演练**：从候选产品数据创建在线快照，恢复到新 `var-product` 并校验；不改母数据。
 3. **MacBook 后台运行**：安装 `cloudflared`、生产环境变量和 LaunchAgent，在回环地址验收。
-4. **域名与公网**：登录 Cloudflare、展示 DNS/名称服务器目标，经确认后修改外部状态，接通 `https://unreached.cn`。
+4. **域名与公网**：登录 Cloudflare、展示 DNS/名称服务器目标，经确认后修改外部状态，接通 `https://td.unreached.cn`。
 5. **验收与观察**：隔离、文件权限、重启、恢复、手机响应式和国内三网连续 48 小时验证。
 6. **GitHub**：只有用户另行明确授权，才推送分支、创建 PR、合并和删除已合并的临时 worktree/分支。
 
@@ -263,7 +267,7 @@ MacBook 合盖休眠、断电、系统更新重启和家庭宽带中断都会造
 
 - `npm ci`、构建、TypeScript 和全部相关测试通过；
 - 未登录 API/文件为 401，普通教师管理接口为 403，跨工作区资源不可读取；
-- `https://unreached.cn` 证书有效，页面、API、文件均为同源，不公开本机端口；
+- `https://td.unreached.cn` 证书有效，页面、API、文件均为同源，不公开本机端口；
 - Node/Tunnel 在退出、断网恢复和 Mac 登录后能自动恢复；遗留长任务状态可解释、可重试；
 - 产品快照校验、恢复到新目录和恢复后浏览器抽查通过；
 - Cleo 管理员数据计数与文件引用正确，新邀请用户工作区为空；
@@ -288,4 +292,5 @@ MacBook 合盖休眠、断电、系统更新重启和家庭宽带中断都会造
 | 版本 | 日期 | 状态 | 修改概要 |
 | --- | --- | --- | --- |
 | 对话草案 D0 | 2026-09-08 | 已被 v1.0 取代 | 曾使用 `app.unreached.cn` 并建议外置加密盘和较多历史保留；用户明确要求使用根域名并排除外置盘。 |
-| v1.0 | 2026-09-08 | 当前，待实施审批 | 固定 `unreached.cn`、MacBook + Cloudflare Tunnel、无服务器、同盘最近两份自动备份、有限上传、人工 Agent Mail、`var-product` 正式数据根和国内三网实测边界。 |
+| v1.0 | 2026-09-08 | 已被 v1.1 取代 | 固定 `unreached.cn`、MacBook + Cloudflare Tunnel、无服务器、同盘最近两份自动备份、有限上传、人工 Agent Mail、`var-product` 正式数据根和国内三网实测边界。 |
+| v1.1 | 2026-09-08 | 当前，待实施审批 | 采纳用户批注：根域名留作未来入口，教师工作台统一使用较短的 `td.unreached.cn`；同步架构图、`APP_URL`、Tunnel 路由和验收地址。 |

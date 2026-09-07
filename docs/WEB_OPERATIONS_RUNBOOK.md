@@ -1,6 +1,6 @@
 # DEMO 网页产品本地生产运行手册
 
-> 文档版本：`v1.3`
+> 文档版本：`v1.4`
 > 日期：2026-09-08
 > 适用范围：网页产品第一阶段第 2 切片及第 3 切片待实施操作口径
 > 当前边界：具备本机邀请登录与工作区隔离；公网、后台自启和自动备份尚未实施
@@ -45,7 +45,7 @@ npm run build
 ```bash
 NODE_ENV=production \
 APP_DATA_ROOT=/Users/cxc/Projects/DEMO/var-web-auth-candidate \
-APP_URL=https://unreached.cn \
+APP_URL=https://td.unreached.cn \
 AUTH_SECRET='<至少 32 字符的独立随机密钥>' \
 API_HOST=127.0.0.1 \
 API_PORT=4317 \
@@ -154,21 +154,21 @@ npm run verify:data -- /Users/cxc/Projects/DEMO/var-web
 ### 9.1 正式入口和运行目录
 
 ```text
-网址：https://unreached.cn
+网址：https://td.unreached.cn
 项目：/Users/cxc/Projects/DEMO
 数据：/Users/cxc/Projects/DEMO/var-product
 监听：127.0.0.1:4317
 环境：/Users/cxc/Projects/DEMO/.env
 ```
 
-不使用 `app.unreached.cn`，不从 Codex worktree 启动生产服务，不使用外置盘、iCloud 或一个月建站权益保存真实数据。
+教师工作台使用 `td.unreached.cn`，根域名 `unreached.cn` 留作未来入口；不从 Codex worktree 启动生产服务，不使用外置盘、iCloud 或一个月建站权益保存真实数据。
 
 ### 9.2 后台进程
 
 计划由三个用户级 `launchd` 项分别管理：
 
 - Node/Express：登录后启动并在异常退出后重启；
-- `cloudflared`：把根域名 Tunnel 转到本机回环端口并自动重连；
+- `cloudflared`：把 `td.unreached.cn` Tunnel 转到本机回环端口并自动重连；
 - 每日备份：检查数据变化，有变化才创建和验证快照。
 
 仓库只保存无密钥模板。`AUTH_SECRET`、AI/OCR 密钥和 Tunnel 凭据不写入仓库，也不输出到操作记录。
@@ -203,4 +203,5 @@ npm run verify:data -- /Users/cxc/Projects/DEMO/var-web
 | v1.0 | 2026-09-07 | 已被 v1.1 取代 | 建立第 1 切片本地生产启动、健康检查、退出、日志和备份恢复操作基线。 |
 | v1.1 | 2026-09-07 | 已被 v1.2 取代 | 加入认证环境变量、本机验收边界和覆盖认证库/全部工作区的 v2 产品快照。 |
 | v1.2 | 2026-09-08 | 已被 v1.3 取代 | 修正本机双进程启动说明；补充“注册后返回登录页”、无注册会话和新教师空工作区的验收步骤。 |
-| v1.3 | 2026-09-08 | 当前，待实施 | 固定 `unreached.cn` 根域名、`var-product` 和三个 LaunchAgent 的运行口径；排除外置盘/云盘，改为每日变更检测及最近两份自动快照，并加入公网故障与三网验收步骤。 |
+| v1.3 | 2026-09-08 | 已被 v1.4 取代 | 固定 `unreached.cn` 根域名、`var-product` 和三个 LaunchAgent 的运行口径；排除外置盘/云盘，改为每日变更检测及最近两份自动快照，并加入公网故障与三网验收步骤。 |
+| v1.4 | 2026-09-08 | 当前，待实施 | 教师工作台入口改为 `td.unreached.cn`，同步生产 `APP_URL`、Tunnel 路由和后台运行说明；根域名保留给未来入口。 |
