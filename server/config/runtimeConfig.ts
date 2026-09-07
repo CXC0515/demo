@@ -15,6 +15,11 @@ export interface RuntimeConfig {
   dataDirectory: string;
   uploadDirectory: string;
   backupDirectory: string;
+  systemDirectory: string;
+  workspacesDirectory: string;
+  authDatabasePath: string;
+  appUrl: string;
+  authSecret: string;
   rosterDatabasePath: string;
   resourceDatabasePath: string;
   distDirectory: string;
@@ -53,6 +58,18 @@ export const loadRuntimeConfig = (
   const dataDirectory = path.join(dataRoot, 'data');
   const uploadDirectory = path.join(dataRoot, 'uploads');
   const backupDirectory = resolved(environment.APP_BACKUP_ROOT, path.join(dataRoot, 'backups'), cwd);
+  const systemDirectory = path.join(dataRoot, 'system');
+  const workspacesDirectory = path.join(dataRoot, 'workspaces');
+  const appUrl = environment.APP_URL?.trim() || `http://localhost:${portNumber(environment.API_PORT)}`;
+  const authSecret = environment.AUTH_SECRET?.trim() || (production ? '' : 'development-only-change-before-production-123456');
+  if (production && authSecret.length < 32) throw new Error('AUTH_SECRET must contain at least 32 characters in production.');
+  try {
+    const parsedUrl = new URL(appUrl);
+    if (production && parsedUrl.protocol !== 'https:') throw new Error('APP_URL must use HTTPS in production.');
+  } catch (error) {
+    if (error instanceof Error && error.message === 'APP_URL must use HTTPS in production.') throw error;
+    throw new Error('APP_URL must be an absolute HTTP(S) URL.');
+  }
 
   return {
     nodeEnv,
@@ -63,6 +80,11 @@ export const loadRuntimeConfig = (
     dataDirectory,
     uploadDirectory,
     backupDirectory,
+    systemDirectory,
+    workspacesDirectory,
+    authDatabasePath: path.join(systemDirectory, 'auth.sqlite'),
+    appUrl,
+    authSecret,
     rosterDatabasePath: resolved(environment.ROSTER_DB_PATH, path.join(dataDirectory, 'roster.sqlite'), cwd),
     resourceDatabasePath: resolved(environment.RESOURCE_DB_PATH, path.join(dataDirectory, 'resources.sqlite'), cwd),
     distDirectory: resolved(environment.APP_DIST_DIR, 'dist', cwd),
@@ -73,7 +95,7 @@ export const loadRuntimeConfig = (
 export const runtimeConfig = loadRuntimeConfig();
 
 export const ensureRuntimeDirectories = (config: RuntimeConfig = runtimeConfig) => {
-  for (const directory of [config.dataRoot, config.dataDirectory, config.uploadDirectory, config.backupDirectory]) {
+  for (const directory of [config.dataRoot, config.systemDirectory, config.workspacesDirectory, config.backupDirectory]) {
     mkdirSync(directory, { recursive: true });
     accessSync(directory, constants.R_OK | constants.W_OK);
   }
@@ -85,6 +107,3 @@ export const assertProductionAssets = (config: RuntimeConfig = runtimeConfig) =>
     throw new Error(`Production frontend is missing: ${path.join(config.distDirectory, 'index.html')}`);
   }
 };
-
-export const dataFilePath = (...segments: string[]) => path.join(runtimeConfig.dataDirectory, ...segments);
-export const uploadFilePath = (...segments: string[]) => path.join(runtimeConfig.uploadDirectory, ...segments);

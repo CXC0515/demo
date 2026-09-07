@@ -8,7 +8,7 @@ import path from "node:path";
 import { PDFDocument } from "pdf-lib";
 import type { ResourceProcessingMetrics } from "../../../src/domain/types";
 import { getModelConfig } from "../../config/modelConfig";
-import { uploadFilePath } from "../../config/runtimeConfig";
+import { uploadFilePath } from "../../context/workspaceContext";
 import { resourceRepository } from "../../repositories/resourceRepository";
 import { MaterialParserError } from "../materials/MaterialParser";
 import { parseMaterial } from "../materials/materialParserRegistry";
@@ -103,6 +103,7 @@ export const processLibraryResource = async (
       fileName: resource.fileName,
       mimeType: resource.mimeType,
       filePath: temporaryPath,
+      publicAssetBaseUrl: `/api/resources/${encodeURIComponent(resourceId)}`,
       pageOffset: pageStart - 1,
       onProgress: (phase, parserMetrics) => {
         metrics = { ...metrics, ...parserMetrics };

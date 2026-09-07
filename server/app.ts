@@ -7,11 +7,16 @@ import { randomUUID } from 'node:crypto';
 import { accessSync, constants } from 'node:fs';
 import path from 'node:path';
 import express, { NextFunction, Request, Response } from 'express';
+import multer from 'multer';
+import { toNodeHandler } from 'better-auth/node';
+import { auth } from './auth/auth';
 import { getModelConfig, isModelConfigured } from './config/modelConfig';
 import { getDocumentParserConfig, isPaddleCloudConfigured } from './config/documentParserConfig';
 import { RuntimeConfig, runtimeConfig } from './config/runtimeConfig';
+import { getAuthDatabase } from './database/authDatabase';
 import { getRosterDatabase } from './database/rosterDatabase';
 import { getResourceDatabase } from './database/resourceDatabase';
+import { createWorkspaceContext, runWithWorkspace, WorkspaceRole } from './context/workspaceContext';
 import { logEvent } from './observability/logger';
 import gradingTasksRouter from './routes/gradingTasks';
 import rosterRouter from './routes/roster';
@@ -19,12 +24,25 @@ import classroomRouter from './routes/classroom';
 import gradingTaskManagementRouter from './routes/gradingTaskManagement';
 import resourcesRouter from './routes/resources';
 import scheduleRouter from './routes/schedule';
+import registrationRouter from './routes/registration';
+import accountRouter from './routes/account';
+import { requireAuthenticatedWorkspace } from './middleware/authenticated';
+import { requireSameOriginMutation } from './middleware/csrf';
+import { securityHeaders } from './middleware/security';
 
 const readiness = (config: RuntimeConfig) => {
-  accessSync(config.dataDirectory, constants.R_OK | constants.W_OK);
-  accessSync(config.uploadDirectory, constants.R_OK | constants.W_OK);
-  getRosterDatabase().prepare('SELECT 1').get();
-  getResourceDatabase().prepare('SELECT 1').get();
+  accessSync(config.systemDirectory, constants.R_OK | constants.W_OK);
+  accessSync(config.workspacesDirectory, constants.R_OK | constants.W_OK);
+  getAuthDatabase().prepare('SELECT 1').get();
+  const memberships = getAuthDatabase().prepare(`
+    SELECT user_id, workspace_id, role FROM app_workspace_members WHERE status = 'active'
+  `).all() as Array<{ user_id: string; workspace_id: string; role: WorkspaceRole }>;
+  for (const membership of memberships) {
+    runWithWorkspace(createWorkspaceContext(membership.user_id, membership.workspace_id, membership.role), () => {
+      getRosterDatabase().prepare('SELECT 1').get();
+      getResourceDatabase().prepare('SELECT 1').get();
+    });
+  }
   return {
     ok: true,
     storage: 'ready',
@@ -37,6 +55,7 @@ export const createApp = (config: RuntimeConfig = runtimeConfig) => {
   const app = express();
   app.disable('x-powered-by');
   if (config.production) app.set('trust proxy', 1);
+  app.use(securityHeaders);
 
   app.use((request, response, next) => {
     const requestId = request.header('x-request-id')?.slice(0, 128) || randomUUID();
@@ -54,8 +73,6 @@ export const createApp = (config: RuntimeConfig = runtimeConfig) => {
     next();
   });
 
-  app.use(express.json({ limit: '1mb' }));
-  app.use('/uploads', express.static(config.uploadDirectory, { index: false, fallthrough: false }));
   app.get('/api/health/live', (_request, response) => response.json({ ok: true }));
   app.get('/api/health/ready', (_request, response) => {
     try {
@@ -74,6 +91,20 @@ export const createApp = (config: RuntimeConfig = runtimeConfig) => {
     }
   });
 
+  // Public sign-up is intentionally unavailable. Accounts can only be created
+  // through a one-time application invitation at /api/register.
+  app.use('/api/auth', (request, response, next) => {
+    const normalizedPath = request.path.replace(/\/+$/, '');
+    if (normalizedPath === '/sign-up/email') return response.status(404).json({ code: 'API_NOT_FOUND' });
+    next();
+  });
+  app.all('/api/auth/*splat', toNodeHandler(auth));
+
+  app.use(express.json({ limit: '1mb' }));
+  app.use('/api', requireSameOriginMutation, registrationRouter);
+  app.use('/api', requireAuthenticatedWorkspace, requireSameOriginMutation);
+  app.use('/api', accountRouter);
+
   app.use('/api', rosterRouter);
   app.use('/api', classroomRouter);
   app.use('/api', gradingTaskManagementRouter);
@@ -84,8 +115,8 @@ export const createApp = (config: RuntimeConfig = runtimeConfig) => {
 
   if (config.production) {
     app.use(express.static(config.distDirectory, { index: false, maxAge: '1h' }));
-    app.get('*', (request, response, next) => {
-      if (request.path.startsWith('/uploads/')) return next();
+    app.get(/.*/, (request, response, next) => {
+      if (request.path.startsWith('/api/')) return next();
       response.sendFile(path.join(config.distDirectory, 'index.html'));
     });
   }
@@ -94,7 +125,15 @@ export const createApp = (config: RuntimeConfig = runtimeConfig) => {
   app.use((error: unknown, request: Request, response: Response, _next: NextFunction) => {
     const requestId = String(response.getHeader('x-request-id') ?? 'unknown');
     logEvent('error', 'unhandled_request_error', { requestId, error });
-    if (!response.headersSent) response.status(500).json({ code: 'INTERNAL_SERVER_ERROR', requestId });
+    if (response.headersSent) return;
+    if (error instanceof multer.MulterError) {
+      const status = error.code === 'LIMIT_FILE_SIZE' || error.code === 'LIMIT_FILE_COUNT' ? 413 : 400;
+      return response.status(status).json({ code: error.code });
+    }
+    if (typeof error === 'object' && error && 'status' in error && error.status === 413) {
+      return response.status(413).json({ code: 'REQUEST_TOO_LARGE' });
+    }
+    response.status(500).json({ code: 'INTERNAL_SERVER_ERROR', requestId });
   });
 
   return app;

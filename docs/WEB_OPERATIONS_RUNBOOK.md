@@ -1,13 +1,13 @@
 # DEMO 网页产品本地生产运行手册
 
-> 文档版本：`v1.0`
+> 文档版本：`v1.1`
 > 日期：2026-09-07
-> 适用范围：网页产品第一阶段第 1 切片
-> 当前边界：仅限 MacBook 本机验证，尚未具备公网开放条件
+> 适用范围：网页产品第一阶段第 2 切片
+> 当前边界：具备本机邀请登录与工作区隔离，尚未配置公网入口
 
 ## 1. 当前运行边界
 
-本切片已经把 Vite 生产构建、Express API 和资料文件放到同一个 Node/Express 进程中，并增加运行环境校验、健康检查、结构化日志和优雅退出。当前尚未实现注册登录、工作区隔离和受保护下载，`/uploads` 仍是临时公开静态路径，因此不得把本版本通过域名或 Tunnel 暴露到互联网。
+本切片已经加入邀请登录、每教师工作区和受保护文件访问，公开 `/uploads` 已移除。域名、Tunnel、自动开机和国内三网测试尚未完成，因此仍不得邀请外部用户。
 
 权威母数据仍是：
 
@@ -18,7 +18,7 @@
 本切片测试运行只使用恢复出的候选副本：
 
 ```text
-/Users/cxc/Projects/DEMO/var-web
+/Users/cxc/Projects/DEMO/var-web-auth-candidate
 ```
 
 真实密钥只从下列外部文件加载，不复制进仓库：
@@ -44,13 +44,15 @@ npm run build
 
 ```bash
 NODE_ENV=production \
-APP_DATA_ROOT=/Users/cxc/Projects/DEMO/var-web \
+APP_DATA_ROOT=/Users/cxc/Projects/DEMO/var-web-auth-candidate \
+APP_URL=https://unreached.cn \
+AUTH_SECRET='<至少 32 字符的独立随机密钥>' \
 API_HOST=127.0.0.1 \
 API_PORT=4317 \
 node --env-file=/Users/cxc/Projects/DEMO/.env --import tsx server/index.ts
 ```
 
-浏览器访问 `http://127.0.0.1:4317`。不要把 `--env-file` 追加在 `npm start --` 后面；那会把参数交给应用而不是 Node，导致外部 AI/OCR 环境变量未加载。
+正式 HTTPS 尚未接通前，使用 `NODE_ENV=development APP_URL=http://127.0.0.1:4317` 做本机验收；不要用生产模式的 Secure Cookie 配置测试 HTTP。不要把 `--env-file` 追加在 `npm start --` 后面；那会把参数交给应用而不是 Node。
 
 `npm start` 仅适用于环境变量已经由进程管理器完整注入的情况。
 
@@ -68,7 +70,7 @@ curl -fsS http://127.0.0.1:4317/api/health/live
 curl -fsS http://127.0.0.1:4317/api/health/ready
 ```
 
-就绪检查会验证数据卷可读写、两个 SQLite 可查询，并报告 AI 与 PaddleOCR 是否已配置。第三方服务未配置不会让本地资料读取整体失效，但会在依赖状态中明确显示。
+就绪检查会验证认证库、系统目录和工作区根可用，并报告 AI 与 PaddleOCR 是否已配置。第三方服务未配置不会让本地资料读取整体失效。
 
 ## 5. 停止与重启
 
@@ -91,29 +93,24 @@ server_shutdown_completed
 
 ## 7. 备份、校验和恢复
 
-对指定数据根创建快照：
+第 2 切片上线后必须使用产品快照，同时包含认证库和全部工作区：
 
 ```bash
-npm run backup:data -- \
-  /Users/cxc/Projects/DEMO/var-web \
-  /Users/cxc/Projects/DEMO/var/backups/manual-YYYYMMDD-HHMMSS
+npm run backup:product -- \
+  /Users/cxc/Projects/DEMO/var-web-auth-candidate \
+  /Users/cxc/Projects/DEMO/var/backups/product-YYYYMMDD-HHMMSS
 ```
 
-校验活动数据：
+校验与恢复演练：
 
 ```bash
-npm run verify:data -- /Users/cxc/Projects/DEMO/var-web
+npm run verify:product -- /Users/cxc/Projects/DEMO/var/backups/product-YYYYMMDD-HHMMSS
+npm run restore:product -- \
+  /Users/cxc/Projects/DEMO/var/backups/product-YYYYMMDD-HHMMSS \
+  /Users/cxc/Projects/DEMO/var-web-auth-restored
 ```
 
-恢复必须写入一个不存在的新目录：
-
-```bash
-npm run restore:data -- \
-  /Users/cxc/Projects/DEMO/var/backups/manual-YYYYMMDD-HHMMSS \
-  /Users/cxc/Projects/DEMO/var-web-restored
-```
-
-备份对 SQLite 使用在线备份 API；文件使用独立快照；`manifest.json` 保存文件大小和 SHA-256。恢复前会验证清单，恢复后会校验数据库完整性、关键表数量和资料引用，并把数据库及 JSON 中位于旧数据根内的绝对路径映射到新根。脚本拒绝覆盖已有目录，也拒绝符号链接。
+备份对认证库和每个工作区 SQLite 使用在线备份 API；`manifest.json` 保存大小和 SHA-256。恢复只允许不存在的新目录，并映射数据库与 JSON 的内部绝对路径。旧 `backup:data/restore:data` 只用于迁移前的单工作区格式，不能作为新产品的完整备份。
 
 完整迁移和回滚步骤见 `docs/WEB_DATA_MIGRATION_RUNBOOK.md`。
 
@@ -135,4 +132,5 @@ npm run verify:data -- /Users/cxc/Projects/DEMO/var-web
 
 | 版本 | 日期 | 状态 | 修改概要 |
 | --- | --- | --- | --- |
-| v1.0 | 2026-09-07 | 当前 | 建立第 1 切片本地生产启动、健康检查、退出、日志和备份恢复操作基线。 |
+| v1.0 | 2026-09-07 | 已被 v1.1 取代 | 建立第 1 切片本地生产启动、健康检查、退出、日志和备份恢复操作基线。 |
+| v1.1 | 2026-09-07 | 当前 | 加入认证环境变量、本机验收边界和覆盖认证库/全部工作区的 v2 产品快照。 |

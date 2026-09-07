@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { runtimeConfig } from "../config/runtimeConfig";
+import { getOptionalWorkspaceContext } from "../context/workspaceContext";
 import { runResourceMigrations } from "./resourceMigrations";
 
 export const createResourceDatabase = (databasePath: string) => {
@@ -19,11 +20,19 @@ export const createResourceDatabase = (databasePath: string) => {
   return database;
 };
 
-const databasePath = runtimeConfig.resourceDatabasePath;
-const database = createResourceDatabase(databasePath);
-
-export const getResourceDatabase = () => database;
-export const getResourceDatabasePath = () => databasePath;
+const databases = new Map<string, Database.Database>();
+export const getResourceDatabasePath = () => getOptionalWorkspaceContext()
+  ? path.join(getOptionalWorkspaceContext()!.dataDirectory, "resources.sqlite")
+  : runtimeConfig.resourceDatabasePath;
+export const getResourceDatabase = () => {
+  const databasePath = getResourceDatabasePath();
+  const existing = databases.get(databasePath);
+  if (existing?.open) return existing;
+  const database = createResourceDatabase(databasePath);
+  databases.set(databasePath, database);
+  return database;
+};
 export const closeResourceDatabase = () => {
-  if (database.open) database.close();
+  for (const database of databases.values()) if (database.open) database.close();
+  databases.clear();
 };

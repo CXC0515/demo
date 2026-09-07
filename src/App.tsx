@@ -44,6 +44,8 @@ import LessonPlanWorkspace from './features/lesson-plan/LessonPlanWorkspace';
 import GradingWorkspace from './features/grading/GradingWorkspace';
 import DiagnosisWorkspace, { DiagnosisTab } from './features/diagnosis/DiagnosisWorkspace';
 import CareerPlaceholder from './features/career/CareerPlaceholder';
+import { useAuth } from './features/auth/AuthGate';
+import { apiFetch } from './services/apiClient';
 
 const describeRosterError = (error: unknown) => {
   const code = error instanceof Error ? error.message : '未知错误';
@@ -61,27 +63,12 @@ const getLocalDate = () => {
   return `${year}-${month}-${day}`;
 };
 
-const defaultTeacherProfile: TeacherProfile = {
-  nickname: '王老师',
-  realName: '王明',
-  schoolName: '江城实验中学',
-  title: '一级教师'
-};
-
-const readTeacherProfile = (): TeacherProfile => {
-  try {
-    const stored = JSON.parse(localStorage.getItem('teacher-profile') ?? '{}') as Partial<TeacherProfile>;
-    return { ...defaultTeacherProfile, ...stored };
-  } catch {
-    return defaultTeacherProfile;
-  }
-};
-
 const createInitialWorkflowState = (task: WorkbenchTask) => {
   return createEmptyWorkflowState(task);
 };
 
 export default function App() {
+  const authState = useAuth();
   // Navigation & View State
   const [activePage, setActivePage] = useState<PageId>('workbench');
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -108,12 +95,12 @@ export default function App() {
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [reminders, setReminders] = useState<TimerReminder[]>([]);
   const [schedulePeriods, setSchedulePeriods] = useState<SchedulePeriod[]>([]);
-  const [showWeekends, setShowWeekends] = useState(() => localStorage.getItem('schedule-show-weekends') === 'true');
+  const [showWeekends, setShowWeekends] = useState(() => localStorage.getItem(`schedule-show-weekends:${authState.user.id}`) === 'true');
   const [settingsRequestedSection, setSettingsRequestedSection] = useState<'schedule-periods' | null>(null);
   const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([]);
   const [workflowStates, setWorkflowStates] = useState<Record<string, WorkflowState>>({});
   const [knowledgeNodes, setKnowledgeNodes] = useState<KnowledgeNode[]>([]);
-  const [teacherProfile, setTeacherProfile] = useState<TeacherProfile>(readTeacherProfile);
+  const [teacherProfile, setTeacherProfile] = useState<TeacherProfile>(authState.profile);
 
   const loadKnowledgeCatalog = useCallback(async () => {
     const graph = await getKnowledgeGraph();
@@ -529,6 +516,8 @@ export default function App() {
       showToast={showToast}
       toastMessage={toastMessage}
       teacherProfile={teacherProfile}
+      accountEmail={authState.user.email}
+      onSignOut={() => void authState.signOut()}
       onSelectClass={setSelectedClassId}
       onSelectPage={setActivePage}
       onToggleGroup={toggleGroup}
@@ -743,7 +732,7 @@ export default function App() {
               showWeekends={showWeekends}
               onShowWeekendsChange={value => {
                 setShowWeekends(value);
-                localStorage.setItem('schedule-show-weekends', String(value));
+                localStorage.setItem(`schedule-show-weekends:${authState.user.id}`, String(value));
               }}
               schedulePeriods={schedulePeriods}
               schedule={schedule}
@@ -764,7 +753,13 @@ export default function App() {
               teacherProfile={teacherProfile}
               onSaveTeacherProfile={profile => {
                 setTeacherProfile(profile);
-                localStorage.setItem('teacher-profile', JSON.stringify(profile));
+                void apiFetch('/api/account/profile', {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(profile),
+                }).then(response => {
+                  if (!response.ok) triggerToast('教师信息保存失败');
+                });
               }}
             />
           )}

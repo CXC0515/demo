@@ -8,7 +8,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { VisionEvidenceKind } from '../../../src/domain/types';
 import { PaddleParserArtifact } from '../../schemas/paddleParserArtifact';
-import { uploadFilePath } from '../../config/runtimeConfig';
+import { uploadFilePath } from '../../context/workspaceContext';
 import { containsRegion, expandRegion, inspectCropEdges, PixelRegion } from './answerEvidenceValidator';
 
 export interface PageSource {
@@ -627,7 +627,7 @@ export const createVisionLocatedRegions = async (
         kind: evidence.kind,
         region: { ...boundedRegion, pageNumber: page.pageNumber },
         cropPath,
-        cropUrl: `/uploads/validation/${encodeURIComponent(taskId)}/${encodeURIComponent(assetId)}/${encodeURIComponent(fileName)}`,
+        cropUrl: `/api/grading-tasks/${encodeURIComponent(taskId)}/materials/${encodeURIComponent(assetId)}/validation/${encodeURIComponent(fileName)}`,
         paddleText,
         paddleTextShared: Boolean(paddleTextKey && (textUseCount.get(paddleTextKey) ?? 0) > 1),
         provisionalText: evidence.provisionalText,
@@ -689,7 +689,7 @@ export const createVisionLocatedRegions = async (
       needsFocusedOcr: overlappingStartsWithAnotherQuestion || paddleContainsAnotherQuestion || overlappingFallbackCrossesBoundary,
       paddleText,
       cropPath: recognitionPath,
-      cropUrl: `/uploads/validation/${encodeURIComponent(taskId)}/${encodeURIComponent(assetId)}/${encodeURIComponent(questionFileName)}`,
+      cropUrl: `/api/grading-tasks/${encodeURIComponent(taskId)}/materials/${encodeURIComponent(assetId)}/validation/${encodeURIComponent(questionFileName)}`,
       evidenceUnits
     };
   }));

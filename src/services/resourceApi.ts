@@ -19,6 +19,7 @@ import {
   ResourceKind,
   ResourceChunk,
 } from "../domain/types";
+import { apiFetch } from './apiClient';
 
 const readErrorCode = async (response: Response) => {
   const body = (await response.json().catch(() => ({}))) as { code?: string };
@@ -26,7 +27,7 @@ const readErrorCode = async (response: Response) => {
 };
 
 const requestJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
-  const response = await fetch(url, init);
+  const response = await apiFetch(url, init);
   if (!response.ok) throw new Error(await readErrorCode(response));
   return response.json() as Promise<T>;
 };
@@ -85,7 +86,7 @@ export const updateLibraryResource = async (
   ).resource;
 
 export const deleteLibraryResource = async (resourceId: string) => {
-  const response = await fetch(`/api/resources/${resourceId}`, {
+  const response = await apiFetch(`/api/resources/${resourceId}`, {
     method: "DELETE",
   });
   if (!response.ok) throw new Error(await readErrorCode(response));
@@ -216,7 +217,7 @@ export const createKnowledgeTag = async (name: string) =>
   })).tag;
 
 export const archiveKnowledgeNode = async (nodeId: string) => {
-  const response = await fetch(`/api/knowledge/nodes/${nodeId}`, {
+  const response = await apiFetch(`/api/knowledge/nodes/${nodeId}`, {
     method: "DELETE",
   });
   if (!response.ok) throw new Error(await readErrorCode(response));

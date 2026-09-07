@@ -1,4 +1,4 @@
-import { Boxes, ChevronDown, GraduationCap, HelpCircle, Menu, Network, Sparkles, X } from 'lucide-react';
+import { Boxes, ChevronDown, GraduationCap, HelpCircle, LogOut, Menu, Network, Sparkles, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import type { SchoolClass, TeacherProfile } from '../domain/types';
 import type { NavGroup, PageId } from './navigation';
@@ -14,10 +14,12 @@ interface AppLayoutProps {
   showToast: boolean;
   toastMessage: string | null;
   teacherProfile: TeacherProfile;
+  accountEmail: string;
   children: ReactNode;
   onSelectClass: (classId: string) => void;
   onSelectPage: (pageId: PageId) => void;
   onToggleGroup: (groupId: string) => void;
+  onSignOut: () => void;
 }
 
 export default function AppLayout({
@@ -31,10 +33,12 @@ export default function AppLayout({
   showToast,
   toastMessage,
   teacherProfile,
+  accountEmail,
   children,
   onSelectClass,
   onSelectPage,
-  onToggleGroup
+  onToggleGroup,
+  onSignOut,
 }: AppLayoutProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const isImmersiveWorkspace = activePage === 'knowledge-graph' || activePage === 'library-editor';
@@ -115,10 +119,11 @@ export default function AppLayout({
           </div>
 
           <div className="hidden items-center gap-2 sm:flex">
-            <span className="hidden sm:inline text-xs font-semibold text-slate-700 dark:text-slate-200">{teacherProfile.nickname}</span>
+            <span className="hidden sm:inline text-right"><span className="block text-xs font-semibold text-slate-700 dark:text-slate-200">{teacherProfile.nickname}</span><span className="block max-w-36 truncate text-[10px] text-slate-400">{accountEmail}</span></span>
             <div className="w-8 h-8 rounded-full bg-slate-200/90 dark:bg-zinc-800 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center text-xs">
               {(teacherProfile.nickname.trim() || teacherProfile.realName.trim() || '师')[0]}
             </div>
+            <button type="button" onClick={onSignOut} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-zinc-800" aria-label="退出登录"><LogOut className="h-4 w-4" /></button>
           </div>
         </div>
       </header>

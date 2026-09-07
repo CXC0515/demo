@@ -4,6 +4,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
@@ -12,7 +13,8 @@ import { z } from 'zod';
 import { AnalysisEvidenceRef, FirstSectionAnalysis, GradingMode, TrialGradingResult, VisionValidationResult } from '../../src/domain/types';
 import { getModelConfig, isModelConfigured } from '../config/modelConfig';
 import { getDocumentParserConfig, isPaddleCloudConfigured } from '../config/documentParserConfig';
-import { runtimeConfig, uploadFilePath } from '../config/runtimeConfig';
+import { assertPathInsideWorkspace, uploadFilePath } from '../context/workspaceContext';
+import { uploadRateLimit } from '../middleware/security';
 import { deleteFirstSectionAnalysis, getFirstSectionAnalysis, saveFirstSectionAnalysis } from '../repositories/analysisRepository';
 import { appendMaterials, getMaterials, removeMaterialsForKind, replaceMaterialsForKind, StoredMaterial, updateMaterial } from '../repositories/materialRepository';
 import { getTaskRubrics, saveTaskRubric } from '../repositories/gradingRubricRepository';
@@ -46,7 +48,13 @@ const decodeUploadFileName = (fileName: string) => {
   return decoded.includes('\uFFFD') ? fileName : decoded;
 };
 const upload = multer({
-  dest: runtimeConfig.uploadDirectory,
+  storage: multer.diskStorage({
+    destination: (_request, _file, callback) => {
+      const directory = uploadFilePath();
+      mkdirSync(directory, { recursive: true });
+      callback(null, directory);
+    },
+  }),
   limits: { fileSize: 25 * 1024 * 1024, files: 20 },
   fileFilter: (_request, file, callback) => callback(null,
     file.mimetype === 'application/pdf'
@@ -143,7 +151,8 @@ const parseUploadedMaterial = async (material: StoredMaterial) => {
       assetId: material.id,
       fileName: material.fileName,
       mimeType: material.mimeType,
-      filePath: material.diskPath
+      filePath: material.diskPath,
+      publicAssetBaseUrl: `/api/grading-tasks/${encodeURIComponent(material.taskId)}/materials/${encodeURIComponent(material.id)}`,
     });
     updateMaterial(material.taskId, material.id, {
       status: normalizedDocument.warnings.length ? 'needs-review' : 'ready',
@@ -199,7 +208,31 @@ router.get('/:taskId/materials/:assetId/content', (request, response) => {
     return;
   }
   response.type(material.mimeType);
-  response.sendFile(path.resolve(material.diskPath));
+  try {
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.sendFile(assertPathInsideWorkspace(material.diskPath));
+  } catch {
+    response.status(404).json({ code: 'MATERIAL_FILE_NOT_FOUND' });
+  }
+});
+
+router.get('/:taskId/materials/:assetId/derived/*segments', (request, response) => {
+  const material = getMaterials(request.params.taskId).find(item => item.id === request.params.assetId);
+  if (!material) return response.status(404).json({ code: 'MATERIAL_NOT_FOUND' });
+  const segments = Array.isArray(request.params.segments) ? request.params.segments : [request.params.segments];
+  const target = uploadFilePath('parsed', material.id, ...segments);
+  if (!existsSync(target)) return response.status(404).json({ code: 'DERIVED_FILE_NOT_FOUND' });
+  response.setHeader('Cache-Control', 'private, no-store');
+  response.sendFile(assertPathInsideWorkspace(target));
+});
+
+router.get('/:taskId/materials/:assetId/validation/:fileName', (request, response) => {
+  const material = getMaterials(request.params.taskId).find(item => item.id === request.params.assetId);
+  if (!material) return response.status(404).json({ code: 'MATERIAL_NOT_FOUND' });
+  const target = uploadFilePath('validation', request.params.taskId, material.id, path.basename(request.params.fileName));
+  if (!existsSync(target)) return response.status(404).json({ code: 'VALIDATION_FILE_NOT_FOUND' });
+  response.setHeader('Cache-Control', 'private, no-store');
+  response.sendFile(assertPathInsideWorkspace(target));
 });
 
 router.get('/:taskId/materials/:assetId/evidence-crop', async (request, response) => {
@@ -462,7 +495,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
   }
 });
 
-router.post('/:taskId/materials', upload.array('files'), (request, response) => {
+router.post('/:taskId/materials', uploadRateLimit, upload.array('files'), (request, response) => {
   const kind = request.body.kind;
   if (kind !== 'assignment' && kind !== 'reference-answer' && kind !== 'student-submission') {
     response.status(400).json({ code: 'INVALID_MATERIAL_KIND' });
@@ -473,21 +506,25 @@ router.post('/:taskId/materials', upload.array('files'), (request, response) => 
     response.status(400).json({ code: 'NO_FILES' });
     return;
   }
-  const assets: StoredMaterial[] = files.map(file => ({
-    id: randomUUID(),
-    taskId: request.params.taskId,
+  const taskId = String(request.params.taskId);
+  const assets: StoredMaterial[] = files.map(file => {
+    const id = randomUUID();
+    return ({
+    id,
+    taskId,
     kind,
     fileName: decodeUploadFileName(file.originalname),
     mimeType: file.mimetype,
     status: 'uploaded',
     diskPath: file.path,
-    publicUrl: `/uploads/${file.filename}`
-  }));
-  if (kind === 'student-submission') appendMaterials(request.params.taskId, assets);
-  else replaceMaterialsForKind(request.params.taskId, kind, assets);
+    publicUrl: `/api/grading-tasks/${encodeURIComponent(taskId)}/materials/${id}/content`
+  });
+  });
+  if (kind === 'student-submission') appendMaterials(taskId, assets);
+  else replaceMaterialsForKind(taskId, kind, assets);
   if (kind !== 'student-submission') {
-    deleteTrialGradingResult(request.params.taskId);
-    deleteFirstSectionAnalysis(request.params.taskId);
+    deleteTrialGradingResult(taskId);
+    deleteFirstSectionAnalysis(taskId);
   }
   assets.forEach(material => { void parseUploadedMaterial(material); });
   response.status(201).json({ assets: assets.map(toPublicAsset) });

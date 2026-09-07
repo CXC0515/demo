@@ -1,52 +1,10 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
+/** @license SPDX-License-Identifier: Apache-2.0 */
 import { VisionValidationResult } from '../../src/domain/types';
-import { runtimeConfig } from '../config/runtimeConfig';
-
-const dataDirectory = runtimeConfig.dataDirectory;
-const dataPath = path.join(dataDirectory, 'vision-validation-results.json');
-mkdirSync(dataDirectory, { recursive: true });
-
-const loadResults = () => {
-  try {
-    return new Map(JSON.parse(readFileSync(dataPath, 'utf8')) as [string, VisionValidationResult][]);
-  } catch {
-    return new Map<string, VisionValidationResult>();
-  }
-};
-
-const results = loadResults();
+import { workspaceMapStore } from './workspaceFileStore';
+const store = () => workspaceMapStore<VisionValidationResult>('vision-validation-results.json');
 const keyFor = (taskId: string, assetId: string) => `${taskId}:${assetId}`;
 export const NON_CHOICE_RECOGNITION_VERSION = 10;
-
-export const isVisionValidationItemCurrent = (item: VisionValidationResult['items'][number]) =>
-  item.pipelineVersion === NON_CHOICE_RECOGNITION_VERSION;
-
-const persist = () => {
-  const temporary = `${dataPath}.tmp`;
-  writeFileSync(temporary, JSON.stringify([...results.entries()]));
-  renameSync(temporary, dataPath);
-};
-
-export const getVisionValidationResult = (taskId: string, assetId: string) => {
-  const result = results.get(keyFor(taskId, assetId));
-  if (!result) return undefined;
-  return { ...result, items: result.items.filter(isVisionValidationItemCurrent) };
-};
-
-export const saveVisionValidationResult = (result: VisionValidationResult) => {
-  results.set(keyFor(result.taskId, result.assetId), result);
-  persist();
-  return result;
-};
-
-export const deleteVisionValidationForTask = (taskId: string) => {
-  let changed = false;
-  for (const key of results.keys()) if (key.startsWith(`${taskId}:`)) { results.delete(key); changed = true; }
-  if (changed) persist();
-};
+export const isVisionValidationItemCurrent = (item: VisionValidationResult['items'][number]) => item.pipelineVersion === NON_CHOICE_RECOGNITION_VERSION;
+export const getVisionValidationResult = (taskId: string, assetId: string) => { const result = store().values.get(keyFor(taskId, assetId)); return result ? { ...result, items: result.items.filter(isVisionValidationItemCurrent) } : undefined; };
+export const saveVisionValidationResult = (result: VisionValidationResult) => { const current = store(); current.values.set(keyFor(result.taskId, result.assetId), result); current.persist(); return result; };
+export const deleteVisionValidationForTask = (taskId: string) => { const current = store(); let changed = false; for (const key of current.values.keys()) if (key.startsWith(`${taskId}:`)) { current.values.delete(key); changed = true; } if (changed) current.persist(); };

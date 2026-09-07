@@ -10,6 +10,7 @@ export interface MaterialParserInput {
   fileName: string;
   mimeType: string;
   filePath: string;
+  publicAssetBaseUrl?: string;
   pageOffset?: number;
   onProgress?: (phase: ResourceProcessingPhase, metrics: ResourceProcessingMetrics) => void;
 }

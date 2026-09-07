@@ -6,6 +6,8 @@
 import React, { useEffect, useState } from 'react';
 import { BookOpen, Database, Palette, Pencil, Plus, Save, Settings2, Sliders, Trash2, UserRound } from 'lucide-react';
 import { CommitteeRole, ScheduleItem, SchedulePeriod, SchoolClass, TeacherProfile } from '../../domain/types';
+import AccountAccessPanel from './AccountAccessPanel';
+import { useAuth } from '../auth/AuthGate';
 
 interface SystemSettingsPanelProps {
   lowConfidenceThreshold: number;
@@ -54,9 +56,9 @@ const themeOptions = [
 ];
 const defaultTheme = 'song-porcelain-green';
 const themeValues = new Set(themeOptions.map(option => option.value));
-const readStoredTheme = () => {
+const readStoredTheme = (userId: string) => {
   if (typeof window === 'undefined') return defaultTheme;
-  const storedTheme = localStorage.getItem('app-theme');
+  const storedTheme = localStorage.getItem(`app-theme:${userId}`);
   return storedTheme && themeValues.has(storedTheme) ? storedTheme : defaultTheme;
 };
 const applyTheme = (theme: string) => {
@@ -66,7 +68,6 @@ const applyTheme = (theme: string) => {
   root.setAttribute('data-theme-forced', 'true');
   root.classList.remove('dark-theme-active');
 };
-applyTheme(readStoredTheme());
 const periodLabels = ['第一节', '第二节', '第三节', '第四节', '第五节', '第六节', '第七节', '第八节', '第九节', '第十节', '第十一节', '第十二节'];
 const addMinutes = (time: string, minutes: number) => {
   const [hour, minute] = time.split(':').map(Number);
@@ -98,6 +99,7 @@ export default function SystemSettingsPanel({
   teacherProfile,
   onSaveTeacherProfile
 }: SystemSettingsPanelProps) {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<SettingsTab>('teacher');
   const [nickname, setNickname] = useState(teacherProfile.nickname);
   const [realName, setRealName] = useState(teacherProfile.realName);
@@ -116,7 +118,7 @@ export default function SystemSettingsPanel({
   const [imageSavePolicy, setImageSavePolicy] = useState('保存原图与裁剪图');
   const [archivePolicy, setArchivePolicy] = useState('按学期归档');
   const [exportFormat, setExportFormat] = useState('PDF + Excel');
-  const [theme, setTheme] = useState(readStoredTheme);
+  const [theme, setTheme] = useState(() => readStoredTheme(user.id));
   const [localSchedulePeriods, setLocalSchedulePeriods] = useState(schedulePeriods);
   const [isScheduleSaving, setIsScheduleSaving] = useState(false);
   const [scheduleSaveError, setScheduleSaveError] = useState('');
@@ -139,9 +141,9 @@ export default function SystemSettingsPanel({
   }, [onRequestedSectionHandled, requestedSection]);
 
   useEffect(() => {
-    localStorage.setItem('app-theme', theme);
+    localStorage.setItem(`app-theme:${user.id}`, theme);
     applyTheme(theme);
-  }, [theme]);
+  }, [theme, user.id]);
 
   const saveSchedulePeriodSettings = async (announce = true) => {
     if (!hasUnsavedScheduleChanges) return true;
@@ -246,6 +248,7 @@ export default function SystemSettingsPanel({
             <SettingInput label="姓名" value={realName} onChange={setRealName} />
             <SettingInput label="学校" value={schoolName} onChange={setSchoolName} />
             <SettingInput label="职称" value={title} onChange={setTitle} />
+            <AccountAccessPanel onShowToast={onShowToast} />
           </div>
         )}
 

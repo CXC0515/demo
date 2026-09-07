@@ -5,7 +5,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { dataFilePath } from '../config/runtimeConfig';
+import { dataFilePath } from '../context/workspaceContext';
 import { ClassMembership, SchoolClass, Student } from '../../src/domain/types';
 import { closeRosterDatabase, getRosterDatabase } from '../database/rosterDatabase';
 

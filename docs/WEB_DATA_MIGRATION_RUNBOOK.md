@@ -1,6 +1,6 @@
 # DEMO 网页产品数据迁移与回滚手册
 
-> 文档版本：`v1.0`
+> 文档版本：`v1.1`
 > 日期：2026-09-07
 > 适用范围：母文件夹真实数据到网页产品数据根的副本迁移
 
@@ -58,6 +58,31 @@
 | resources | resource_processing_jobs | 11 |
 
 上述数字用于发现意外缺失，不代表未来数据必须保持不变。
+
+## 2.1 2026-09-07 认证工作区候选迁移
+
+对非权威候选 `/Users/cxc/Projects/DEMO/var-web` 再次创建在线快照：
+
+```text
+/Users/cxc/Projects/DEMO/var/backups/pre-auth-20260907-170634
+```
+
+随后只从该快照恢复到：
+
+```text
+/Users/cxc/Projects/DEMO/var-web-auth-candidate/
+└── workspaces/ba9eb0be-5101-4d78-b7c9-915ff568e240/
+```
+
+新候选同时包含 `system/auth.sqlite`。初始所有者邀请绑定 `xcheng@agent.qq.com`，注册前保持 pending。迁移后仍为 182 个业务文件、336,844,907 字节；两个业务 SQLite 完整性为 `ok`，关键表计数与上表一致，2 个资料引用均存在。原 `/var` 与 `/var-web` 未被改写，新候选尚未设为正式权威数据根。
+
+迁移后又用 v2 产品快照覆盖认证库与所有者工作区：
+
+```text
+/Users/cxc/Projects/DEMO/var/backups/post-auth-candidate-20260907-172120
+```
+
+该快照共 186 个文件，包含 3 个在线备份的 SQLite；清单哈希和数据库完整性校验通过。另已恢复到临时新目录并验证路径映射，证明 v2 备份可恢复；临时演练目录不作为长期备份。
 
 ## 3. 创建可恢复快照
 
@@ -130,4 +155,5 @@ npm run verify:data -- /Users/cxc/Projects/DEMO/var-web-next
 
 | 版本 | 日期 | 状态 | 修改概要 |
 | --- | --- | --- | --- |
-| v1.0 | 2026-09-07 | 当前 | 记录首次真实数据副本演练、校验基线、正式切换和回滚流程。 |
+| v1.0 | 2026-09-07 | 已被 v1.1 取代 | 记录首次真实数据副本演练、校验基线、正式切换和回滚流程。 |
+| v1.1 | 2026-09-07 | 当前 | 记录认证工作区候选迁移、二次在线快照、所有者归属和 v2 产品备份边界。 |

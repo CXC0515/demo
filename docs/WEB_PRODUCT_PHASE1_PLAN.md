@@ -1,9 +1,9 @@
 # DEMO 网页产品第一阶段方案
 
-> 状态：第 1 切片已实施并完成本地验证，待用户验收；第 2—4 切片未批准
-> 当前版本：`v0.4`
+> 状态：第 2 切片已实施并完成本地验证，待用户验收；尚未公网开放
+> 当前版本：`v0.5`
 > 文档日期：2026-09-07
-> Git 基线：`origin/main@4af8ff18407bbc02bba31d5c27282378bf9b5bdd`
+> Git 基线：`origin/main@0cf16710f839f3ac4539dc26d286033f4f598e78`
 
 ## 0. 阅读和批注方式
 
@@ -26,7 +26,7 @@
 
 ## 1. 本版概要
 
-本版记录第 1 切片的实际实施结果：本地生产底座、同源构建、集中数据根、健康检查、结构化日志、优雅退出和可校验备份恢复已经完成；母数据已通过在线 SQLite 备份和文件快照恢复到独立候选副本，并通过真实数据只读烟雾测试。身份认证、用户隔离、受保护下载和公网开放尚未实施，因此当前版本只能在 MacBook 本机使用。
+本版记录第 2 切片的实际实施结果：邀请注册、登录会话、所有者/教师角色、每教师物理工作区、业务 API 鉴权、同源写请求校验、受保护资料访问、登录限速和安全响应头已经完成；原有数据再次经过在线 SQLite 备份和文件快照，迁入一个尚未启用的所有者工作区候选副本。公网 Tunnel、域名 DNS、自动开机和国内三网实测尚未实施，因此仍不能邀请外部用户。
 
 本版确认用户已经取得长期使用的 `unreached.cn`，并仅把一个月阿里云万小智 AI 建站权益视为临时赠送能力。默认部署路径仍为：
 
@@ -86,16 +86,16 @@ Cloudflare 全球网络与 Tunnel（免费起步）
 
 | 项目 | 当前事实 | 证据位置 |
 | --- | --- | --- |
-| Git 基线 | `HEAD` 与 `origin/main` 均为 `4af8ff1` | 本轮 `git fetch origin` 与 `git rev-parse` |
+| Git 基线 | 第 2 切片从 `origin/main@0cf1671` 创建独立 worktree | 本轮 `git fetch origin` 与 `git rev-parse` |
 | 前端 | React 19 + Vite 6 + TypeScript | `package.json`、`src/` |
-| API | Express 4，由 `tsx` 运行 TypeScript | `package.json`、`server/index.ts` |
+| API | Express 5，由 `tsx` 运行 TypeScript | `package.json`、`server/index.ts` |
 | 持久数据 | 两个 SQLite、上传文件、JSON 状态、OCR/解析产物 | `server/database/`、`server/repositories/`、`var/` |
 | 权威数据 | 位于母文件夹 `/Users/cxc/Projects/DEMO/var` | `docs/PROJECT_HANDOFF.md` |
-| 生产同源 | 尚未完成；Express 不托管 `dist` | `server/index.ts`、`vite.config.ts` |
-| 身份边界 | 没有登录、会话、角色和租户隔离 | `server/index.ts` 与全部路由 |
-| 文件保护 | `/uploads` 当前由 `express.static` 公开提供 | `server/index.ts` |
+| 生产同源 | Express 同源托管 `dist`、API 与受保护文件 | `server/app.ts` |
+| 身份边界 | 邀请登录、会话、角色和每教师工作区已实现 | `server/auth/`、`server/context/` |
+| 文件保护 | 公共 `/uploads` 已移除，文件按当前工作区授权 | `server/routes/` |
 | 上传限制 | 资料库 500 MiB；批改单文件 25 MiB、最多 20 个；课表 20 MiB | `server/routes/*.ts` |
-| 写入路径 | 大量代码直接写相对路径 `var/data`、`var/uploads` | 数据库、repository、parser 与 route 文件 |
+| 写入路径 | HTTP 业务写入由服务端工作区上下文解析；脚本保留显式旧格式路径用于迁移 | database、repository、parser 与 route 文件 |
 | 长任务 | OCR/AI 在请求或进程内推进，重启恢复不完整 | grading/resource 路由与服务 |
 | OCR/AI | PaddleOCR 云 API、OpenAI-compatible 服务；部分 DOCX/PDF 流程使用本机命令 | `server/config/`、`server/workers/` |
 | 健康检查 | 只报告 API 存活和多模态模型是否配置 | `GET /api/health` |
@@ -694,17 +694,32 @@ docs/WEB_DATA_MIGRATION_RUNBOOK.md
 
 ### 20.4 已知限制和安全门槛
 
-当前 `/uploads` 仍是未认证静态路径，业务 API 也未登录保护，所以严禁公网开放。`npm audit --omit=dev` 报告 10 个生产依赖项风险（4 high、6 moderate、0 critical），涉及 `sharp`、Express/`qs`、`exceljs`/`uuid` 和构建链传递依赖；自动修复可能包含主版本变更，因此没有越过本切片范围直接升级。依赖升级、回归验证、认证授权、CSRF/速率限制和受保护下载应在公网切片前完成并重新审批。
+第 1 切片当时 `/uploads` 仍是未认证静态路径，业务 API 也未登录保护，所以该切片严禁公网开放。其依赖审计当时报告 10 个生产依赖项风险（4 high、6 moderate、0 critical）；这些问题在第 2 切片按批准范围处理，结果见第 21 节。
 
-## 21. 下一切片批准口径
+## 21. 第 2 切片实施记录
 
-第 1 切片已按用户授权完成。下一步建议先审阅本版和两份运行手册；若接受，再单独批准第 2 切片：
+- Better Auth 负责密码哈希、HttpOnly 会话 Cookie、登录/退出和一次性密码重置令牌；应用关闭公共注册，只接受 72 小时有效、邮箱绑定、只存 SHA-256 哈希的一次性邀请。
+- 所有业务 `/api` 在进入 repository 前解析服务端工作区；客户端不能提交磁盘根。SQLite 连接、JSON 缓存、上传目录、解析产物和后台资源处理均按工作区解析。
+- 删除公开 `/uploads`；原始资料和派生图只通过“已登录 + 当前工作区记录存在”的 API 返回，并对最终路径做工作区内约束。
+- 新增同源修改请求校验、Helmet CSP/安全头、认证端点及注册端点限速；不开放业务 CORS。
+- 管理员可在设置页创建教师邀请并生成 30 分钟密码重置链接；链接由管理员通过 Agent Mail 人工发送，不接无人值守邮件服务。
+- 依赖固定为 Better Auth 1.7.3、Express 5.2.1、Helmet 8.3.0、express-rate-limit 8.7.0、Sharp 0.35.4；Better Auth 的 peer 约束要求 `better-sqlite3` 固定为 12.11.1。
+- 新增 v2 产品快照，覆盖 `system/auth.sqlite` 和全部 `workspaces/*`，所有 SQLite 使用在线备份，恢复写入新目录并映射内部绝对路径。
+- 生产依赖审计从第 1 切片的 10 项（4 high、6 moderate）降为 2 项 moderate、0 high、0 critical；剩余项来自 ExcelJS/uuid，强制覆盖会把 ExcelJS 降到不兼容版本，当前以受控导入和后续上游升级跟踪处理。
 
-> 同意执行 `docs/WEB_PRODUCT_PHASE1_PLAN.md` v0.4 中的第 2 个实施切片，并把公网前依赖安全升级纳入该切片。
+迁移候选为 `/Users/cxc/Projects/DEMO/var-web-auth-candidate`。它尚未成为权威数据根；初始所有者邀请绑定 `xcheng@agent.qq.com`，注册前不会建立账号或启动服务。详细结构见 `docs/WEB_AUTH_ISOLATION_DESIGN.md`，迁移记录见数据手册。
 
-该授权只覆盖身份、工作区隔离、受保护文件访问、旧数据归属迁移及明确列出的依赖安全升级。购买第三方服务、开放公网、推送 GitHub、创建 PR 和合并仍分别确认。
+验证结果：生产构建与 TypeScript 通过；原有 93 项测试、工作区隔离测试和双账号 HTTP 集成测试共 95 项通过。端到端测试确认未登录为 401、教师管理接口为 403、缺少同源校验的写请求为 403、直接公共注册为 404，并确认两个账号的同名业务数据互不可见。登录页已在真实浏览器检查语义结构；手机/平板全尺寸截图验收仍应在下一切片接入真实域名后完成。v2 产品快照已完成创建、哈希校验和恢复到新目录的演练。
 
-## 22. 修改历史
+## 22. 下一切片批准口径
+
+第 2 切片已按用户授权完成。下一步应先由用户审阅并验收本地登录、数据归属和跨账号隔离，再单独审批第 3 切片（MacBook 后台运行、Cloudflare Tunnel、`unreached.cn` DNS/HTTPS 与三网试用）。
+
+> 同意执行 `docs/WEB_PRODUCT_PHASE1_PLAN.md` v0.5 中的第 3 个实施切片。
+
+该授权只覆盖本机后台运行、Tunnel/DNS/HTTPS 配置和国内网络验收；购买第三方服务、使用母数据正式切换、推送 GitHub、创建 PR 和合并仍分别确认。
+
+## 23. 修改历史
 
 | 版本 | 日期 | 状态 | 修改概要 |
 | --- | --- | --- | --- |
@@ -712,4 +727,5 @@ docs/WEB_DATA_MIGRATION_RUNBOOK.md
 | v0.1 | 2026-09-07 | 已被 v0.2 取代 | 首次沉淀到 `docs`。改为 MacBook + 自有 `.cn` 域名 + Cloudflare Tunnel 免费起步；加入邀请注册、每教师工作区隔离、80 MiB 上传限制、异步任务、备份恢复、国内三网验收和服务器触发条件。 |
 | v0.2 | 2026-09-07 | 已被 v0.3 取代 | 确认域名为 `unreached.cn`，记录已购阿里云万小智轻量权益；增加共享 ECS 八项只读验证门槛。加入 Agent Mail CLI 安装范围与人工邀请定位，不再默认使用 Brevo，也不把交互式 CLI 误当作自动事务邮件服务。 |
 | v0.3 | 2026-09-07 | 已被 v0.4 取代 | Agent Mail CLI、skill 与 `xcheng@agent.qq.com` OAuth 安装验证完成；记录用户级安装路径和额度。将一个月万小智权益从部署备选降为非关键可选实验，长期方案只依赖 `unreached.cn`，不依赖共享 ECS、CDN、建站空间或续费。 |
-| v0.4 | 2026-09-07 | 当前，待验收 | 记录第 1 切片实际实施、真实数据副本恢复演练、完整测试结果与依赖审计；新增生产运行和数据迁移手册；明确当前仍禁止公网开放以及第 2 切片的审批范围。 |
+| v0.4 | 2026-09-07 | 已被 v0.5 取代 | 记录第 1 切片实际实施、真实数据副本恢复演练、完整测试结果与依赖审计；新增生产运行和数据迁移手册；明确当前仍禁止公网开放以及第 2 切片的审批范围。 |
+| v0.5 | 2026-09-07 | 当前，待验收 | 记录邀请认证、每教师工作区、受保护文件、安全中间件、依赖升级、所有者数据候选迁移和全产品备份恢复；明确尚未公网开放。 |

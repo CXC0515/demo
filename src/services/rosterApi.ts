@@ -4,6 +4,7 @@
  */
 
 import { CommitteeAssignment, CommitteeRole, RosterSnapshot, RosterStudent, SchoolClass, Student, SubmissionRosterMatch } from '../domain/types';
+import { apiFetch } from './apiClient';
 
 export type RosterImportField = 'studentNo' | 'name' | 'gender' | 'parentName' | 'parentPhone' | 'parentRelation' | 'parentRemark';
 export type RosterImportMapping = Record<number, RosterImportField | null>;
@@ -32,7 +33,7 @@ const readErrorCode = async (response: Response) => {
 };
 
 const requestJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
-  const response = await fetch(url, init);
+  const response = await apiFetch(url, init);
   if (!response.ok) throw new Error(await readErrorCode(response));
   return response.json() as Promise<T>;
 };
@@ -93,7 +94,7 @@ export const updateRosterCommitteeRole = async (roleId: string, name: string) =>
 };
 
 export const deleteRosterCommitteeRole = async (roleId: string) => {
-  const response = await fetch(`/api/committee-roles/${encodeURIComponent(roleId)}`, { method: 'DELETE' });
+  const response = await apiFetch(`/api/committee-roles/${encodeURIComponent(roleId)}`, { method: 'DELETE' });
   if (!response.ok) throw new Error(await readErrorCode(response));
 };
 
@@ -122,7 +123,7 @@ export const updateRosterStudent = async (student: Student) => {
 };
 
 export const deleteRosterStudent = async (studentId: string) => {
-  const response = await fetch(`/api/students/${encodeURIComponent(studentId)}`, { method: 'DELETE' });
+  const response = await apiFetch(`/api/students/${encodeURIComponent(studentId)}`, { method: 'DELETE' });
   if (!response.ok) throw new Error(await readErrorCode(response));
 };
 

@@ -16,13 +16,18 @@ import {
   readPdfPageCount,
 } from "../services/resources/resourceProcessingService";
 import { getResourcePageImagePath } from "../services/resources/resourcePageRenderService";
-import { uploadFilePath } from "../config/runtimeConfig";
+import { assertPathInsideWorkspace, uploadFilePath } from "../context/workspaceContext";
+import { uploadRateLimit } from '../middleware/security';
 
 const router = Router();
-const uploadDirectory = uploadFilePath("resources");
-mkdirSync(uploadDirectory, { recursive: true });
 const upload = multer({
-  dest: uploadDirectory,
+  storage: multer.diskStorage({
+    destination: (_request, _file, callback) => {
+      const directory = uploadFilePath("resources");
+      mkdirSync(directory, { recursive: true });
+      callback(null, directory);
+    },
+  }),
   limits: { fileSize: 500 * 1024 * 1024, files: 1 },
   fileFilter: (_request, file, callback) =>
     callback(
@@ -126,7 +131,7 @@ router.get("/resources", (_request, response) =>
   response.json({ resources: resourceRepository.listResources() }),
 );
 
-router.post("/resources", upload.single("file"), async (request, response) => {
+router.post("/resources", uploadRateLimit, upload.single("file"), async (request, response) => {
   const parsed = metadataSchema.safeParse(request.body);
   const file = request.file;
   if (!parsed.success || !file) {
@@ -249,7 +254,20 @@ router.get("/resources/:resourceId/content", (request, response) => {
   }
   response.type(resource.mimeType);
   response.setHeader("Cache-Control", "private, max-age=31536000, immutable");
-  response.sendFile(path.resolve(resource.diskPath));
+  try {
+    response.sendFile(assertPathInsideWorkspace(resource.diskPath));
+  } catch {
+    response.status(404).json({ code: "RESOURCE_FILE_NOT_FOUND" });
+  }
+});
+
+router.get("/resources/:resourceId/derived/*segments", (request, response) => {
+  const resource = resourceRepository.getStoredResource(request.params.resourceId);
+  if (!resource) return response.status(404).json({ code: "RESOURCE_NOT_FOUND" });
+  const segments = Array.isArray(request.params.segments) ? request.params.segments : [request.params.segments];
+  const target = uploadFilePath("parsed", resource.id, ...segments);
+  response.setHeader("Cache-Control", "private, no-store");
+  response.sendFile(assertPathInsideWorkspace(target));
 });
 
 router.get("/resources/:resourceId/pages/:pageNumber/content", async (request, response) => {

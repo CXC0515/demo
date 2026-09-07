@@ -11,7 +11,8 @@ import { z } from 'zod';
 import { deleteReminder, deleteScheduleItem, listReminders, listScheduleItems, listSchedulePeriods, saveReminder, saveReminderSeries, saveReminders, saveScheduleItem, saveScheduleItems, saveSchedulePeriods } from '../repositories/scheduleRepository';
 import { importScheduleDocument } from '../services/schedule/scheduleImportService';
 import { createReminderDrafts } from '../services/schedule/reminderImportService';
-import { uploadFilePath } from '../config/runtimeConfig';
+import { uploadFilePath } from '../context/workspaceContext';
+import { uploadRateLimit } from '../middleware/security';
 
 const router = Router();
 const scheduleSchema = z.object({
@@ -103,14 +104,18 @@ router.delete('/schedule/reminders/:id', (request, response) => {
   response.status(204).end();
 });
 
-const uploadDirectory = uploadFilePath('schedule');
-mkdirSync(uploadDirectory, { recursive: true });
 const upload = multer({
-  dest: uploadDirectory,
+  storage: multer.diskStorage({
+    destination: (_request, _file, callback) => {
+      const directory = uploadFilePath('schedule');
+      mkdirSync(directory, { recursive: true });
+      callback(null, directory);
+    },
+  }),
   limits: { fileSize: 20 * 1024 * 1024, files: 1 },
   fileFilter: (_request, file, callback) => callback(null, file.mimetype === 'application/pdf' || file.mimetype.startsWith('image/'))
 });
-router.post('/schedule/import', upload.single('file'), async (request, response) => {
+router.post('/schedule/import', uploadRateLimit, upload.single('file'), async (request, response) => {
   const file = request.file;
   const scope = request.body.scope === 'class' ? 'class' : 'teacher';
   if (!file) { response.status(400).json({ code: 'SCHEDULE_FILE_REQUIRED' }); return; }
