@@ -1,8 +1,8 @@
 # DEMO 公网试用部署方案
 
-> 文档版本：`v1.1`
+> 文档版本：`v1.2`
 > 日期：2026-09-08
-> 状态：方案已沉淀，尚未批准实施
+> 状态：v1.1 已获批准；代码、数据恢复演练和本机生产烟雾测试已完成，待 GitHub 合并与公网接通
 > Git 基线：`origin/main@db34ba370b4cba3fb7a9a6f4778e0818604afd77`
 
 ## 1. 原始问题和目标
@@ -26,7 +26,7 @@
 
 - 第一阶段不购买服务器，也不依赖只有一个月的阿里云建站、共享 ECS、1GB 存储或 10GB CDN 权益。
 - 外置盘完全不属于本方案：不读取、不写入、不配置、不作为恢复条件。
-- MacBook 是 Apple Silicon，已有 Homebrew、Node `v24.11.1`、npm `11.6.2`；尚未安装 `cloudflared`，也没有 DEMO 的 `launchd` 项。
+- MacBook 是 Apple Silicon，已有 Homebrew、Node `v24.11.1`、npm `11.6.2`；已安装 `cloudflared 2026.8.3`，尚未创建 Tunnel 或安装 DEMO 的 `launchd` 项。
 - 生产代码已支持 Express 同源提供 Vite 构建产物、`/api` 和受保护资料；Node 默认可只监听 `127.0.0.1`。
 - 认证使用 Better Auth；公共注册已关闭，邀请注册后不会自动登录，新用户得到空工作区。
 - 候选产品数据位于 `/Users/cxc/Projects/DEMO/var-web-auth-candidate`，约 333MB；母文件夹 `/Users/cxc/Projects/DEMO/var` 约 1.6GB，其中已有四份约 326–339MB 的历史快照。
@@ -238,7 +238,23 @@ MacBook 合盖休眠、断电、系统更新重启和家庭宽带中断都会造
 - 在 Cloudflare 添加 `unreached.cn`，在域名注册商处修改权威名称服务器，并把 `td.unreached.cn` 路由到 Tunnel；根域名不绑定工作台。
 - 创建 `/Users/cxc/Projects/DEMO/var-product`、其自动备份及日志目录。
 
-这些都是实施范围，不由本方案文档批准自动授权。
+上述代码、数据副本和 MacBook 本地配置范围已由用户批准。GitHub 推送/PR/合并以及域名注册商名称服务器变更仍按本文件约定分别确认。
+
+### 11.3 2026-09-08 实施记录
+
+- 在独立 worktree `/Users/cxc/.codex/worktrees/web-public-trial-plan/DEMO`、分支 `codex/web-public-trial-plan` 上实施；生产服务不会长期从 worktree 运行。
+- 上传限制已集中为资料 80 MiB、批改单文件 4 MiB × 20、课表 10 MiB；批改上传在业务字段无效时会清理已经落盘的临时文件。
+- 启动时会把遗留的资料解析、材料处理和批改批次运行态收敛为失败/中断，保留人工重试入口，不伪造自动续跑。
+- 自动备份已实现“在线备份 → 完整校验 → 内容比较 → 成功后原子发布 → 最近两份保留”；无变化实测会跳过且不留下临时目录，已损坏旧快照会保留供排查但不会阻止生成新的恢复点。
+- 已加入生产环境原子配置脚本、应用/Tunnel/备份三个 LaunchAgent 模板和统一日志启动脚本。运行日志进入 macOS unified log，不写入 `var-product`，避免日志随产品快照重复膨胀。
+- `cloudflared 2026.8.3` 已通过 Homebrew 安装；未创建 Tunnel、未启动服务、未修改任何 DNS。
+- 候选数据已先在线备份到 `/Users/cxc/Projects/DEMO/var/backups/pre-public-trial-2026-09-08T055000+0800`，再恢复到全新的 `/Users/cxc/Projects/DEMO/var-product`。快照共 186 个文件、3 个 SQLite，清单哈希和数据库完整性均通过。
+- 恢复后实测为 1 个用户、1 个工作区、4 个班级、53 名学生、46 条日程、2 份资料、522 个资料页面、62 个知识节点；2 个资料文件均存在，数据库内资料路径全部指向 `var-product`。
+- 自动备份第一次创建成功，第二次在无数据变化时返回 `production_snapshot_skipped_unchanged`；当前自动目录只有 1 份成功快照。
+- 使用 `var-product` 与正式 `dist` 在 `127.0.0.1:4317` 完成生产烟雾测试：首页与 SPA 深层路由 200、live/ready 200、未登录业务 API 和资料文件 401、SIGINT 优雅退出码 0。
+- 完整检查通过：lint、生产构建和 99 项测试；`npm audit --omit=dev` 为 2 moderate、0 high、0 critical，均为既有 ExcelJS/uuid 链路。
+
+尚未执行：真实 `.env` 生产值写入、LaunchAgent 安装、Cloudflare 账号授权和 Tunnel 创建、名称服务器/DNS 变更、公网与国内三网 48 小时验收。LaunchAgent 固定指向母文件夹，因此应在功能合并回 `/Users/cxc/Projects/DEMO` 后安装。
 
 ## 12. 实施顺序和授权边界
 
@@ -293,4 +309,5 @@ MacBook 合盖休眠、断电、系统更新重启和家庭宽带中断都会造
 | --- | --- | --- | --- |
 | 对话草案 D0 | 2026-09-08 | 已被 v1.0 取代 | 曾使用 `app.unreached.cn` 并建议外置加密盘和较多历史保留；用户明确要求使用根域名并排除外置盘。 |
 | v1.0 | 2026-09-08 | 已被 v1.1 取代 | 固定 `unreached.cn`、MacBook + Cloudflare Tunnel、无服务器、同盘最近两份自动备份、有限上传、人工 Agent Mail、`var-product` 正式数据根和国内三网实测边界。 |
-| v1.1 | 2026-09-08 | 当前，待实施审批 | 采纳用户批注：根域名留作未来入口，教师工作台统一使用较短的 `td.unreached.cn`；同步架构图、`APP_URL`、Tunnel 路由和验收地址。 |
+| v1.1 | 2026-09-08 | 已批准并进入实施 | 采纳用户批注：根域名留作未来入口，教师工作台统一使用较短的 `td.unreached.cn`；同步架构图、`APP_URL`、Tunnel 路由和验收地址。 |
+| v1.2 | 2026-09-08 | 当前，实施中 | 记录上传/任务/自动备份/后台模板实现、cloudflared 安装、`var-product` 在线快照恢复、99 项测试和生产烟雾结果；明确 GitHub 合并、真实环境配置与 DNS 仍未执行。 |

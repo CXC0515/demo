@@ -51,3 +51,18 @@ export const removeMaterialsForKind = (taskId: string, kind: StoredMaterial['kin
   persistMaterials();
   return removed;
 };
+
+export const markProcessingMaterialsInterrupted = () => {
+  const { values, persist } = store();
+  let changes = 0;
+  for (const [taskId, materials] of values) {
+    const updated = materials.map(material => {
+      if (material.status !== 'processing') return material;
+      changes += 1;
+      return { ...material, status: 'failed' as const, parseErrorCode: 'PROCESSING_INTERRUPTED' };
+    });
+    values.set(taskId, updated);
+  }
+  if (changes) persist();
+  return changes;
+};

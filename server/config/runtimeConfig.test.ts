@@ -13,7 +13,7 @@ test('derives every default writable path from APP_DATA_ROOT', () => {
   const config = loadRuntimeConfig({
     APP_DATA_ROOT: 'state',
     NODE_ENV: 'production',
-    APP_URL: 'https://unreached.cn',
+    APP_URL: 'https://td.unreached.cn',
     AUTH_SECRET: 'test-secret-with-at-least-32-characters',
   }, cwd);
   assert.equal(config.dataRoot, path.join(cwd, 'state'));
@@ -24,9 +24,15 @@ test('derives every default writable path from APP_DATA_ROOT', () => {
   assert.equal(config.systemDirectory, path.join(cwd, 'state/system'));
   assert.equal(config.workspacesDirectory, path.join(cwd, 'state/workspaces'));
   assert.equal(config.authDatabasePath, path.join(cwd, 'state/system/auth.sqlite'));
-  assert.equal(config.appUrl, 'https://unreached.cn');
+  assert.equal(config.appUrl, 'https://td.unreached.cn');
   assert.equal(config.host, '127.0.0.1');
   assert.equal(config.production, true);
+  assert.deepEqual(config.uploadLimits, {
+    resourceFileBytes: 80 * 1024 * 1024,
+    gradingFileBytes: 4 * 1024 * 1024,
+    gradingFileCount: 20,
+    scheduleFileBytes: 10 * 1024 * 1024,
+  });
 });
 
 test('accepts explicit database and operational paths', () => {

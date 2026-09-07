@@ -1,7 +1,7 @@
 /** @license SPDX-License-Identifier: Apache-2.0 */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
@@ -65,4 +65,26 @@ test('invited accounts receive isolated business APIs and owner-only administrat
   assert.equal(teacherRoster.classes.length, 0);
   assert.equal((await fetch(`${origin}/api/admin/accounts`, { headers: { Cookie: teacher.cookie } })).status, 403);
   assert.equal((await fetch(`${origin}/api/classes`, { method: 'POST', headers: { Origin: origin, Cookie: teacher.cookie, 'Content-Type': 'application/json' }, body: '{}' })).status, 403);
+
+  const invalidKind = new FormData();
+  invalidKind.set('kind', 'not-a-material-kind');
+  invalidKind.append('files', new Blob(['fixture'], { type: 'text/plain' }), 'fixture.txt');
+  const invalidKindResponse = await fetch(`${origin}/api/grading-tasks/task-1/materials`, {
+    method: 'POST',
+    headers: { Origin: origin, 'Sec-Fetch-Site': 'same-origin', 'x-demo-csrf': '1', Cookie: owner.cookie },
+    body: invalidKind,
+  });
+  assert.equal(invalidKindResponse.status, 400);
+
+  const oversized = new FormData();
+  oversized.set('kind', 'student-submission');
+  oversized.append('files', new Blob([new Uint8Array(4 * 1024 * 1024 + 1)], { type: 'image/png' }), 'oversized.png');
+  const oversizedResponse = await fetch(`${origin}/api/grading-tasks/task-1/materials`, {
+    method: 'POST',
+    headers: { Origin: origin, 'Sec-Fetch-Site': 'same-origin', 'x-demo-csrf': '1', Cookie: owner.cookie },
+    body: oversized,
+  });
+  assert.equal(oversizedResponse.status, 413);
+  const uploadRoot = path.join(root, 'workspaces', owner.invitation.workspaceId, 'uploads');
+  assert.deepEqual(await readdir(uploadRoot), []);
 });
