@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { access, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { uploadFilePath } from "../../config/runtimeConfig";
+import { uploadFilePath } from "../../context/workspaceContext";
 import { resourceRepository } from "../../repositories/resourceRepository";
 
 const execFileAsync = promisify(execFile);

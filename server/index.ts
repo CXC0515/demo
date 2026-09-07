@@ -6,16 +6,28 @@
 import 'dotenv/config';
 import { assertProductionAssets, ensureRuntimeDirectories, runtimeConfig } from './config/runtimeConfig';
 import { logEvent } from './observability/logger';
+import { initializeAuth } from './auth/auth';
 
 ensureRuntimeDirectories();
 assertProductionAssets();
+await initializeAuth();
 
 const { createApp } = await import('./app');
 const { closeRosterDatabase } = await import('./database/rosterDatabase');
 const { closeResourceDatabase } = await import('./database/resourceDatabase');
+const { closeAuthDatabase } = await import('./database/authDatabase');
+const { getAuthDatabase } = await import('./database/authDatabase');
+const { createWorkspaceContext, runWithWorkspace } = await import('./context/workspaceContext');
 const { resourceRepository } = await import('./repositories/resourceRepository');
 
-resourceRepository.markRunningJobsInterrupted();
+const memberships = getAuthDatabase().prepare(`
+  SELECT user_id, workspace_id, role FROM app_workspace_members WHERE status = 'active'
+`).all() as Array<{ user_id: string; workspace_id: string; role: 'owner' | 'teacher' }>;
+for (const membership of memberships) {
+  runWithWorkspace(createWorkspaceContext(membership.user_id, membership.workspace_id, membership.role), () => {
+    resourceRepository.markRunningJobsInterrupted();
+  });
+}
 const app = createApp();
 const server = app.listen(runtimeConfig.port, runtimeConfig.host, () => {
   logEvent('info', 'server_started', {
@@ -40,6 +52,7 @@ const shutdown = (reason: string, exitCode: number) => {
     clearTimeout(forceTimer);
     closeRosterDatabase();
     closeResourceDatabase();
+    closeAuthDatabase();
     logEvent('info', 'server_shutdown_completed', { reason });
     process.exit(exitCode);
   });

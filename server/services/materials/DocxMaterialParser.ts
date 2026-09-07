@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { DocumentParserConfig } from '../../config/documentParserConfig';
-import { uploadFilePath } from '../../config/runtimeConfig';
+import { uploadFilePath } from '../../context/workspaceContext';
 import { MaterialParseWarning, NormalizedDocumentBlock } from '../../../src/domain/types';
 import { MaterialParser, MaterialParserError, MaterialParserInput } from './MaterialParser';
 
@@ -66,15 +66,17 @@ export class DocxMaterialParser implements MaterialParser {
       sourceFormat: 'docx' as const,
       markdown: result.markdown,
       sourceMarkdown: result.sourceMarkdown,
-      sourcePreviewUrl: result.previewRelativePath
-        ? `/uploads/parsed/${input.assetId}/${result.previewRelativePath.split(path.sep).join('/')}`
+      sourcePreviewUrl: result.previewRelativePath && input.publicAssetBaseUrl
+        ? `${input.publicAssetBaseUrl}/derived/${result.previewRelativePath.split(path.sep).map(encodeURIComponent).join('/')}`
         : undefined,
       blocks: result.blocks,
       resources: result.resources.map(resource => ({
         id: randomUUID(),
         fileName: resource.fileName,
         mimeType: resource.mimeType,
-        publicUrl: `/uploads/parsed/${input.assetId}/${resource.relativePath.split(path.sep).join('/')}`
+        publicUrl: input.publicAssetBaseUrl
+          ? `${input.publicAssetBaseUrl}/derived/${resource.relativePath.split(path.sep).map(encodeURIComponent).join('/')}`
+          : ''
       })),
       warnings: result.warnings,
       parsedAt: new Date().toISOString()

@@ -4,10 +4,11 @@
  */
 
 import { ReminderImportDraft, ScheduleItem, SchedulePeriod, TimerReminder } from '../domain/types';
+import { apiFetch } from './apiClient';
 
 const readError = async (response: Response) => ((await response.json().catch(() => ({}))) as { code?: string }).code ?? `HTTP_${response.status}`;
 const jsonRequest = async <T>(url: string, init?: RequestInit) => {
-  const response = await fetch(url, init);
+  const response = await apiFetch(url, init);
   if (!response.ok) throw new Error(await readError(response));
   return response.status === 204 ? undefined as T : await response.json() as T;
 };
@@ -29,7 +30,7 @@ export const importSchedule = async (file: File, scope: 'teacher' | 'class', cla
   data.append('file', file);
   data.append('scope', scope);
   data.append('classId', classId);
-  const response = await fetch('/api/schedule/import', { method: 'POST', body: data });
+  const response = await apiFetch('/api/schedule/import', { method: 'POST', body: data });
   if (!response.ok) throw new Error(await readError(response));
   return await response.json() as ScheduleImportDraft;
 };

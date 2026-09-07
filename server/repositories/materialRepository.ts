@@ -3,10 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
 import { DocumentAsset, NormalizedDocument } from '../../src/domain/types';
-import { runtimeConfig } from '../config/runtimeConfig';
+import { workspaceMapStore } from './workspaceFileStore';
 
 export interface StoredMaterial extends DocumentAsset {
   diskPath: string;
@@ -14,44 +12,28 @@ export interface StoredMaterial extends DocumentAsset {
   normalizedDocument?: NormalizedDocument;
 }
 
-const dataDirectory = runtimeConfig.dataDirectory;
-const dataPath = path.join(dataDirectory, 'materials.json');
-mkdirSync(dataDirectory, { recursive: true });
-
-const loadMaterials = () => {
-  try {
-    const entries = JSON.parse(readFileSync(dataPath, 'utf8')) as [string, StoredMaterial[]][];
-    return new Map(entries);
-  } catch {
-    return new Map<string, StoredMaterial[]>();
-  }
-};
-
-const taskMaterials = loadMaterials();
-
-const persistMaterials = () => {
-  const temporaryPath = `${dataPath}.tmp`;
-  writeFileSync(temporaryPath, JSON.stringify([...taskMaterials.entries()]));
-  renameSync(temporaryPath, dataPath);
-};
+const store = () => workspaceMapStore<StoredMaterial[]>('materials.json');
 
 export const appendMaterialList = (current: StoredMaterial[], materials: StoredMaterial[]) => [...current, ...materials];
 
 export const replaceMaterialsForKind = (taskId: string, kind: StoredMaterial['kind'], materials: StoredMaterial[]) => {
+  const { values: taskMaterials, persist: persistMaterials } = store();
   const current = taskMaterials.get(taskId) ?? [];
   taskMaterials.set(taskId, [...current.filter(material => material.kind !== kind), ...materials]);
   persistMaterials();
 };
 
 export const appendMaterials = (taskId: string, materials: StoredMaterial[]) => {
+  const { values: taskMaterials, persist: persistMaterials } = store();
   const current = taskMaterials.get(taskId) ?? [];
   taskMaterials.set(taskId, appendMaterialList(current, materials));
   persistMaterials();
 };
 
-export const getMaterials = (taskId: string) => taskMaterials.get(taskId) ?? [];
+export const getMaterials = (taskId: string) => store().values.get(taskId) ?? [];
 
 export const updateMaterial = (taskId: string, materialId: string, update: Partial<StoredMaterial>) => {
+  const { values: taskMaterials, persist: persistMaterials } = store();
   const materials = taskMaterials.get(taskId) ?? [];
   const index = materials.findIndex(material => material.id === materialId);
   if (index < 0) return undefined;
@@ -62,6 +44,7 @@ export const updateMaterial = (taskId: string, materialId: string, update: Parti
 };
 
 export const removeMaterialsForKind = (taskId: string, kind: StoredMaterial['kind']) => {
+  const { values: taskMaterials, persist: persistMaterials } = store();
   const current = taskMaterials.get(taskId) ?? [];
   const removed = current.filter(material => material.kind === kind);
   taskMaterials.set(taskId, current.filter(material => material.kind !== kind));

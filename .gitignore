@@ -7,6 +7,8 @@ var/data/
 var/backups/
 var/test-fixtures/
 var-web/
+var-web-auth-candidate/
+var-web-auth-restored/
 .DS_Store
 *.log
 .env*

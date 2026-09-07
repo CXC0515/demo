@@ -21,6 +21,7 @@ import {
   Sparkles,
   X
 } from 'lucide-react';
+import { useAuth } from '../auth/AuthGate';
 import { ClassroomLayout, CommitteeRole, SchoolClass, Student } from '../../domain/types';
 import { exportClassroomLayout, getClassroomLayout, saveClassroomLayout } from '../../services/classroomApi';
 import BehaviorTagEditor from '../students/BehaviorTagEditor';
@@ -60,6 +61,7 @@ export default function VirtualClassroom({
   onAddObservation,
   onUpdateStudent
 }: VirtualClassroomProps) {
+  const { user } = useAuth();
   const [layout, setLayout] = useState<ClassroomLayout | null>(null);
   const [draft, setDraft] = useState<ClassroomLayout | null>(null);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
@@ -68,7 +70,7 @@ export default function VirtualClassroom({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [includeStudentNo, setIncludeStudentNo] = useState(() => localStorage.getItem('classroom-export-student-no') !== 'false');
+  const [includeStudentNo, setIncludeStudentNo] = useState(() => localStorage.getItem(`classroom-export-student-no:${user.id}`) !== 'false');
   const [submittingObservation, setSubmittingObservation] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -333,7 +335,7 @@ export default function VirtualClassroom({
                   checked={includeStudentNo}
                   onChange={event => {
                     setIncludeStudentNo(event.target.checked);
-                    localStorage.setItem('classroom-export-student-no', String(event.target.checked));
+                    localStorage.setItem(`classroom-export-student-no:${user.id}`, String(event.target.checked));
                   }}
                   className="accent-emerald-700"
                 />

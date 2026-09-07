@@ -10,12 +10,21 @@ import { loadRuntimeConfig } from './runtimeConfig';
 
 test('derives every default writable path from APP_DATA_ROOT', () => {
   const cwd = '/tmp/demo-runtime-config';
-  const config = loadRuntimeConfig({ APP_DATA_ROOT: 'state', NODE_ENV: 'production' }, cwd);
+  const config = loadRuntimeConfig({
+    APP_DATA_ROOT: 'state',
+    NODE_ENV: 'production',
+    APP_URL: 'https://unreached.cn',
+    AUTH_SECRET: 'test-secret-with-at-least-32-characters',
+  }, cwd);
   assert.equal(config.dataRoot, path.join(cwd, 'state'));
   assert.equal(config.rosterDatabasePath, path.join(cwd, 'state/data/roster.sqlite'));
   assert.equal(config.resourceDatabasePath, path.join(cwd, 'state/data/resources.sqlite'));
   assert.equal(config.uploadDirectory, path.join(cwd, 'state/uploads'));
   assert.equal(config.backupDirectory, path.join(cwd, 'state/backups'));
+  assert.equal(config.systemDirectory, path.join(cwd, 'state/system'));
+  assert.equal(config.workspacesDirectory, path.join(cwd, 'state/workspaces'));
+  assert.equal(config.authDatabasePath, path.join(cwd, 'state/system/auth.sqlite'));
+  assert.equal(config.appUrl, 'https://unreached.cn');
   assert.equal(config.host, '127.0.0.1');
   assert.equal(config.production, true);
 });

@@ -1610,5 +1610,22 @@ export class ResourceRepository {
   }
 }
 
-export const resourceRepository = new ResourceRepository(getResourceDatabase());
-resourceRepository.seedBaseKnowledge();
+const repositories = new Map<string, ResourceRepository>();
+export const getResourceRepository = () => {
+  const database = getResourceDatabase();
+  const key = database.name;
+  const existing = repositories.get(key);
+  if (existing) return existing;
+  const repository = new ResourceRepository(database);
+  repository.seedBaseKnowledge();
+  repositories.set(key, repository);
+  return repository;
+};
+
+export const resourceRepository = new Proxy({} as ResourceRepository, {
+  get: (_target, property) => {
+    const repository = getResourceRepository() as unknown as Record<PropertyKey, unknown>;
+    const value = repository[property];
+    return typeof value === 'function' ? value.bind(repository) : value;
+  },
+});

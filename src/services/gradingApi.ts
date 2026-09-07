@@ -4,6 +4,7 @@
  */
 
 import { CalibrationResultSource, CalibrationSample, DocumentAsset, FirstSectionAnalysis, GradingBatch, GradingDiagnosis, GradingFeedbackReason, GradingMode, GradingQuestion, GradingReviewDecision, KnowledgeNode, NormalizedDocument, TaskQuestionRubric, TrialGradingQuestionInput, TrialGradingResult, TrialGradingSubmissionInput, VisionValidationResult } from '../domain/types';
+import { apiFetch } from './apiClient';
 
 const readErrorCode = async (response: Response) => {
   const body = await response.json().catch(() => ({})) as { code?: string };
@@ -14,14 +15,14 @@ export const uploadTaskMaterials = async (taskId: string, kind: 'assignment' | '
   const form = new FormData();
   form.set('kind', kind);
   files.forEach(file => form.append('files', file));
-  const response = await fetch(`/api/grading-tasks/${taskId}/materials`, { method: 'POST', body: form });
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/materials`, { method: 'POST', body: form });
   if (!response.ok) throw new Error(await readErrorCode(response));
   const body = await response.json() as { assets: DocumentAsset[] };
   return body.assets;
 };
 
 export const clearStudentSubmissions = async (taskId: string) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/student-submissions`, { method: 'DELETE' });
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/student-submissions`, { method: 'DELETE' });
   if (!response.ok) throw new Error(await readErrorCode(response));
 };
 
@@ -31,7 +32,7 @@ export interface TaskMaterialsResult {
 }
 
 export const getTaskMaterials = async (taskId: string): Promise<TaskMaterialsResult> => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/materials`);
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/materials`);
   if (!response.ok) throw new Error(await readErrorCode(response));
   return response.json() as Promise<TaskMaterialsResult>;
 };
@@ -54,7 +55,7 @@ export const analyzeTaskMaterials = async (taskId: string, knowledgeNodes: Knowl
   const knowledgeCatalog = knowledgeNodes
     .filter(node => node.type === 'knowledge' || node.type === 'capability')
     .map(node => ({ id: node.id, name: node.name, type: node.type, description: node.desc }));
-  const response = await fetch(`/api/grading-tasks/${taskId}/analysis`, {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/analysis`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ knowledgeCatalog })
@@ -65,7 +66,7 @@ export const analyzeTaskMaterials = async (taskId: string, knowledgeNodes: Knowl
 };
 
 export const getTaskAnalysis = async (taskId: string) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/analysis`);
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/analysis`);
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(await readErrorCode(response));
   const body = await response.json() as { analysis: FirstSectionAnalysis };
@@ -73,7 +74,7 @@ export const getTaskAnalysis = async (taskId: string) => {
 };
 
 export const saveTaskQuestionCorrection = async (taskId: string, displayNo: string, correction: { title: string; stem: string; answerRequirement: string; standardAnswer?: string }) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/analysis/questions/${encodeURIComponent(displayNo)}`, {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/analysis/questions/${encodeURIComponent(displayNo)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(correction)
@@ -83,14 +84,14 @@ export const saveTaskQuestionCorrection = async (taskId: string, displayNo: stri
 };
 
 export const getTaskRubrics = async (taskId: string) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/rubrics`);
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/rubrics`);
   if (!response.ok) throw new Error(await readErrorCode(response));
   const body = await response.json() as { rubrics: TaskQuestionRubric[] };
   return body.rubrics;
 };
 
 export const saveTaskRubric = async (taskId: string, rubric: Omit<TaskQuestionRubric, 'taskId' | 'updatedAt'>) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/rubrics/${encodeURIComponent(rubric.questionId)}`, {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/rubrics/${encodeURIComponent(rubric.questionId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(rubric)
@@ -105,7 +106,7 @@ export const gradeTaskTrial = async (
   questions: TrialGradingQuestionInput[],
   submissions: TrialGradingSubmissionInput[]
 ) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/trial-grading`, {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/trial-grading`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ questions, submissions })
@@ -116,7 +117,7 @@ export const gradeTaskTrial = async (
 };
 
 export const getTaskTrialGrading = async (taskId: string) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/trial-grading`);
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/trial-grading`);
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(await readErrorCode(response));
   const body = await response.json() as { result: TrialGradingResult };
@@ -128,7 +129,7 @@ export const regradeTrialQuestion = async (
   question: TrialGradingQuestionInput,
   submissions: TrialGradingSubmissionInput[]
 ) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/trial-grading/regrade-question`, {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/trial-grading/regrade-question`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ questions: [question], submissions })
@@ -138,14 +139,14 @@ export const regradeTrialQuestion = async (
 };
 
 export const correctTrialOcr = async (taskId: string, sampleId: string, correctedText: string, question: TrialGradingQuestionInput, submission: TrialGradingSubmissionInput) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/trial-grading/${encodeURIComponent(sampleId)}/ocr-correction`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ correctedText, question, submission }) });
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/trial-grading/${encodeURIComponent(sampleId)}/ocr-correction`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ correctedText, question, submission }) });
   if (!response.ok) throw new Error(await readErrorCode(response));
   const body = await response.json() as { sample: CalibrationSample };
   return body.sample;
 };
 
 export const saveTeacherReview = async (taskId: string, sampleId: string, finalScore: number, reason: string, resultSource: CalibrationResultSource, correctedText?: string, reviewDecision?: GradingReviewDecision, feedbackReasons?: GradingFeedbackReason[]) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/trial-grading/${encodeURIComponent(sampleId)}/teacher-review`, {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/trial-grading/${encodeURIComponent(sampleId)}/teacher-review`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ finalScore, reason, resultSource, correctedText, reviewDecision, feedbackReasons })
@@ -155,37 +156,37 @@ export const saveTeacherReview = async (taskId: string, sampleId: string, finalS
 };
 
 export const getBatchGrading = async (taskId: string) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/batch-grading`);
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/batch-grading`);
   if (!response.ok) throw new Error(await readErrorCode(response));
   return (await response.json() as { batch: GradingBatch }).batch;
 };
 
 export const startBatchGrading = async (taskId: string, mode: GradingMode, questions: TrialGradingQuestionInput[], submissions: TrialGradingSubmissionInput[]) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/batch-grading/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode, questions, submissions }) });
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/batch-grading/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode, questions, submissions }) });
   if (!response.ok) throw new Error(await readErrorCode(response));
   return response.json() as Promise<{ batch: GradingBatch; result: TrialGradingResult }>;
 };
 
 export const setBatchGradingAction = async (taskId: string, action: 'pause' | 'resume') => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/batch-grading/${action}`, { method: 'POST' });
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/batch-grading/${action}`, { method: 'POST' });
   if (!response.ok) throw new Error(await readErrorCode(response));
   return (await response.json() as { batch: GradingBatch }).batch;
 };
 
 export const confirmBatchStudents = async (taskId: string, studentIds: string[]) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/batch-grading/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentIds }) });
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/batch-grading/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentIds }) });
   if (!response.ok) throw new Error(await readErrorCode(response));
   return (await response.json() as { batch: GradingBatch }).batch;
 };
 
 export const getGradingDiagnosis = async (taskId: string, questions: GradingQuestion[]) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/diagnosis`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: questions.map(({ id, displayNo, score }) => ({ id, displayNo, score })) }) });
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/diagnosis`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: questions.map(({ id, displayNo, score }) => ({ id, displayNo, score })) }) });
   if (!response.ok) throw new Error(await readErrorCode(response));
   return (await response.json() as { diagnosis: GradingDiagnosis }).diagnosis;
 };
 
 export const runVisionValidation = async (taskId: string, assetId: string, questionNos = ['2', '3', '4', '5', '6']) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/vision-validation`, {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/vision-validation`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ assetId, questionNos })
@@ -196,7 +197,7 @@ export const runVisionValidation = async (taskId: string, assetId: string, quest
 };
 
 export const getVisionValidation = async (taskId: string, assetId: string) => {
-  const response = await fetch(`/api/grading-tasks/${taskId}/vision-validation/${encodeURIComponent(assetId)}`);
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/vision-validation/${encodeURIComponent(assetId)}`);
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(await readErrorCode(response));
   const body = await response.json() as { result: VisionValidationResult };

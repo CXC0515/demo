@@ -16,7 +16,7 @@ import {
   RequestTimeoutError
 } from '@paddleocr/api-sdk';
 import { DocumentParserConfig } from '../../config/documentParserConfig';
-import { uploadFilePath } from '../../config/runtimeConfig';
+import { uploadFilePath } from '../../context/workspaceContext';
 import { mergeParserArtifactPages } from '../../repositories/parserArtifactRepository';
 import { MaterialParser, MaterialParserError, MaterialParserInput } from './MaterialParser';
 import { enhanceRecognitionPage } from './recognitionImagePreprocessor';
@@ -175,7 +175,9 @@ export class PaddleVisionMaterialParser implements MaterialParser {
           id: randomUUID(),
           fileName: path.basename(resource.resourcePath),
           mimeType: path.extname(resource.resourcePath).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg',
-          publicUrl: `/uploads/parsed/${input.assetId}/resources/${encodeURIComponent(path.basename(resource.resourcePath))}`,
+          publicUrl: input.publicAssetBaseUrl
+            ? `${input.publicAssetBaseUrl}/derived/resources/${encodeURIComponent(path.basename(resource.resourcePath))}`
+            : '',
           role: resource.role,
           pageNumber: resource.pageNumber
         })),
