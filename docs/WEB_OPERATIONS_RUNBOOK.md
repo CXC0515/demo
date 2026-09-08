@@ -1,9 +1,9 @@
 # DEMO 网页产品本地生产运行手册
 
-> 文档版本：`v1.5`
+> 文档版本：`v1.6`
 > 日期：2026-09-08
 > 适用范围：网页产品第一阶段第 2、3 切片操作口径
-> 当前边界：代码、`var-product` 恢复演练及本机生产烟雾已完成；公网与后台自启尚未接通
+> 当前边界：代码已合并、`var-product` 与生产环境已就绪；名称服务器切换已获批准，公网与后台自启尚未接通
 
 ## 1. 当前运行边界
 
@@ -149,7 +149,20 @@ npm run verify:data -- /Users/cxc/Projects/DEMO/var-web
 
 ## 9. 第 3 切片运行口径与当前进度
 
-完整批准范围和实时实施记录见 `docs/WEB_PUBLIC_TRIAL_DEPLOYMENT_PLAN.md`。`cloudflared 2026.8.3` 已安装，但 Tunnel、DNS 和 LaunchAgent 仍未创建或启用。
+完整批准范围和实时实施记录见 `docs/WEB_PUBLIC_TRIAL_DEPLOYMENT_PLAN.md`。`cloudflared 2026.8.3` 已安装，Cloudflare 免费 Zone 已创建；Tunnel、名称服务器切换和 LaunchAgent 仍未完成。
+
+### 9.0 DNS 切换与回滚
+
+域名继续由阿里云持有和续费，权威 DNS 计划从阿里云切换到 Cloudflare：
+
+```text
+原值：dns11.hichina.com
+原值：dns12.hichina.com
+新值：mustafa.ns.cloudflare.com
+新值：ophelia.ns.cloudflare.com
+```
+
+2026-09-08 切换前检查未发现 A、AAAA、MX、TXT、`www`、`td` 或 DNSSEC 记录，因此没有现有网站或域名邮箱记录需要迁移。回滚时先在阿里云 DNS 建立必要记录，再恢复两条原名称服务器。不要在传播期间反复切换；等待公共解析确认后再点击 Cloudflare 的完成按钮。
 
 ### 9.1 正式入口和运行目录
 
@@ -222,4 +235,5 @@ node /Users/cxc/Projects/DEMO/scripts/configure-production-env.mjs
 | v1.2 | 2026-09-08 | 已被 v1.3 取代 | 修正本机双进程启动说明；补充“注册后返回登录页”、无注册会话和新教师空工作区的验收步骤。 |
 | v1.3 | 2026-09-08 | 已被 v1.4 取代 | 固定 `unreached.cn` 根域名、`var-product` 和三个 LaunchAgent 的运行口径；排除外置盘/云盘，改为每日变更检测及最近两份自动快照，并加入公网故障与三网验收步骤。 |
 | v1.4 | 2026-09-08 | 已被 v1.5 取代 | 教师工作台入口改为 `td.unreached.cn`，同步生产 `APP_URL`、Tunnel 路由和后台运行说明；根域名保留给未来入口。 |
-| v1.5 | 2026-09-08 | 当前，实施中 | 记录 cloudflared、本地产品副本、自动备份去重、unified log 与合并后 LaunchAgent 安装顺序；公网入口仍未启用。 |
+| v1.5 | 2026-09-08 | 已被 v1.6 取代 | 记录 cloudflared、本地产品副本、自动备份去重、unified log 与合并后 LaunchAgent 安装顺序；公网入口仍未启用。 |
+| v1.6 | 2026-09-08 | 当前，实施中 | 记录 Cloudflare 免费 Zone、阿里云与 Cloudflare DNS 职责、精确名称服务器、切换前空记录核查、用户授权和回滚步骤。 |
