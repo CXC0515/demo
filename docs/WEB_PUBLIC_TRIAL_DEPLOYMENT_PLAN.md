@@ -1,8 +1,8 @@
 # DEMO 公网试用部署方案
 
-> 文档版本：`v1.3`
-> 日期：2026-09-08
-> 状态：代码已合并，生产环境已配置；Cloudflare DNS 切换已获用户批准，待执行和验证
+> 文档版本：`v1.4`
+> 日期：2026-09-09
+> 状态：公网入口已启用并通过基础验收；待完成国内三网及微信内置浏览器 48 小时观察
 > Git 基线：`origin/main@52fdf13349e83264377e437fa6b74bf6defb490d`
 
 ## 1. 原始问题和目标
@@ -26,7 +26,7 @@
 
 - 第一阶段不购买服务器，也不依赖只有一个月的阿里云建站、共享 ECS、1GB 存储或 10GB CDN 权益。
 - 外置盘完全不属于本方案：不读取、不写入、不配置、不作为恢复条件。
-- MacBook 是 Apple Silicon，已有 Homebrew、Node `v24.11.1`、npm `11.6.2`；已安装 `cloudflared 2026.8.3`，尚未创建 Tunnel 或安装 DEMO 的 `launchd` 项。
+- MacBook 是 Apple Silicon，已有 Homebrew、Node `v24.11.1`、npm `11.6.2`；已安装 `cloudflared 2026.8.3`、命名 Tunnel 和 DEMO 的三个 `launchd` 项。
 - 生产代码已支持 Express 同源提供 Vite 构建产物、`/api` 和受保护资料；Node 默认可只监听 `127.0.0.1`。
 - 认证使用 Better Auth；公共注册已关闭，邀请注册后不会自动登录，新用户得到空工作区。
 - 候选产品数据位于 `/Users/cxc/Projects/DEMO/var-web-auth-candidate`，约 333MB；母文件夹 `/Users/cxc/Projects/DEMO/var` 约 1.6GB，其中已有四份约 326–339MB 的历史快照。
@@ -271,7 +271,20 @@ MacBook 合盖休眠、断电、系统更新重启和家庭宽带中断都会造
 
 已完成：PR #10 合并到 `main@52fdf13`；正式 `.env` 已原子写入生产路径并生成 64 字符随机 `AUTH_SECRET`；母文件夹依赖、`dist` 和 TypeScript 检查通过。
 
-尚未执行：阿里云名称服务器切换及生效确认、Tunnel 创建与 `td` 路由、LaunchAgent 安装、公网和国内三网 48 小时验收。
+### 11.4 2026-09-09 公网启用记录
+
+- 阿里云权威名称服务器已从 `dns11.hichina.com`、`dns12.hichina.com` 切换为 `mustafa.ns.cloudflare.com`、`ophelia.ns.cloudflare.com`；WHOIS、Cloudflare 控制台、`1.1.1.1` 和 `223.5.5.5` 均确认生效。
+- Cloudflare Zone 已显示 Active；根域名没有绑定教师工作台，仍保留给未来入口。
+- Cloudflare Tunnel 授权成功，已创建命名 Tunnel `teacher-dashboard`；本机凭据和 `/Users/cxc/.cloudflared/config.yml` 权限设为 `600`，未写入仓库。
+- `td.unreached.cn` 已绑定到 Tunnel，唯一源站为 `http://127.0.0.1:4317`；未开放路由器端口或本机公网监听。
+- 应用、Tunnel、每日备份三个 LaunchAgent 已从母文件夹正式 `main` 安装。应用和 Tunnel 处于运行态；备份任务按日历计划唤醒，空闲时不常驻。
+- 公网 `live`、`ready` 均返回 200，存储、AI 和 PaddleOCR 配置状态正常；`/login` 与首页返回 200，未登录业务 API 返回 401。
+- HTTPS 证书覆盖 `unreached.cn`，由 Google Trust Services 签发；响应包含 HSTS、CSP、`nosniff`、`SAMEORIGIN` 和 `no-referrer`。
+- 人工强制重启应用与 Tunnel 后，两者 PID 均变化并自动恢复；公网 `ready` 再次通过，Tunnel 恢复两条 Cloudflare 边缘连接。
+
+已完成：代码合并、产品数据副本、自动备份基线、正式环境、DNS、Tunnel、LaunchAgent、公网 HTTPS 和重启恢复基础验收。
+
+尚未完成：国内电信/联通/移动、手机和微信内置浏览器的连续 48 小时体验记录，以及首批两个试用账号的真实任务闭环。
 
 ## 12. 实施顺序和授权边界
 
@@ -328,4 +341,5 @@ MacBook 合盖休眠、断电、系统更新重启和家庭宽带中断都会造
 | v1.0 | 2026-09-08 | 已被 v1.1 取代 | 固定 `unreached.cn`、MacBook + Cloudflare Tunnel、无服务器、同盘最近两份自动备份、有限上传、人工 Agent Mail、`var-product` 正式数据根和国内三网实测边界。 |
 | v1.1 | 2026-09-08 | 已批准并进入实施 | 采纳用户批注：根域名留作未来入口，教师工作台统一使用较短的 `td.unreached.cn`；同步架构图、`APP_URL`、Tunnel 路由和验收地址。 |
 | v1.2 | 2026-09-08 | 已被 v1.3 取代 | 记录上传/任务/自动备份/后台模板实现、cloudflared 安装、`var-product` 在线快照恢复、99 项测试和生产烟雾结果；明确 GitHub 合并、真实环境配置与 DNS 仍未执行。 |
-| v1.3 | 2026-09-08 | 当前，实施中 | 记录 PR #10 合并、生产环境配置、阿里云 DNS 与限时建站权益的区别、Cloudflare 免费 Zone、精确名称服务器、用户切换授权和回滚路径。 |
+| v1.3 | 2026-09-08 | 已被 v1.4 取代 | 记录 PR #10 合并、生产环境配置、阿里云 DNS 与限时建站权益的区别、Cloudflare 免费 Zone、精确名称服务器、用户切换授权和回滚路径。 |
+| v1.4 | 2026-09-09 | 当前，观察中 | 记录名称服务器生效、Zone 激活、命名 Tunnel、`td` 路由、三个 LaunchAgent、公网 HTTPS/权限检查和强制重启恢复结果；进入国内网络 48 小时验收。 |
