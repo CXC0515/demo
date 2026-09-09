@@ -22,9 +22,9 @@ export interface ScheduleClassMatch {
 
 export interface ScheduleClassEvidence {
   recognizedClassText: string;
-  aiClassName?: string;
   aiCandidateClassId?: string;
   confidence?: number;
+  aiNeedsReview?: boolean;
 }
 
 const chineseDigitValues: Record<string, number> = {
@@ -93,24 +93,63 @@ const localCandidates = (evidenceText: string, classes: SchoolClass[]) => {
 
 const unique = (values: string[]) => [...new Set(values)];
 
+const editDistance = (left: string, right: string) => {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length];
+};
+
+const isOrderedSubsequence = (shorter: string, longer: string) => {
+  let index = 0;
+  for (const character of longer) {
+    if (character === shorter[index]) index += 1;
+    if (index === shorter.length) return true;
+  }
+  return false;
+};
+
+const isPlausibleAiCorrection = (rawText: string, candidate: SchoolClass) => {
+  const raw = normalizeClassLabel(rawText);
+  const name = normalizeClassLabel(candidate.name);
+  if (!raw || !name) return false;
+  const rawGrade = gradeNumberFromText(rawText);
+  const candidateGrade = gradeNumberFromText(candidate.name) ?? gradeNumberFromText(candidate.grade);
+  const rawClassNumber = classNumberFromText(rawText);
+  const candidateClassNumber = classNumberFromText(candidate.name);
+  if (rawGrade && candidateGrade && rawGrade !== candidateGrade) return false;
+  if (rawClassNumber && candidateClassNumber && rawClassNumber !== candidateClassNumber) return false;
+  if (raw.length >= 3 && (raw.includes(name) || name.includes(raw))) return true;
+  if (raw.length >= 3 && raw.length / name.length >= 0.4 && isOrderedSubsequence(raw, name)) return true;
+  return editDistance(raw, name) <= Math.max(1, Math.ceil(name.length * 0.34));
+};
+
 export const matchScheduleClass = (evidence: ScheduleClassEvidence, classes: SchoolClass[]) => {
   const available = new Map(classes.map(item => [item.id, item]));
   const recognized = localCandidates(evidence.recognizedClassText, classes);
-  const named = localCandidates(evidence.aiClassName ?? '', classes);
-  const localIds = unique([...recognized.ids, ...named.ids]);
+  const localIds = unique(recognized.ids);
   const aiClass = evidence.aiCandidateClassId ? available.get(evidence.aiCandidateClassId) : undefined;
 
   if (localIds.length === 1) {
-    if (aiClass && aiClass.id !== localIds[0]) {
+    if (!aiClass || evidence.aiNeedsReview || aiClass.id !== localIds[0]) {
       return {
         classId: '', className: '',
-        match: { status: 'unresolved', reason: 'conflicting-evidence', candidateClassIds: unique([...localIds, aiClass.id]) } satisfies ScheduleClassMatch,
+        match: { status: 'unresolved', reason: 'conflicting-evidence', candidateClassIds: unique([...localIds, ...(aiClass ? [aiClass.id] : [])]) } satisfies ScheduleClassMatch,
       };
     }
     const matched = available.get(localIds[0])!;
     return {
       classId: matched.id, className: matched.name,
-      match: { status: 'matched', reason: recognized.reason ?? named.reason ?? 'normalized-name', candidateClassIds: [matched.id] } satisfies ScheduleClassMatch,
+      match: { status: 'matched', reason: recognized.reason ?? 'normalized-name', candidateClassIds: [matched.id] } satisfies ScheduleClassMatch,
     };
   }
 
@@ -121,7 +160,7 @@ export const matchScheduleClass = (evidence: ScheduleClassEvidence, classes: Sch
     };
   }
 
-  if (aiClass && (evidence.confidence ?? 0) >= 0.8) {
+  if (aiClass && !evidence.aiNeedsReview && (evidence.confidence ?? 0) >= 0.8 && isPlausibleAiCorrection(evidence.recognizedClassText, aiClass)) {
     return {
       classId: aiClass.id, className: aiClass.name,
       match: { status: 'matched', reason: 'ai-catalog-selection', candidateClassIds: [aiClass.id] } satisfies ScheduleClassMatch,

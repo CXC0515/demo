@@ -25,20 +25,38 @@ test('normalizes full-width punctuation without discarding meaningful names', ()
 });
 
 test('matches arbitrary existing class names from OCR cell evidence', () => {
-  const result = matchScheduleClass({ recognizedClassText: '综合实践  星辰班', confidence: 0.97 }, classes);
+  const result = matchScheduleClass({ recognizedClassText: '综合实践  星辰班', aiCandidateClassId: 'stars', confidence: 0.97 }, classes);
   assert.equal(result.classId, 'stars');
   assert.equal(result.match.reason, 'normalized-name');
 });
 
 test('matches grade and class-number aliases as supplementary evidence', () => {
-  assert.equal(matchScheduleClass({ recognizedClassText: '语文 七年级十班' }, classes).classId, 'class-10');
-  assert.equal(matchScheduleClass({ recognizedClassText: '语文 初一 9 班' }, classes).classId, 'class-9');
+  assert.equal(matchScheduleClass({ recognizedClassText: '语文 七年级十班', aiCandidateClassId: 'class-10' }, classes).classId, 'class-10');
+  assert.equal(matchScheduleClass({ recognizedClassText: '语文 初一 9 班', aiCandidateClassId: 'class-9' }, classes).classId, 'class-9');
 });
 
 test('uses a validated high-confidence catalog selection when text has no local match', () => {
   const result = matchScheduleClass({ recognizedClassText: '创新班', aiCandidateClassId: 'innovation', confidence: 0.92 }, classes);
   assert.equal(result.classId, 'innovation');
   assert.equal(result.match.reason, 'ai-catalog-selection');
+});
+
+test('accepts a small AI cleanup while preserving class-number anchors', () => {
+  const result = matchScheduleClass({ recognizedClassText: '初秃一（10）班', aiCandidateClassId: 'class-10', confidence: 0.96 }, classes);
+  assert.equal(result.classId, 'class-10');
+  assert.equal(result.match.reason, 'ai-catalog-selection');
+});
+
+test('rejects an AI correction that changes a recognized class number', () => {
+  const result = matchScheduleClass({ recognizedClassText: '初秃一（10）班', aiCandidateClassId: 'class-9', confidence: 0.99 }, classes);
+  assert.equal(result.classId, '');
+  assert.equal(result.match.reason, 'no-candidate');
+});
+
+test('requires review when AI declines an otherwise exact catalog match', () => {
+  const result = matchScheduleClass({ recognizedClassText: '初一（10）班', aiCandidateClassId: 'class-10', confidence: 0.99, aiNeedsReview: true }, classes);
+  assert.equal(result.classId, '');
+  assert.equal(result.match.reason, 'conflicting-evidence');
 });
 
 test('rejects catalog ids outside the current workspace', () => {
