@@ -140,7 +140,12 @@ router.post('/schedule/import', uploadRateLimit, upload.single('file'), async (r
     response.json(result);
   } catch (error) {
     const code = error instanceof Error ? error.message : 'SCHEDULE_IMPORT_FAILED';
-    response.status(code.includes('NOT_CONFIGURED') ? 503 : 422).json({ code });
+    const unavailable = code.includes('NOT_CONFIGURED')
+      || code === 'MODEL_CONNECTION_FAILED'
+      || /^MODEL_REQUEST_FAILED:(502|503|504)$/.test(code)
+      || ['PADDLEOCR_QUEUE_FULL', 'PADDLEOCR_RATE_LIMITED', 'PADDLEOCR_TIMEOUT', 'PADDLEOCR_PARSE_FAILED'].includes(code);
+    logEvent('warn', 'schedule_import_failed', { scope, code, serviceUnavailable: unavailable });
+    response.status(unavailable ? 503 : 422).json({ code });
   } finally {
     rmSync(file.path, { force: true });
   }
