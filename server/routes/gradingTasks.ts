@@ -33,6 +33,7 @@ import { OpenAICompatibleVisionRecognizer } from '../services/grading/OpenAIComp
 import { OpenAICompatibleVisionRegionLocator } from '../services/grading/OpenAICompatibleVisionRegionLocator';
 import { createVisionLocatedRegions } from '../services/grading/questionRegionCropper';
 import { hasSuspiciousRepeatedShortAnswer, inferAnswerCardOption } from '../services/grading/trialScore';
+import { authenticatedUploadPath, resumeAuthenticatedWorkspace } from '../middleware/authenticated';
 import { buildExpectedAnswerFields } from '../services/grading/answerFieldSchema';
 import { buildTeacherAnswerOverrides, findSubmissionsNeedingTrialGrading, mergeCurrentTrialSamples, mergeRegradedQuestionSamples } from '../services/grading/trialResultReconciler';
 import { gradeTrialSubmissions } from '../services/grading/trialGradingService';
@@ -50,10 +51,14 @@ const decodeUploadFileName = (fileName: string) => {
 };
 const upload = multer({
   storage: multer.diskStorage({
-    destination: (_request, _file, callback) => {
-      const directory = uploadFilePath();
-      mkdirSync(directory, { recursive: true });
-      callback(null, directory);
+    destination: (request, _file, callback) => {
+      try {
+        const directory = authenticatedUploadPath(request);
+        mkdirSync(directory, { recursive: true });
+        callback(null, directory);
+      } catch (error) {
+        callback(error instanceof Error ? error : new Error('WORKSPACE_CONTEXT_REQUIRED'), '');
+      }
     },
   }),
   limits: {
@@ -499,7 +504,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
   }
 });
 
-router.post('/:taskId/materials', uploadRateLimit, upload.array('files'), (request, response) => {
+router.post('/:taskId/materials', uploadRateLimit, upload.array('files'), resumeAuthenticatedWorkspace, (request, response) => {
   const kind = request.body.kind;
   const files = (request.files as Express.Multer.File[] | undefined) ?? [];
   if (kind !== 'assignment' && kind !== 'reference-answer' && kind !== 'student-submission') {

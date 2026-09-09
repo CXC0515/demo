@@ -114,10 +114,26 @@ export const createApp = (config: RuntimeConfig = runtimeConfig) => {
   app.use('/api', (_request, response) => response.status(404).json({ code: 'API_NOT_FOUND' }));
 
   if (config.production) {
-    app.use(express.static(config.distDirectory, { index: false, maxAge: '1h' }));
+    app.use('/assets', express.static(path.join(config.distDirectory, 'assets'), {
+      index: false,
+      immutable: true,
+      maxAge: '1y',
+    }));
+    app.use('/assets', (_request, response) => {
+      response.setHeader('Cache-Control', 'no-store');
+      response.status(404).json({ code: 'STATIC_ASSET_NOT_FOUND' });
+    });
+    app.use(express.static(config.distDirectory, {
+      index: false,
+      maxAge: 0,
+      setHeaders: (response, filePath) => {
+        if (path.basename(filePath) === 'index.html') response.setHeader('Cache-Control', 'no-store');
+      },
+    }));
     app.get(/.*/, (request, response, next) => {
       if (request.path.startsWith('/api/')) return next();
-      response.sendFile(path.join(config.distDirectory, 'index.html'));
+      response.setHeader('Cache-Control', 'no-store');
+      response.sendFile('index.html', { root: config.distDirectory });
     });
   }
 

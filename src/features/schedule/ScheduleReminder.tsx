@@ -1162,6 +1162,8 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
       const code = cause instanceof Error ? cause.message : 'SCHEDULE_IMPORT_FAILED';
       setError(code === 'PADDLEOCR_QUEUE_FULL' || code === 'PADDLEOCR_RATE_LIMITED'
         ? 'OCR 服务当前排队较多，自动重试后仍未恢复，请稍后再试。'
+        : code === 'SCHEDULE_CLASS_NOT_FOUND'
+          ? '所选班级已经失效，请关闭窗口后重新选择班级。'
         : code.startsWith('PADDLEOCR_')
           ? 'OCR 服务暂时无法完成课表识别，请稍后重试。'
           : code === 'MODEL_CONNECTION_FAILED' || /^MODEL_REQUEST_FAILED:(502|503|504)$/.test(code)
@@ -1182,7 +1184,9 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
     );
   const remove = (index: number) => setDraft((current) => (current ? { ...current, items: current.items.filter((_, i) => i !== index) } : current));
   const orderedItems = (draft?.items ?? []).map((item, index) => ({ item, index })).sort((left, right) => left.item.day - right.item.day || left.item.period - right.item.period);
-  const unresolvedItems = (draft?.items ?? []).filter(item => item.classMatch.status === 'unresolved');
+  const unresolvedItems = scope === 'teacher'
+    ? (draft?.items ?? []).filter(item => item.classMatch.status === 'unresolved')
+    : [];
   const classById = useMemo(() => new Map(classes.map(item => [item.id, item])), [classes]);
   const classOptionLabels = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1387,7 +1391,7 @@ function ImportDraftRow({ item, index, scope, classes, classById, classOptionLab
         </label>
       ) : (
         <label className="text-xs font-bold text-slate-600">
-          教师
+          教师（可空）
           <input value={item.teacherName ?? ''} onChange={(event) => onUpdate(index, { teacherName: event.target.value })} className={`${fieldClass} mt-1`} />
         </label>
       )}

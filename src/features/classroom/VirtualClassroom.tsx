@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { MutableRefObject, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AlertCircle,
@@ -30,6 +30,7 @@ interface VirtualClassroomProps {
   students: Student[];
   classes: SchoolClass[];
   committeeRoles: CommitteeRole[];
+  layoutCache: MutableRefObject<Map<string, ClassroomLayout>>;
   selectedClassId: string;
   onSelectClass: (classId: string) => void;
   onCreateClass: () => void;
@@ -55,6 +56,7 @@ export default function VirtualClassroom({
   students,
   classes,
   committeeRoles,
+  layoutCache,
   selectedClassId,
   onSelectClass,
   onCreateClass,
@@ -98,8 +100,9 @@ export default function VirtualClassroom({
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setLayout(null);
+    const cachedLayout = layoutCache.current.get(effectiveClassId);
+    setLoading(!cachedLayout);
+    setLayout(cachedLayout ?? null);
     setDraft(null);
     setSelectedStudentId(null);
     setPlacementStudentId(null);
@@ -110,16 +113,24 @@ export default function VirtualClassroom({
     }
     getClassroomLayout(effectiveClassId)
       .then(nextLayout => {
-        if (active) setLayout(nextLayout);
+        if (active) {
+          layoutCache.current.set(effectiveClassId, nextLayout);
+          setLayout(nextLayout);
+        }
       })
       .catch(error => {
-        if (active) setMessage({ type: 'error', text: `座位表读取失败：${error instanceof Error ? error.message : '未知错误'}` });
+        if (active) setMessage({
+          type: 'error',
+          text: cachedLayout
+            ? `座位表刷新失败，当前仍显示上次结果：${error instanceof Error ? error.message : '未知错误'}`
+            : `座位表读取失败：${error instanceof Error ? error.message : '未知错误'}`,
+        });
       })
       .finally(() => {
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, [effectiveClassId]);
+  }, [effectiveClassId, layoutCache]);
 
   useEffect(() => {
     if (!selectedStudent || editMode) return;
@@ -215,6 +226,7 @@ export default function VirtualClassroom({
     setMessage(null);
     try {
       const saved = await saveClassroomLayout(draft);
+      layoutCache.current.set(saved.classId, saved);
       setLayout(saved);
       setDraft(null);
       setPlacementStudentId(null);
