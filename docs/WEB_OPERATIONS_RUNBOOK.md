@@ -1,6 +1,6 @@
 # DEMO 网页产品本地生产运行手册
 
-> 文档版本：`v1.7`
+> 文档版本：`v1.8`
 > 日期：2026-09-09
 > 适用范围：网页产品第一阶段第 2、3 切片操作口径
 > 当前边界：代码、`var-product`、公网 HTTPS 和后台自启均已接通；限两名受邀试用者验证，暂不扩大范围
@@ -230,6 +230,14 @@ node /Users/cxc/Projects/DEMO/scripts/configure-production-env.mjs
 
 公网开放后连续 48 小时在中国电信、联通、移动以及微信内置浏览器测试登录、首屏、核心 API、PDF 打开和上传。测试前关闭会影响结论的开发机代理；免费 Cloudflare 不构成中国大陆高速承诺。
 
+### 9.6 Shadowrocket 共存与 Tunnel 协议
+
+2026-09-09 15:22–15:25，公网班级保存请求没有到达 Express；同期 `cloudflared` 的 QUIC 连接持续报告无网络活动并重连。只读核查确认 MacBook 正在通过 Shadowrocket 的 TUN 接口和 `198.18.0.0/15` 合成地址转发流量。应用、SQLite 和班级 API 均正常，故障边界位于 MacBook 到 Cloudflare 边缘的 Tunnel 连接。
+
+曾按批准方案试验 `protocol: http2`，希望让连接通过 TCP 而不是 QUIC/UDP。配置校验通过，但真实启动预检查确认 Shadowrocket 当前链路阻断 Cloudflare TCP 7844，TLS 握手失败且公网返回 530，因此当场删除该配置项并恢复自动协议选择。生产仍使用可连接的 QUIC；HTTP/2 不能作为当前环境的稳定方案。
+
+该修正只处理 MacBook 出口的 Tunnel 稳定性，不能绕过学校网络对 Cloudflare 入口的封锁；校园网仍需域名/SNI 白名单或另行批准国内入口。
+
 ## 10. 修改历史
 
 | 版本 | 日期 | 状态 | 修改概要 |
@@ -241,4 +249,5 @@ node /Users/cxc/Projects/DEMO/scripts/configure-production-env.mjs
 | v1.4 | 2026-09-08 | 已被 v1.5 取代 | 教师工作台入口改为 `td.unreached.cn`，同步生产 `APP_URL`、Tunnel 路由和后台运行说明；根域名保留给未来入口。 |
 | v1.5 | 2026-09-08 | 已被 v1.6 取代 | 记录 cloudflared、本地产品副本、自动备份去重、unified log 与合并后 LaunchAgent 安装顺序；公网入口仍未启用。 |
 | v1.6 | 2026-09-08 | 已被 v1.7 取代 | 记录 Cloudflare 免费 Zone、阿里云与 Cloudflare DNS 职责、精确名称服务器、切换前空记录核查、用户授权和回滚步骤。 |
-| v1.7 | 2026-09-09 | 当前，观察中 | 记录 DNS 生效、Tunnel 与 `td` 路由、三个 LaunchAgent、公网 HTTPS/鉴权检查及重启恢复实测；保留三网和微信 48 小时验收。 |
+| v1.7 | 2026-09-09 | 已被 v1.8 取代 | 记录 DNS 生效、Tunnel 与 `td` 路由、三个 LaunchAgent、公网 HTTPS/鉴权检查及重启恢复实测；保留三网和微信 48 小时验收。 |
+| v1.8 | 2026-09-09 | 当前，观察中 | 记录 Shadowrocket TUN 与 Cloudflare QUIC 断线证据；HTTP/2 实测因 TCP 7844 被阻断而立即回滚，生产恢复自动协议，并保留校园网问题边界。 |
