@@ -20,7 +20,6 @@ const primaryClass = roster.createClass({
   grade: '七年级',
   term: '2026 秋季学期',
   headTeacher: '测试教师',
-  chineseTeacher: '测试教师',
   status: 'active'
 });
 
@@ -37,7 +36,6 @@ test('saves a real classroom layout and enforces class membership', () => {
     grade: '七年级',
     term: '2026 秋季学期',
     headTeacher: '测试教师',
-    chineseTeacher: '测试教师',
     status: 'active'
   });
   const outsider = roster.createStudent({ studentId: 'seat-outsider', classId: otherClass.id, studentNo: '6001', name: '外班学生' });

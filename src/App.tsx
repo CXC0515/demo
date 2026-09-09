@@ -224,13 +224,16 @@ export default function App() {
   };
 
   // 4. Class actions
-  const handleAddClass = async (newClass: SchoolClass) => {
+  const handleAddClass = async (newClass: Omit<SchoolClass, 'id' | 'studentCount'>) => {
     try {
       const created = await createRosterClass(newClass);
       setClasses(current => [...current, created]);
+      setSelectedClassId(created.id);
       triggerToast(`成功新建了班级 [${created.name}]！`);
+      return true;
     } catch (error) {
       triggerToast(`班级创建失败：${error instanceof Error ? error.message : '未知错误'}`);
+      return false;
     }
   };
 
@@ -241,8 +244,10 @@ export default function App() {
       setClasses(snapshot.classes);
       setStudents(snapshot.students);
       triggerToast('班级基础信息已成功更新！');
+      return true;
     } catch (error) {
       triggerToast(`班级保存失败：${error instanceof Error ? error.message : '未知错误'}`);
+      return false;
     }
   };
 
@@ -556,6 +561,7 @@ export default function App() {
               committeeRoles={committeeRoles}
               selectedClassId={selectedClassId}
               onSelectClass={setSelectedClassId}
+              onCreateClass={() => setActivePage('class-mgmt')}
               onManageStudent={(studentId) => {
                 setSelectedStudentId(studentId);
                 setStudentManagementTargetId(studentId);

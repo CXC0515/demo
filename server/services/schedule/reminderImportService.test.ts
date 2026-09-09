@@ -14,7 +14,7 @@ process.env.ROSTER_DB_PATH = path.join(directory, 'roster.sqlite');
 const { buildReminderImportPrompt, createReminderDrafts } = await import('./reminderImportService');
 const { closeRosterDatabase } = await import('../../database/rosterDatabase');
 const { createClass } = await import('../../repositories/rosterRepository');
-const primaryClass = createClass({ name: '七年级 5 班', grade: '七年级', term: '2026 秋季学期', headTeacher: '测试教师', chineseTeacher: '测试教师', status: 'active' });
+const primaryClass = createClass({ name: '七年级 5 班', grade: '七年级', term: '2026 秋季学期', headTeacher: '测试教师', status: 'active' });
 after(() => { closeRosterDatabase(); rmSync(directory, { recursive: true, force: true }); });
 
 test('prompt treats pasted text as data and defines three time modes', () => {
