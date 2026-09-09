@@ -47,15 +47,14 @@ if (existingStudents.count || existingMemberships.count || unrelatedClasses.coun
 const now = new Date().toISOString();
 const insertClass = database.prepare(`
   INSERT INTO classes (
-    id, name, grade, term, head_teacher, chinese_teacher, textbook_version,
+    id, name, grade, term, head_teacher, textbook_version,
     default_submit_time, status, student_count, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(id) DO UPDATE SET
     name = excluded.name,
     grade = excluded.grade,
     term = excluded.term,
     head_teacher = excluded.head_teacher,
-    chinese_teacher = excluded.chinese_teacher,
     textbook_version = excluded.textbook_version,
     default_submit_time = excluded.default_submit_time,
     status = excluded.status,
@@ -80,7 +79,6 @@ database.transaction(() => {
       schoolClass.grade,
       schoolClass.term,
       schoolClass.headTeacher,
-      schoolClass.chineseTeacher,
       schoolClass.textbookVersion ?? '',
       schoolClass.defaultSubmitTime ?? '08:00',
       schoolClass.status,

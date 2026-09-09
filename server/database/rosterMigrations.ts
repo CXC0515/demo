@@ -300,6 +300,12 @@ const migrations: Migration[] = [
       SET name = '委派班委', updated_at = CURRENT_TIMESTAMP
       WHERE name = '选课代表';
     `
+  },
+  {
+    version: 11,
+    sql: `
+      ALTER TABLE classes DROP COLUMN chinese_teacher;
+    `
   }
 ];
 

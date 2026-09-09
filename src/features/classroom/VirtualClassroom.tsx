@@ -32,6 +32,7 @@ interface VirtualClassroomProps {
   committeeRoles: CommitteeRole[];
   selectedClassId: string;
   onSelectClass: (classId: string) => void;
+  onCreateClass: () => void;
   onManageStudent: (studentId: string) => void;
   onViewStudentProfile: (studentId: string) => void;
   onAddObservation: (studentId: string, text: string) => Promise<void>;
@@ -56,6 +57,7 @@ export default function VirtualClassroom({
   committeeRoles,
   selectedClassId,
   onSelectClass,
+  onCreateClass,
   onManageStudent,
   onViewStudentProfile,
   onAddObservation,
@@ -285,7 +287,16 @@ export default function VirtualClassroom({
     </section>
   );
 
-  if (!activeClass) return null;
+  if (!activeClass) return (
+    <section className="grid min-h-[320px] place-items-center rounded-3xl border border-slate-200 bg-white/80 px-4 py-10 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-900/70" id="classroom-page">
+      <div className="max-w-sm">
+        <GraduationCap className="mx-auto h-11 w-11 text-emerald-700" />
+        <h2 className="mt-4 text-xl font-black text-slate-900 dark:text-slate-100">还没有可以排座位的班级</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-500">先建立班级并导入学生，再回来安排座位和记录课堂观察。</p>
+        <button type="button" onClick={onCreateClass} className="mt-5 min-h-11 rounded-xl bg-emerald-700 px-5 text-sm font-bold text-white">创建第一个班级</button>
+      </div>
+    </section>
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 animate-fade-in" id="classroom-page">
