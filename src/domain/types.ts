@@ -136,7 +136,6 @@ export interface SchoolClass {
   grade: string;
   term: string;
   headTeacher: string;
-  chineseTeacher: string;
   studentCount: number;
   status: 'active' | 'archived';
 }

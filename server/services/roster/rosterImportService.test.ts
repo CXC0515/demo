@@ -21,7 +21,6 @@ const schoolClass = repository.createClass({
   grade: '七年级',
   term: '2026 秋季学期',
   headTeacher: '测试教师',
-  chineseTeacher: '测试教师',
   status: 'active'
 });
 

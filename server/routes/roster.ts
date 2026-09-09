@@ -34,7 +34,6 @@ const classWriteSchema = z.object({
   grade: z.string().trim().min(1),
   term: z.string().trim().min(1),
   headTeacher: z.string().trim().min(1),
-  chineseTeacher: z.string().trim().min(1),
   status: z.enum(['active', 'archived'])
 });
 
@@ -43,7 +42,6 @@ const classPatchSchema = z.object({
   grade: z.string().trim().min(1).optional(),
   term: z.string().trim().min(1).optional(),
   headTeacher: z.string().trim().min(1).optional(),
-  chineseTeacher: z.string().trim().min(1).optional(),
   status: z.enum(['active', 'archived']).optional()
 });
 

@@ -58,9 +58,8 @@ export const listRosterStudents = async (classId: string) => {
   return body.students;
 };
 
-export const createRosterClass = async (schoolClass: SchoolClass) => {
-  const { id: _id, studentCount: _studentCount, ...input } = schoolClass;
-  const body = await requestJson<{ schoolClass: SchoolClass }>('/api/classes', jsonRequest('POST', input));
+export const createRosterClass = async (schoolClass: Omit<SchoolClass, 'id' | 'studentCount'>) => {
+  const body = await requestJson<{ schoolClass: SchoolClass }>('/api/classes', jsonRequest('POST', schoolClass));
   return body.schoolClass;
 };
 

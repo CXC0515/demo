@@ -57,7 +57,7 @@ test('invited accounts receive isolated business APIs and owner-only administrat
   assert.equal(ownerAccount.user.name, 'Cleo');
   assert.equal(ownerAccount.profile.nickname, 'Cleo');
   assert.equal(ownerAccount.profile.realName, 'Cleo');
-  const createClass = await fetch(`${origin}/api/classes`, { method: 'POST', headers: { ...mutationHeaders, Cookie: owner.cookie }, body: JSON.stringify({ name: '仅所有者可见', grade: '七年级', term: '2026', headTeacher: '甲', chineseTeacher: '甲', status: 'active' }) });
+  const createClass = await fetch(`${origin}/api/classes`, { method: 'POST', headers: { ...mutationHeaders, Cookie: owner.cookie }, body: JSON.stringify({ name: '仅所有者可见', grade: '七年级', term: '2026', headTeacher: '甲', status: 'active' }) });
   assert.equal(createClass.status, 201);
   const ownerRoster = await (await fetch(`${origin}/api/roster`, { headers: { Cookie: owner.cookie } })).json() as { classes: unknown[] };
   const teacherRoster = await (await fetch(`${origin}/api/roster`, { headers: { Cookie: teacher.cookie } })).json() as { classes: unknown[] };

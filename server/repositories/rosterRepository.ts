@@ -16,7 +16,6 @@ interface ClassRow {
   grade: string;
   term: string;
   head_teacher: string;
-  chinese_teacher: string;
   textbook_version: string;
   default_submit_time: string;
   status: SchoolClass['status'];
@@ -81,7 +80,6 @@ const toClassView = (row: ClassRow): SchoolClass => ({
     grade: row.grade,
     term: row.term,
     headTeacher: row.head_teacher,
-    chineseTeacher: row.chinese_teacher,
     studentCount: row.student_count ?? 0,
     status: row.status
 });
@@ -309,16 +307,15 @@ export const createClass = (input: Omit<SchoolClass, 'id' | 'studentCount'>) => 
   try {
     database.prepare(`
       INSERT INTO classes (
-        id, name, grade, term, head_teacher, chinese_teacher, textbook_version,
+        id, name, grade, term, head_teacher, textbook_version,
         default_submit_time, status, student_count, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       schoolClass.id,
       schoolClass.name,
       schoolClass.grade,
       schoolClass.term,
       schoolClass.headTeacher,
-      schoolClass.chineseTeacher,
       '',
       '08:00',
       schoolClass.status,
@@ -340,7 +337,6 @@ export const updateClass = (classId: string, patch: Partial<SchoolClass>) => {
     ['grade', 'grade'],
     ['term', 'term'],
     ['headTeacher', 'head_teacher'],
-    ['chineseTeacher', 'chinese_teacher'],
     ['status', 'status']
   ];
 

@@ -61,6 +61,17 @@ export default function DiagnosisWorkspace({
     onRequestedTabHandled?.();
   }, [onRequestedTabHandled, requestedTab, selectedStudentId]);
 
+  if (!classes.some(item => item.status === 'active')) return (
+    <section className="grid min-h-[320px] place-items-center rounded-3xl border border-slate-200 bg-white/80 px-4 py-10 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-900/70" id="diagnosis-workspace-page">
+      <div className="max-w-sm">
+        <BarChart3 className="mx-auto h-11 w-11 text-emerald-700" />
+        <h2 className="mt-4 text-xl font-black text-slate-900 dark:text-slate-100">还没有可诊断的班级</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-500">先创建班级并导入学生。完成真实批改后，这里才会展示学情结果。</p>
+        <button type="button" onClick={() => onNavigate('class-mgmt')} className="mt-5 min-h-11 rounded-xl bg-emerald-700 px-5 text-sm font-bold text-white">创建第一个班级</button>
+      </div>
+    </section>
+  );
+
   return (
     <div className="space-y-5 animate-fade-in" id="diagnosis-workspace-page">
       <div className="glass-panel flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-slate-100/60 p-2 dark:bg-zinc-900/60">
@@ -94,14 +105,6 @@ export default function DiagnosisWorkspace({
           students={students}
           classes={classes}
           selectedClassId={selectedClassId}
-          onNavigate={(pageId, subPageId) => {
-            if (pageId === 'diagnosis' && subPageId === 'profile') {
-              setActiveTab('student');
-              return;
-            }
-            onNavigate(pageId, subPageId);
-          }}
-          onShowToast={onShowToast}
         />
       )}
 

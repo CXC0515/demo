@@ -1,13 +1,13 @@
 # DEMO 网页产品本地生产运行手册
 
-> 文档版本：`v1.5`
-> 日期：2026-09-08
+> 文档版本：`v1.7`
+> 日期：2026-09-09
 > 适用范围：网页产品第一阶段第 2、3 切片操作口径
-> 当前边界：代码、`var-product` 恢复演练及本机生产烟雾已完成；公网与后台自启尚未接通
+> 当前边界：代码、`var-product`、公网 HTTPS 和后台自启均已接通；限两名受邀试用者验证，暂不扩大范围
 
 ## 1. 当前运行边界
 
-本切片已经加入邀请登录、每教师工作区和受保护文件访问，公开 `/uploads` 已移除。域名、Tunnel、自动开机和国内三网测试尚未完成，因此仍不得邀请外部用户。
+本切片已经加入邀请登录、每教师工作区和受保护文件访问，公开 `/uploads` 已移除。域名、Tunnel 和后台自启已完成基础验收；可以按计划邀请两名指定试用者查错，同时继续完成国内三网、手机和微信内置浏览器的 48 小时观察，在观察结论确认前不扩大邀请范围。
 
 原始权威母数据仍保持不动：
 
@@ -149,7 +149,20 @@ npm run verify:data -- /Users/cxc/Projects/DEMO/var-web
 
 ## 9. 第 3 切片运行口径与当前进度
 
-完整批准范围和实时实施记录见 `docs/WEB_PUBLIC_TRIAL_DEPLOYMENT_PLAN.md`。`cloudflared 2026.8.3` 已安装，但 Tunnel、DNS 和 LaunchAgent 仍未创建或启用。
+完整批准范围和实时实施记录见 `docs/WEB_PUBLIC_TRIAL_DEPLOYMENT_PLAN.md`。`cloudflared 2026.8.3`、Cloudflare 免费 Zone、命名 Tunnel、`td.unreached.cn` 路由和三个 LaunchAgent 均已启用；当前处于国内网络 48 小时观察期。
+
+### 9.0 DNS 切换与回滚
+
+域名继续由阿里云持有和续费，权威 DNS 已于 2026-09-09 从阿里云切换到 Cloudflare：
+
+```text
+原值：dns11.hichina.com
+原值：dns12.hichina.com
+新值：mustafa.ns.cloudflare.com
+新值：ophelia.ns.cloudflare.com
+```
+
+2026-09-08 切换前检查未发现 A、AAAA、MX、TXT、`www`、`td` 或 DNSSEC 记录，因此没有现有网站或域名邮箱记录需要迁移。2026-09-09 已由 Cloudflare 控制台、WHOIS、`1.1.1.1` 和 `223.5.5.5` 确认新名称服务器生效。回滚时先在阿里云 DNS 建立必要记录，再恢复两条原名称服务器。
 
 ### 9.1 正式入口和运行目录
 
@@ -165,7 +178,7 @@ npm run verify:data -- /Users/cxc/Projects/DEMO/var-web
 
 ### 9.2 后台进程
 
-代码仓库已提供三个用户级 `launchd` 模板，合并到母文件夹后再安装：
+三个用户级 `launchd` 项已经从母文件夹正式 `main` 安装：
 
 - Node/Express：登录后启动并在异常退出后重启；
 - `cloudflared`：把 `td.unreached.cn` Tunnel 转到本机回环端口并自动重连；
@@ -177,7 +190,7 @@ npm run verify:data -- /Users/cxc/Projects/DEMO/var-web
 log show --last 1h --predicate 'process == "logger" AND eventMessage CONTAINS "cn.unreached.teacher-dashboard"'
 ```
 
-正式合并后按顺序执行：
+重装时按顺序执行：
 
 ```bash
 node /Users/cxc/Projects/DEMO/scripts/configure-production-env.mjs
@@ -185,6 +198,10 @@ node /Users/cxc/Projects/DEMO/scripts/configure-production-env.mjs
 ```
 
 第二条命令只有在 `/Users/cxc/.cloudflared/config.yml` 已创建并校验后才会成功；它不会从 worktree 安装长期服务。
+
+当前 Tunnel 名为 `teacher-dashboard`，只把 `td.unreached.cn` 转发到 `http://127.0.0.1:4317`。配置和凭据位于 `/Users/cxc/.cloudflared`，权限为 `600`，不得提交仓库或复制到操作记录。
+
+2026-09-09 安装后实测：应用与 Tunnel 为运行态，备份任务按每天 03:15 的日历计划唤醒；人工 `kickstart -k` 重启应用和 Tunnel 后，两者自动恢复，公网 `ready` 继续返回 200。
 
 仓库只保存无密钥模板。`AUTH_SECRET`、AI/OCR 密钥和 Tunnel 凭据不写入仓库，也不输出到操作记录。
 
@@ -222,4 +239,6 @@ node /Users/cxc/Projects/DEMO/scripts/configure-production-env.mjs
 | v1.2 | 2026-09-08 | 已被 v1.3 取代 | 修正本机双进程启动说明；补充“注册后返回登录页”、无注册会话和新教师空工作区的验收步骤。 |
 | v1.3 | 2026-09-08 | 已被 v1.4 取代 | 固定 `unreached.cn` 根域名、`var-product` 和三个 LaunchAgent 的运行口径；排除外置盘/云盘，改为每日变更检测及最近两份自动快照，并加入公网故障与三网验收步骤。 |
 | v1.4 | 2026-09-08 | 已被 v1.5 取代 | 教师工作台入口改为 `td.unreached.cn`，同步生产 `APP_URL`、Tunnel 路由和后台运行说明；根域名保留给未来入口。 |
-| v1.5 | 2026-09-08 | 当前，实施中 | 记录 cloudflared、本地产品副本、自动备份去重、unified log 与合并后 LaunchAgent 安装顺序；公网入口仍未启用。 |
+| v1.5 | 2026-09-08 | 已被 v1.6 取代 | 记录 cloudflared、本地产品副本、自动备份去重、unified log 与合并后 LaunchAgent 安装顺序；公网入口仍未启用。 |
+| v1.6 | 2026-09-08 | 已被 v1.7 取代 | 记录 Cloudflare 免费 Zone、阿里云与 Cloudflare DNS 职责、精确名称服务器、切换前空记录核查、用户授权和回滚步骤。 |
+| v1.7 | 2026-09-09 | 当前，观察中 | 记录 DNS 生效、Tunnel 与 `td` 路由、三个 LaunchAgent、公网 HTTPS/鉴权检查及重启恢复实测；保留三网和微信 48 小时验收。 |
