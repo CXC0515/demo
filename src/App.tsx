@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import AppLayout from './app/AppLayout';
 import { createNavGroups, PageId } from './app/navigation';
 
 // Import Types and Mock Data
 import {
   Student, SchoolClass, WorkbenchTask, ScheduleItem, SchedulePeriod,
-  TimerReminder, ReviewItem, WorkflowState, TeacherObservation, RosterStudent, KnowledgeNode, CommitteeRole, CommitteeAssignment, TeacherProfile
+  TimerReminder, ReviewItem, WorkflowState, TeacherObservation, RosterStudent, KnowledgeNode, CommitteeRole, CommitteeAssignment, TeacherProfile, ClassroomLayout
 } from './domain/types';
 import { createEmptyWorkflowState } from './domain/gradingTask';
 import { listGradingTasks, saveGradingTask } from './services/gradingTaskApi';
@@ -93,6 +93,7 @@ export default function App() {
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [tasks, setTasks] = useState<WorkbenchTask[]>([]);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
+  const classroomLayoutCache = useRef(new Map<string, ClassroomLayout>());
   const [reminders, setReminders] = useState<TimerReminder[]>([]);
   const [schedulePeriods, setSchedulePeriods] = useState<SchedulePeriod[]>([]);
   const [showWeekends, setShowWeekends] = useState(() => localStorage.getItem(`schedule-show-weekends:${authState.user.id}`) === 'true');
@@ -570,6 +571,7 @@ export default function App() {
               students={students}
               classes={classes}
               committeeRoles={committeeRoles}
+              layoutCache={classroomLayoutCache}
               selectedClassId={selectedClassId}
               onSelectClass={setSelectedClassId}
               onCreateClass={() => setActivePage('class-mgmt')}

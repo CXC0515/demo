@@ -100,6 +100,36 @@ test('keeps an unsafe class-number correction unresolved after focused review', 
   assert.equal(calls, 2);
 });
 
+test('class schedule keeps teacher optional and omits class matching from the AI contract', async () => {
+  let requestBody = '';
+  const fakeFetch = async (_url: string | URL | Request, init?: RequestInit) => {
+    requestBody = String(init?.body ?? '');
+    return completion({
+      items: [{ day: 1, period: 1, title: '语文', time: '08:00 - 08:45', teacherName: '', confidence: 0.96 }],
+      warnings: [],
+    });
+  };
+  const result = await structureScheduleText('周一 第一节 语文', { scope: 'class', classId: class10.id }, modelConfig, fakeFetch as typeof fetch);
+  assert.equal(result.items[0].classId, class10.id);
+  assert.equal(result.items[0].classMatch.status, 'matched');
+  assert.equal(result.items[0].teacherName, '');
+  assert.match(requestBody, /教师为空是有效结果/);
+  assert.doesNotMatch(requestBody, /classCandidateKey/);
+  assert.doesNotMatch(requestBody, /当前教师已有班级目录/);
+});
+
+test('class schedule rejects an unknown class before calling the model', async () => {
+  let calls = 0;
+  await assert.rejects(
+    structureScheduleText('周一 第一节 语文', { scope: 'class', classId: 'missing-class' }, modelConfig, (async () => {
+      calls += 1;
+      return completion({ items: [], warnings: [] });
+    }) as typeof fetch),
+    /SCHEDULE_CLASS_NOT_FOUND/,
+  );
+  assert.equal(calls, 0);
+});
+
 test('retries transient model failures without retrying successful responses', async () => {
   let calls = 0;
   const result = await requestScheduleModel('test', modelConfig, (async () => {

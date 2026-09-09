@@ -18,15 +18,20 @@ import {
 import { getResourcePageImagePath } from "../services/resources/resourcePageRenderService";
 import { assertPathInsideWorkspace, uploadFilePath } from "../context/workspaceContext";
 import { uploadRateLimit } from '../middleware/security';
+import { authenticatedUploadPath, resumeAuthenticatedWorkspace } from '../middleware/authenticated';
 import { runtimeConfig } from '../config/runtimeConfig';
 
 const router = Router();
 const upload = multer({
   storage: multer.diskStorage({
-    destination: (_request, _file, callback) => {
-      const directory = uploadFilePath("resources");
-      mkdirSync(directory, { recursive: true });
-      callback(null, directory);
+    destination: (request, _file, callback) => {
+      try {
+        const directory = authenticatedUploadPath(request, "resources");
+        mkdirSync(directory, { recursive: true });
+        callback(null, directory);
+      } catch (error) {
+        callback(error instanceof Error ? error : new Error("WORKSPACE_CONTEXT_REQUIRED"), "");
+      }
     },
   }),
   limits: { fileSize: runtimeConfig.uploadLimits.resourceFileBytes, files: 1 },
@@ -132,7 +137,7 @@ router.get("/resources", (_request, response) =>
   response.json({ resources: resourceRepository.listResources() }),
 );
 
-router.post("/resources", uploadRateLimit, upload.single("file"), async (request, response) => {
+router.post("/resources", uploadRateLimit, upload.single("file"), resumeAuthenticatedWorkspace, async (request, response) => {
   const parsed = metadataSchema.safeParse(request.body);
   const file = request.file;
   if (!parsed.success || !file) {

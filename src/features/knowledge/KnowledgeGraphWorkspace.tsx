@@ -6,6 +6,7 @@
 import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  AlertCircle,
   Archive,
   ArrowLeft,
   ArrowRight,
@@ -47,7 +48,41 @@ import {
 } from "../../services/resourceApi";
 import { entityLabels, entityTones, relationLabels, resourceKindLabels } from "./knowledgeUi";
 
-const KnowledgeGraphCanvas = lazy(() => import("./KnowledgeGraphCanvas"));
+let graphCanvasPromise: ReturnType<typeof importGraphCanvas> | undefined;
+function importGraphCanvas() {
+  return import("./KnowledgeGraphCanvas");
+}
+const loadGraphCanvas = () => graphCanvasPromise ??= importGraphCanvas();
+const KnowledgeGraphCanvas = lazy(loadGraphCanvas);
+
+if (typeof window !== "undefined") {
+  window.setTimeout(() => {
+    void loadGraphCanvas().catch(() => { graphCanvasPromise = undefined; });
+  }, 0);
+}
+
+class GraphCanvasBoundary extends React.Component<{ children?: React.ReactNode }, { failed: boolean }> {
+  declare readonly props: { children?: React.ReactNode };
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div className="grid h-full min-h-[320px] place-items-center px-5 text-center lg:h-[clamp(560px,72dvh,840px)]">
+        <div className="max-w-sm">
+          <AlertCircle className="mx-auto h-8 w-8 text-amber-600" />
+          <h3 className="mt-3 text-base font-black text-slate-800 dark:text-zinc-100">知识图谱暂时无法显示</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-500">页面资源可能已经更新，刷新即可重新加载；已有知识数据不会受到影响。</p>
+          <button type="button" onClick={() => window.location.reload()} className="btn-primary mt-4 min-h-11 px-4 text-sm">刷新页面</button>
+        </div>
+      </div>
+    );
+  }
+}
 const structuralTypes = new Set<KnowledgeEntityType>(["domain", "topic", "knowledge"]);
 const fieldClass =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-600 dark:border-zinc-700 dark:bg-zinc-900";
@@ -587,9 +622,11 @@ export default function KnowledgeGraphWorkspace({ graph, loading, narrowLayout, 
         </div>
         <section ref={graphSectionRef} className="glass-panel flex min-h-0 flex-1 scroll-mt-4 flex-col overflow-hidden rounded-xl lg:block">
           {subjectNodes.length ? (
-            <Suspense fallback={<div className="grid h-full min-h-0 place-items-center lg:h-[clamp(560px,72dvh,840px)]"><LoaderCircle className="h-5 w-5 animate-spin text-slate-400" /></div>}>
-              <KnowledgeGraphCanvas compact={narrowLayout} subject={subject} nodes={subjectNodes} stages={graph.stages} availableTags={availableTags} selectedId={selectedId} onSelect={setSelectedId} onShowDetails={() => narrowLayout ? setMobilePanel("detail") : detailSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} />
-            </Suspense>
+            <GraphCanvasBoundary>
+              <Suspense fallback={<div className="grid h-full min-h-0 place-items-center lg:h-[clamp(560px,72dvh,840px)]"><LoaderCircle className="h-5 w-5 animate-spin text-slate-400" /></div>}>
+                <KnowledgeGraphCanvas compact={narrowLayout} subject={subject} nodes={subjectNodes} stages={graph.stages} availableTags={availableTags} selectedId={selectedId} onSelect={setSelectedId} onShowDetails={() => narrowLayout ? setMobilePanel("detail") : detailSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+              </Suspense>
+            </GraphCanvasBoundary>
           ) : <div className="grid h-full min-h-0 place-items-center text-sm text-slate-400 lg:h-[clamp(560px,72dvh,840px)]">这个学科还没有知识主干</div>}
         </section>
         <section ref={detailSectionRef} className={`glass-panel min-h-0 scroll-mt-4 overflow-y-auto ${narrowLayout ? mobilePanel === "detail" ? "fixed inset-x-0 bottom-0 z-50 max-h-[82dvh] rounded-t-3xl shadow-2xl" : "hidden" : "hidden lg:block lg:rounded-xl"}`}>

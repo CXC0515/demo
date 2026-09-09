@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { deleteReminder, deleteScheduleItem, listReminders, listScheduleItems, listSchedulePeriods, saveReminder, saveReminderSeries, saveReminders, saveScheduleItem, saveScheduleItems, saveSchedulePeriods } from '../repositories/scheduleRepository';
 import { importScheduleDocument } from '../services/schedule/scheduleImportService';
 import { createReminderDrafts } from '../services/schedule/reminderImportService';
-import { uploadFilePath } from '../context/workspaceContext';
+import { authenticatedUploadPath, resumeAuthenticatedWorkspace } from '../middleware/authenticated';
 import { uploadRateLimit } from '../middleware/security';
 import { runtimeConfig } from '../config/runtimeConfig';
 import { logEvent } from '../observability/logger';
@@ -108,16 +108,20 @@ router.delete('/schedule/reminders/:id', (request, response) => {
 
 const upload = multer({
   storage: multer.diskStorage({
-    destination: (_request, _file, callback) => {
-      const directory = uploadFilePath('schedule');
-      mkdirSync(directory, { recursive: true });
-      callback(null, directory);
+    destination: (request, _file, callback) => {
+      try {
+        const directory = authenticatedUploadPath(request, 'schedule');
+        mkdirSync(directory, { recursive: true });
+        callback(null, directory);
+      } catch (error) {
+        callback(error instanceof Error ? error : new Error('WORKSPACE_CONTEXT_REQUIRED'), '');
+      }
     },
   }),
   limits: { fileSize: runtimeConfig.uploadLimits.scheduleFileBytes, files: 1 },
   fileFilter: (_request, file, callback) => callback(null, file.mimetype === 'application/pdf' || file.mimetype.startsWith('image/'))
 });
-router.post('/schedule/import', uploadRateLimit, upload.single('file'), async (request, response) => {
+router.post('/schedule/import', uploadRateLimit, upload.single('file'), resumeAuthenticatedWorkspace, async (request, response) => {
   const file = request.file;
   const scope = request.body.scope === 'class' ? 'class' : 'teacher';
   if (!file) { response.status(400).json({ code: 'SCHEDULE_FILE_REQUIRED' }); return; }

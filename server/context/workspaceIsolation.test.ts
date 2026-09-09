@@ -8,7 +8,8 @@ import test from 'node:test';
 
 const root = await mkdtemp(path.join(os.tmpdir(), 'demo-workspace-isolation-'));
 process.env.APP_DATA_ROOT = root;
-const { createWorkspaceContext, runWithWorkspace } = await import('./workspaceContext');
+const { createWorkspaceContext, getWorkspaceContext, runWithWorkspace } = await import('./workspaceContext');
+const { authenticatedUploadPath, bindAuthenticatedWorkspace, resumeAuthenticatedWorkspace } = await import('../middleware/authenticated');
 const { getRosterDatabase, closeRosterDatabase } = await import('../database/rosterDatabase');
 
 test('roster data is isolated by workspace context', () => {
@@ -24,4 +25,18 @@ test('roster data is isolated by workspace context', () => {
   runWithWorkspace(first, () => assert.equal((getRosterDatabase().prepare('SELECT name FROM classes WHERE id = ?').get('same-id') as { name: string }).name, '一班'));
   runWithWorkspace(second, () => assert.equal((getRosterDatabase().prepare('SELECT name FROM classes WHERE id = ?').get('same-id') as { name: string }).name, '二班'));
   closeRosterDatabase();
+});
+
+test('multipart continuation restores the authenticated workspace and upload root', () => {
+  const context = createWorkspaceContext('user-upload', 'workspace-upload', 'teacher');
+  const request = {} as never;
+  bindAuthenticatedWorkspace(request, context);
+  assert.equal(authenticatedUploadPath(request, 'schedule'), path.join(context.uploadDirectory, 'schedule'));
+
+  let observedWorkspaceId = '';
+  const response = { status: () => response, json: () => response } as never;
+  resumeAuthenticatedWorkspace(request, response, () => {
+    observedWorkspaceId = getWorkspaceContext().workspaceId;
+  });
+  assert.equal(observedWorkspaceId, context.workspaceId);
 });

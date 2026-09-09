@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { ScheduleItem } from '../../../src/domain/types';
+import { ScheduleItem, SchoolClass } from '../../../src/domain/types';
 import { getDocumentParserConfig } from '../../config/documentParserConfig';
 import { getModelConfig, isModelConfigured, ModelConfig } from '../../config/modelConfig';
 import { listClasses } from '../../repositories/rosterRepository';
@@ -139,11 +139,13 @@ export const structureScheduleText = async (
   text: string,
   input: Pick<ScheduleImportInput, 'scope' | 'classId'>,
   config: ModelConfig = getModelConfig(),
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  availableClasses?: SchoolClass[],
 ) => {
   if (!isModelConfigured(config)) throw new Error('MODEL_NOT_CONFIGURED');
-  const classes = listClasses().filter(item => item.status === 'active');
+  const classes = (availableClasses ?? listClasses()).filter(item => item.status === 'active');
   const requestedClass = classes.find(item => item.id === input.classId);
+  if (input.scope === 'class' && !requestedClass) throw new Error('SCHEDULE_CLASS_NOT_FOUND');
   const classNameCounts = new Map<string, number>();
   classes.forEach(item => classNameCounts.set(item.name, (classNameCounts.get(item.name) ?? 0) + 1));
   const classCatalog = classes.map((item, index) => ({
@@ -154,12 +156,8 @@ export const structureScheduleText = async (
     ...(classNameCounts.get(item.name)! > 1 ? { term: item.term } : {}),
   }));
   const classIdByCandidateKey = new Map(classCatalog.map(item => [item.key, item.id]));
-  const prompt = [
-    '你负责把纸质课表 OCR 文本整理成教师可复核的结构化草稿。OCR 是原始候选，可能混入涂改字、污迹字符、重复字或格式噪声；只能依据 OCR 文本和封闭班级目录做最小必要纠错，不得自由补写。',
-    'day 使用 1-7 表示周一到周日；period 是课节序号。每个非空课程格生成一项。',
-    input.scope === 'teacher'
-      ? '这是教师个人课表：title 填课程名称，teacherName 可留空。'
-      : `这是班级课表：班级固定为 ${requestedClass?.name ?? '待确认'}，title 填课程名称，teacherName 填任课教师。`,
+  const teacherScheduleInstructions = [
+    '这是教师个人课表：title 填课程名称，teacherName 可留空。',
     [
       '班级文字纠错与目录关联规则：',
       '1. recognizedClassText 必须逐字保留对应课程格中 OCR 给出的班级文字，不得先改写；格内确实没有班级信息才返回空字符串。',
@@ -169,10 +167,20 @@ export const structureScheduleText = async (
       '5. 相同 recognizedClassText 在整份结果中必须使用相同的 classCandidateKey、classCorrectionType 和 classNeedsReview；返回 JSON 前逐组检查一致性。',
       '6. 目录中的任意名称都可能有效，包括不含年级或数字的名称；不要偏向目录中的第一项或任何特定编号。'
     ].join('\n'),
-    'time 尽量使用原图时间；无法确认写“待确认”。confidence 为该项识别置信度。',
-    'title、teacherName 只返回可直接显示的纯文本；把 Markdown/LaTeX 装饰符号还原为普通字符，例如“$ ^{\\*} $”应返回“*”。空字段必须返回空字符串，不得填写“待补充”“待确认”等占位词。',
     '只返回 JSON，字段结构：{"items":[{"day":1,"period":1,"title":"课程文字","time":"时间文字或待确认","recognizedClassText":"OCR中的班级原文或空字符串","classCandidateKey":"","classCorrectionType":"uncertain","classNeedsReview":true,"teacherName":"","confidence":0.9}],"warnings":[]}。classCandidateKey 的空字符串仅表示无法可靠选择，能可靠选择时必须填写目录中的真实 key。',
     `当前教师已有班级目录：${JSON.stringify(classCatalog.map(({ key, name, grade, ...optional }) => ({ key, name, grade, ...optional })))}`,
+  ];
+  const classScheduleInstructions = [
+    `这是“${requestedClass?.name ?? ''}”的班级课表，班级已经由教师选定，不要识别、推测或返回班级字段。`,
+    'title 填课程名称。teacherName 只有在 OCR 明确出现任课教师时才填写，没有教师文字时必须返回空字符串；教师为空是有效结果。',
+    '只返回最小 JSON，字段结构：{"items":[{"day":1,"period":1,"title":"课程文字","time":"时间文字或待确认","teacherName":"","confidence":0.9}],"warnings":[]}。',
+  ];
+  const prompt = [
+    '你负责把纸质课表 OCR 文本整理成教师可复核的结构化草稿。OCR 是原始候选，可能混入涂改字、污迹字符、重复字或格式噪声；只能依据 OCR 文本和下述约束做最小必要纠错，不得自由补写。',
+    'day 使用 1-7 表示周一到周日；period 是课节序号。每个非空课程格生成一项。',
+    ...(input.scope === 'teacher' ? teacherScheduleInstructions : classScheduleInstructions),
+    'time 尽量使用原图时间；无法确认写“待确认”。confidence 为该项识别置信度。',
+    'title、teacherName 只返回可直接显示的纯文本；把 Markdown/LaTeX 装饰符号还原为普通字符，例如“$ ^{\\*} $”应返回“*”。空字段必须返回空字符串，不得填写“待补充”“待确认”等占位词。',
     `OCR 文本：\n${text.slice(0, 30000)}`
   ].join('\n\n');
   const initialResponse = await requestScheduleModel(prompt, config, fetcher);
@@ -283,6 +291,10 @@ export const structureScheduleText = async (
 
 export const importScheduleDocument = async (input: ScheduleImportInput) => {
   const startedAt = performance.now();
+  const classes = listClasses().filter(item => item.status === 'active');
+  if (input.scope === 'class' && !classes.some(item => item.id === input.classId)) {
+    throw new Error('SCHEDULE_CLASS_NOT_FOUND');
+  }
   let enhancedAt = startedAt;
   if (input.mimeType.startsWith('image/')) {
     try {
@@ -296,7 +308,13 @@ export const importScheduleDocument = async (input: ScheduleImportInput) => {
   const parsedDocument = await parseScheduleWithRetry(parser, input);
   const document = parsedDocument.document;
   const parsedAt = performance.now();
-  const structured = await structureScheduleText(document.markdown || document.blocks.map(block => block.text).join('\n'), input);
+  const structured = await structureScheduleText(
+    document.markdown || document.blocks.map(block => block.text).join('\n'),
+    input,
+    getModelConfig(),
+    fetch,
+    classes,
+  );
   const structuredAt = performance.now();
   return {
     ...structured,
