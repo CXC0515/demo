@@ -22,7 +22,7 @@ export interface RosterImportPreviewRow {
 }
 
 const aliases: Record<RosterImportField, string[]> = {
-  studentNo: ['学号', '学生编号', '学生学号', '编号'],
+  studentNo: ['学号', '学生编号', '学生学号'],
   name: ['姓名', '学生姓名', '名字'],
   gender: ['性别'],
   parentName: ['家长姓名', '家长', '联系人', '联系人姓名'],
@@ -34,14 +34,17 @@ const aliases: Record<RosterImportField, string[]> = {
 const normalizeHeader = (value: string) => value.trim().replace(/[\s_（）()：:]/g, '').toLowerCase();
 const normalizeName = (value: string) => value.trim().replace(/\s+/g, '');
 
-export const inferRosterImportMapping = (headers: string[]): RosterImportMapping => Object.fromEntries(
-  headers.map((header, index) => {
+export const inferRosterImportMapping = (headers: string[]): RosterImportMapping => {
+  const claimedFields = new Set<RosterImportField>();
+  return Object.fromEntries(headers.map((header, index) => {
     const normalized = normalizeHeader(header);
     const match = (Object.entries(aliases) as [RosterImportField, string[]][])
       .find(([, names]) => names.some(name => normalizeHeader(name) === normalized));
-    return [index, match?.[0] ?? null];
-  })
-);
+    if (!match || claimedFields.has(match[0])) return [index, null];
+    claimedFields.add(match[0]);
+    return [index, match[0]];
+  }));
+};
 
 const valuesForRow = (row: string[], mapping: RosterImportMapping) => {
   const values: Partial<Record<RosterImportField, string>> = {};
@@ -68,10 +71,17 @@ export const previewRosterImport = (classId: string, grid: RosterImportGrid) => 
     const name = values.name ?? '';
     const byNumber = studentNo ? byNo.get(studentNo) : undefined;
     const nameMatches = name ? byName.get(normalizeName(name)) ?? [] : [];
+    const uniqueNameMatch = nameMatches.length === 1 ? nameMatches[0] : undefined;
     const target = byNumber ?? (nameMatches.length === 1 ? nameMatches[0] : undefined);
     const changes = Object.keys(values).filter(key => !['studentNo', 'name'].includes(key));
 
     if (!studentNo && !name) return { row: index + 2, action: 'invalid', studentNo, name, changes, values, message: '缺少学号或姓名' };
+    if (byNumber && name && normalizeName(byNumber.name) !== normalizeName(name)) {
+      return { row: index + 2, action: 'conflict', studentNo, name, changes, values, message: `学号 ${studentNo} 已属于 ${byNumber.name}，不会覆盖` };
+    }
+    if (!byNumber && studentNo && uniqueNameMatch && uniqueNameMatch.studentNo !== studentNo) {
+      return { row: index + 2, action: 'conflict', studentNo, name, changes, values, message: `${name} 的现有学号是 ${uniqueNameMatch.studentNo}，不会自动改号` };
+    }
     if (!byNumber && nameMatches.length > 1) return { row: index + 2, action: 'conflict', studentNo, name, changes, values, message: '班内存在重名学生，请补充学号' };
     if (target) return { row: index + 2, action: 'update', studentNo: studentNo || target.studentNo, name: name || target.name, targetStudentId: target.id, changes, values };
     if (!studentNo || !name) return { row: index + 2, action: 'invalid', studentNo, name, changes, values, message: '新增学生必须同时包含学号和姓名' };

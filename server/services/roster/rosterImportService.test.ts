@@ -46,6 +46,16 @@ test('infers common headers and updates a uniquely named existing student', () =
   assert.equal(result.updated[0].parent.phone, '13800138000');
 });
 
+test('ignores spreadsheet sequence columns and only infers explicit student number headers', () => {
+  const mapping = importer.inferRosterImportMapping(['序号', '编号', '学号', '学生姓名', '姓名']);
+
+  assert.equal(mapping[0], null);
+  assert.equal(mapping[1], null);
+  assert.equal(mapping[2], 'studentNo');
+  assert.equal(mapping[3], 'name');
+  assert.equal(mapping[4], null);
+});
+
 test('creates complete new rows but rejects ambiguous names and incomplete additions', () => {
   repository.createStudent({ classId: schoolClass.id, studentNo: '5002', name: '李明' });
   repository.createStudent({ classId: schoolClass.id, studentNo: '5003', name: '李明' });
@@ -65,4 +75,26 @@ test('creates complete new rows but rejects ambiguous names and incomplete addit
   assert.equal(result.created.length, 1);
   assert.equal(result.rejected.length, 2);
   assert.equal(repository.findStudentByNo(schoolClass.id, '5004')?.parent.phone, '13900139000');
+});
+
+test('does not overwrite a student when the imported name and student number identify different records', () => {
+  repository.createStudent({ classId: schoolClass.id, studentNo: '7001', name: '学生甲' });
+  repository.createStudent({ classId: schoolClass.id, studentNo: '7002', name: '学生乙' });
+  const grid = {
+    headers: ['学号', '姓名', '联系电话'],
+    rows: [
+      ['7001', '学生乙', '13800000001'],
+      ['7999', '学生甲', '13800000002']
+    ]
+  };
+
+  const preview = importer.previewRosterImport(schoolClass.id, grid);
+  assert.deepEqual(preview.rows.map(row => row.action), ['conflict', 'conflict']);
+
+  const result = importer.applyRosterImport(schoolClass.id, grid);
+  assert.equal(result.created.length, 0);
+  assert.equal(result.updated.length, 0);
+  assert.equal(result.rejected.length, 2);
+  assert.equal(repository.findStudentByNo(schoolClass.id, '7001')?.name, '学生甲');
+  assert.equal(repository.findStudentByNo(schoolClass.id, '7002')?.name, '学生乙');
 });
