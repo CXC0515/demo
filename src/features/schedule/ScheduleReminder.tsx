@@ -1159,7 +1159,14 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
     try {
       setDraft(await importSchedule(file, scope, classId));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'SCHEDULE_IMPORT_FAILED');
+      const code = cause instanceof Error ? cause.message : 'SCHEDULE_IMPORT_FAILED';
+      setError(code === 'PADDLEOCR_QUEUE_FULL' || code === 'PADDLEOCR_RATE_LIMITED'
+        ? 'OCR 服务当前排队较多，自动重试后仍未恢复，请稍后再试。'
+        : code.startsWith('PADDLEOCR_')
+          ? 'OCR 服务暂时无法完成课表识别，请稍后重试。'
+          : code === 'MODEL_CONNECTION_FAILED' || /^MODEL_REQUEST_FAILED:(502|503|504)$/.test(code)
+            ? 'AI 整理服务暂时不可用，自动重试后仍未恢复，请稍后再试。'
+            : code);
     } finally {
       setBusy(false);
     }
@@ -1176,6 +1183,12 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
   const remove = (index: number) => setDraft((current) => (current ? { ...current, items: current.items.filter((_, i) => i !== index) } : current));
   const orderedItems = (draft?.items ?? []).map((item, index) => ({ item, index })).sort((left, right) => left.item.day - right.item.day || left.item.period - right.item.period);
   const unresolvedItems = (draft?.items ?? []).filter(item => item.classMatch.status === 'unresolved');
+  const classById = useMemo(() => new Map(classes.map(item => [item.id, item])), [classes]);
+  const classOptionLabels = useMemo(() => {
+    const counts = new Map<string, number>();
+    classes.forEach(item => counts.set(item.name, (counts.get(item.name) ?? 0) + 1));
+    return new Map(classes.map(item => [item.id, counts.get(item.name)! > 1 ? `${item.name} · ${item.term}` : item.name]));
+  }, [classes]);
   const unresolvedGroups = useMemo(() => {
     const groups = new Map<string, { label: string; indexes: number[] }>();
     (draft?.items ?? []).forEach((item, index) => {
@@ -1194,20 +1207,22 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
       if (!indexes.includes(index)) return item;
       if (value === '__unassigned__') return {
         ...item, classId: '', className: '',
+        classCorrectionType: 'uncertain', classNeedsReview: false,
         classMatch: { status: 'unassigned', reason: 'teacher-unassigned', candidateClassIds: [] },
       };
-      const selectedClass = classes.find(itemClass => itemClass.id === value);
+      const selectedClass = classById.get(value);
       if (!selectedClass) return {
         ...item, classId: '', className: '',
         classMatch: { ...item.classMatch, status: 'unresolved' },
       };
       return {
         ...item, classId: selectedClass.id, className: selectedClass.name,
+        classCorrectionType: 'exact', classNeedsReview: false,
         classMatch: { status: 'matched', reason: 'teacher-selected', candidateClassIds: [selectedClass.id] },
       };
     }),
   } : current);
-  const persistedItems = (draft?.items ?? []).map(({ recognizedClassText: _, classMatch: __, ...item }) => item);
+  const persistedItems = (draft?.items ?? []).map(({ recognizedClassText: _, classCorrectionType: __, classNeedsReview: ___, classMatch: ____, ...item }) => item);
   const footer = draft ? (
     <button
       onClick={async () => {
@@ -1281,7 +1296,7 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
                   <span className="break-words">识别到：{group.label} <span className="font-normal text-slate-500">（{group.indexes.length}项）</span></span>
                   <select defaultValue="" onChange={event => applyClassChoice(group.indexes, event.target.value)} className={`${fieldClass} min-h-11 text-base sm:text-sm`}>
                     <option value="">请选择已有班级</option>
-                    {classes.map(itemClass => <option key={itemClass.id} value={itemClass.id}>{itemClass.name} · {itemClass.term}</option>)}
+                    {classes.map(itemClass => <option key={itemClass.id} value={itemClass.id}>{classOptionLabels.get(itemClass.id)}</option>)}
                     <option value="__unassigned__">不关联班级</option>
                   </select>
                 </label>
@@ -1291,7 +1306,7 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
           <div className="max-h-[58vh] overflow-y-auto rounded-xl border border-slate-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
             <div className="divide-y divide-slate-100 dark:divide-zinc-800">
               {orderedItems.map(({ item, index }) => (
-                <ImportDraftRow key={item.id} item={item} index={index} scope={scope} classes={classes} periods={periods} onUpdate={update} onRemove={remove} />
+                <ImportDraftRow key={item.id} item={item} index={index} scope={scope} classes={classes} classById={classById} classOptionLabels={classOptionLabels} periods={periods} onUpdate={update} onRemove={remove} />
               ))}
             </div>
           </div>
@@ -1301,9 +1316,10 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
   );
 }
 
-function ImportDraftRow({ item, index, scope, classes, periods, onUpdate, onRemove }: { key?: React.Key; item: ScheduleImportItemDraft; index: number; scope: 'teacher' | 'class'; classes: SchoolClass[]; periods: SchedulePeriod[]; onUpdate: (index: number, patch: Partial<ScheduleImportItemDraft>) => void; onRemove: (index: number) => void }) {
+function ImportDraftRow({ item, index, scope, classes, classById, classOptionLabels, periods, onUpdate, onRemove }: { key?: React.Key; item: ScheduleImportItemDraft; index: number; scope: 'teacher' | 'class'; classes: SchoolClass[]; classById: Map<string, SchoolClass>; classOptionLabels: Map<string, string>; periods: SchedulePeriod[]; onUpdate: (index: number, patch: Partial<ScheduleImportItemDraft>) => void; onRemove: (index: number) => void }) {
   const lowConfidence = item.confidence !== undefined && item.confidence < 0.75;
-  const matchLabel = item.classMatch.status === 'matched' ? (item.classMatch.reason === 'teacher-selected' ? '教师已确认' : '已自动匹配') : item.classMatch.status === 'unassigned' ? '不关联班级' : '需要确认';
+  const aiCorrected = item.classCorrectionType === 'noise-removed' || item.classCorrectionType === 'ocr-corrected';
+  const matchLabel = item.classMatch.status === 'matched' ? (item.classMatch.reason === 'teacher-selected' ? '教师已确认' : aiCorrected ? 'AI 已清理 OCR 噪声' : '已自动匹配') : item.classMatch.status === 'unassigned' ? '不关联班级' : '需要确认';
   return (
     <div className={`grid gap-3 p-3 md:grid-cols-[190px_minmax(150px,1fr)_minmax(170px,1fr)_32px] ${lowConfidence ? 'bg-amber-50 dark:bg-amber-950/20' : 'bg-white dark:bg-zinc-900'}`}>
       <div className="grid grid-cols-2 gap-2">
@@ -1349,11 +1365,11 @@ function ImportDraftRow({ item, index, scope, classes, periods, onUpdate, onRemo
             value={item.classMatch.status === 'unassigned' ? '__unassigned__' : item.classId}
             onChange={(event) => {
               const value = event.target.value;
-              if (value === '__unassigned__') onUpdate(index, { classId: '', className: '', classMatch: { status: 'unassigned', reason: 'teacher-unassigned', candidateClassIds: [] } });
+              if (value === '__unassigned__') onUpdate(index, { classId: '', className: '', classCorrectionType: 'uncertain', classNeedsReview: false, classMatch: { status: 'unassigned', reason: 'teacher-unassigned', candidateClassIds: [] } });
               else {
-                const selectedClass = classes.find(itemClass => itemClass.id === value);
+                const selectedClass = classById.get(value);
                 onUpdate(index, selectedClass
-                  ? { classId: selectedClass.id, className: selectedClass.name, classMatch: { status: 'matched', reason: 'teacher-selected', candidateClassIds: [selectedClass.id] } }
+                  ? { classId: selectedClass.id, className: selectedClass.name, classCorrectionType: 'exact', classNeedsReview: false, classMatch: { status: 'matched', reason: 'teacher-selected', candidateClassIds: [selectedClass.id] } }
                   : { classId: '', className: '', classMatch: { ...item.classMatch, status: 'unresolved' } });
               }
             }}
@@ -1362,7 +1378,7 @@ function ImportDraftRow({ item, index, scope, classes, periods, onUpdate, onRemo
             <option value="">请选择已有班级</option>
             {classes.map((itemClass) => (
               <option key={itemClass.id} value={itemClass.id}>
-                {itemClass.name}
+                {classOptionLabels.get(itemClass.id)}
               </option>
             ))}
             <option value="__unassigned__">不关联班级</option>

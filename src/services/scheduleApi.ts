@@ -32,6 +32,8 @@ export interface ScheduleClassMatchDraft {
 }
 export interface ScheduleImportItemDraft extends ScheduleItem {
   recognizedClassText: string;
+  classCorrectionType: 'exact' | 'format-normalized' | 'noise-removed' | 'ocr-corrected' | 'uncertain';
+  classNeedsReview: boolean;
   classMatch: ScheduleClassMatchDraft;
 }
 export interface ScheduleImportDraft { items: ScheduleImportItemDraft[]; warnings: string[]; sourceText: string; timings?: { enhanceMs: number; paddleMs: number; aiMs: number; totalMs: number }; }
