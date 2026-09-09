@@ -312,12 +312,23 @@ export default function App() {
   };
 
   const handleBulkImport = async (classId: string, grid: Parameters<typeof importRosterStudents>[1]) => {
-    const result = await importRosterStudents(classId, grid);
-    const snapshot = await getRoster();
-    setClasses(snapshot.classes);
-    setStudents(snapshot.students);
-    if (snapshot.classes.some(item => item.id === classId && item.status === 'active')) setSelectedClassId(classId);
-    return result;
+    try {
+      const result = await importRosterStudents(classId, grid);
+      const snapshot = await getRoster();
+      setClasses(snapshot.classes);
+      setStudents(snapshot.students);
+      if (snapshot.classes.some(item => item.id === classId && item.status === 'active')) setSelectedClassId(classId);
+      return result;
+    } catch (error) {
+      try {
+        const snapshot = await getRoster();
+        setClasses(snapshot.classes);
+        setStudents(snapshot.students);
+      } catch {
+        // Preserve the import error. The dialog explains that the result must be checked before retrying.
+      }
+      throw error;
+    }
   };
 
   const handleBulkMoveClass = async (studentIds: string[], targetClassId: string) => {

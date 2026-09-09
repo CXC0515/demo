@@ -27,6 +27,13 @@ export interface RosterImportResult {
   rejected: { row: number; studentNo: string; code: string }[];
 }
 
+class RosterRequestError extends Error {
+  constructor(public readonly status: number, public readonly code: string) {
+    super(code);
+    this.name = 'RosterRequestError';
+  }
+}
+
 const readErrorCode = async (response: Response) => {
   const body = await response.json().catch(() => ({})) as { code?: string };
   return body.code ?? `HTTP_${response.status}`;
@@ -34,8 +41,29 @@ const readErrorCode = async (response: Response) => {
 
 const requestJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
   const response = await apiFetch(url, init);
-  if (!response.ok) throw new Error(await readErrorCode(response));
+  if (!response.ok) throw new RosterRequestError(response.status, await readErrorCode(response));
   return response.json() as Promise<T>;
+};
+
+const isRetryablePreviewError = (error: unknown) => error instanceof TypeError
+  || (error instanceof RosterRequestError && [502, 503, 504].includes(error.status));
+
+const wait = (durationMs: number) => new Promise(resolve => setTimeout(resolve, durationMs));
+
+export const describeRosterImportError = (error: unknown, phase: 'preview' | 'import') => {
+  if (isRetryablePreviewError(error)) {
+    return phase === 'preview'
+      ? '连接暂时中断，本次内容尚未保存，请重新预览。'
+      : '连接暂时中断，导入结果暂时无法确认。请先刷新名册并核对结果，再决定是否重试。';
+  }
+  if (error instanceof RosterRequestError) {
+    if (error.status === 401) return '登录状态已失效，请重新登录后再试。';
+    if (error.status === 413) return '导入内容超过大小限制，请拆分后重试。';
+    if (error.code === 'INVALID_IMPORT') return '表格内容或列匹配无效，请检查后重新预览。';
+    if (error.status >= 500) return '服务暂时不可用，请稍后重新预览。';
+  }
+  if (error instanceof Error && !/^HTTP_\d+$/.test(error.message)) return error.message;
+  return phase === 'preview' ? '无法解析导入内容，请检查表格后重试。' : '导入失败，请核对名册后重试。';
 };
 
 const jsonRequest = (method: string, body?: unknown): RequestInit => ({
@@ -126,11 +154,19 @@ export const deleteRosterStudent = async (studentId: string) => {
   if (!response.ok) throw new Error(await readErrorCode(response));
 };
 
-export const previewRosterStudentsImport = (classId: string, grid: RosterImportGrid) =>
-  requestJson<RosterImportPreview>(
+export const previewRosterStudentsImport = async (classId: string, grid: RosterImportGrid) => {
+  const request = () => requestJson<RosterImportPreview>(
     `/api/classes/${encodeURIComponent(classId)}/students/import/preview`,
     jsonRequest('POST', grid)
   );
+  try {
+    return await request();
+  } catch (error) {
+    if (!isRetryablePreviewError(error)) throw error;
+    await wait(500);
+    return request();
+  }
+};
 
 export const importRosterStudents = (classId: string, grid: RosterImportGrid) =>
   requestJson<RosterImportResult>(
