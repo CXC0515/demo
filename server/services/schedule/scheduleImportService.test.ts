@@ -23,8 +23,8 @@ test('turns AI timetable JSON into an editable teacher draft', async () => {
     requestBody = String(init?.body ?? '');
     return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
     items: [
-      { day: 2, period: 1, title: '阅读', time: '08:00 - 08:45', className: '初一10班', teacherName: '', confidence: 0.88 },
-      { day: 1, period: 2, title: '语文', time: '08:55 - 09:40', className: '七年级十班', teacherName: '', confidence: 0.91 }
+      { day: 2, period: 1, title: '阅读', time: '08:00 - 08:45', recognizedClassText: '初一10班', classCandidateKey: 'C1', className: '初一（10）班', teacherName: '', confidence: 0.88 },
+      { day: 1, period: 2, title: '语文', time: '08:55 - 09:40', recognizedClassText: '七年级十班', classCandidateKey: '', className: '', teacherName: '', confidence: 0.91 }
     ],
     warnings: ['第三节模糊']
   }) } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -35,11 +35,15 @@ test('turns AI timetable JSON into an editable teacher draft', async () => {
   assert.equal(result.items[0].scope, 'teacher');
   assert.deepEqual(result.items.map(item => item.classId), [primaryClass.id, primaryClass.id]);
   assert.deepEqual(result.items.map(item => item.className), ['初一（10）班', '初一（10）班']);
+  assert.deepEqual(result.items.map(item => item.recognizedClassText), ['七年级十班', '初一10班']);
+  assert.deepEqual(result.items.map(item => item.classMatch.status), ['matched', 'matched']);
   assert.equal(result.items[0].confidence, 0.91);
   assert.deepEqual(result.items.map(item => [item.day, item.period]), [[1, 2], [2, 1]]);
   assert.deepEqual(result.warnings, ['第三节模糊']);
   assert.match(requestBody, /这只是匹配规则示例/);
-  assert.match(requestBody, /className 必须返回/);
+  assert.match(requestBody, /recognizedClassText/);
+  assert.match(requestBody, /classCandidateKey 只能从/);
+  assert.match(requestBody, /当前教师已有班级目录/);
 });
 
 test('normalizes OCR decoration markers without stripping real formulas', () => {

@@ -6,7 +6,7 @@
 import React, { useMemo, useState } from 'react';
 import { AlertCircle, Bell, CalendarDays, Check, Circle, FileScan, GripVertical, LayoutGrid, ListTodo, LoaderCircle, Pencil, Plus, Repeat2, Settings2, Sparkles, Trash2, X } from 'lucide-react';
 import { ReminderImportDraft, ScheduleItem, SchedulePeriod, SchoolClass, TimerReminder } from '../../domain/types';
-import { createReminderImportDraft, importSchedule, ScheduleImportDraft } from '../../services/scheduleApi';
+import { createReminderImportDraft, importSchedule, ScheduleImportDraft, ScheduleImportItemDraft } from '../../services/scheduleApi';
 
 interface Props {
   schedule: ScheduleItem[];
@@ -273,10 +273,10 @@ function Tab({ active, onClick, icon: Icon, children }: { active: boolean; onCli
     </button>
   );
 }
-function Modal({ title, onClose, children, footer, wide = false }: { title: string; onClose: () => void; children: React.ReactNode; footer: React.ReactNode; wide?: boolean }) {
+function Modal({ title, onClose, children, footer, wide = false, compactFull = false }: { title: string; onClose: () => void; children: React.ReactNode; footer: React.ReactNode; wide?: boolean; compactFull?: boolean }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-      <div className={`max-h-[90vh] w-full overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl dark:bg-zinc-900 ${wide ? 'max-w-5xl' : 'max-w-2xl'}`}>
+    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm ${compactFull ? 'p-0 sm:p-4' : 'p-4'}`}>
+      <div className={`w-full overflow-y-auto bg-white p-5 shadow-2xl dark:bg-zinc-900 ${compactFull ? 'h-[100dvh] rounded-none sm:h-auto sm:max-h-[90dvh] sm:rounded-2xl' : 'max-h-[90vh] rounded-2xl'} ${wide ? 'max-w-5xl' : 'max-w-2xl'}`}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="font-black">{title}</h3>
           <button onClick={onClose} aria-label="关闭">
@@ -1164,7 +1164,7 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
       setBusy(false);
     }
   };
-  const update = (index: number, patch: Partial<ScheduleItem>) =>
+  const update = (index: number, patch: Partial<ScheduleImportItemDraft>) =>
     setDraft((current) =>
       current
         ? {
@@ -1175,28 +1175,67 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
     );
   const remove = (index: number) => setDraft((current) => (current ? { ...current, items: current.items.filter((_, i) => i !== index) } : current));
   const orderedItems = (draft?.items ?? []).map((item, index) => ({ item, index })).sort((left, right) => left.item.day - right.item.day || left.item.period - right.item.period);
+  const unresolvedItems = (draft?.items ?? []).filter(item => item.classMatch.status === 'unresolved');
+  const unresolvedGroups = useMemo(() => {
+    const groups = new Map<string, { label: string; indexes: number[] }>();
+    (draft?.items ?? []).forEach((item, index) => {
+      if (item.classMatch.status !== 'unresolved') return;
+      const normalized = item.recognizedClassText.normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase('zh-CN');
+      const key = normalized || `unrecognized-${item.id}`;
+      const current = groups.get(key) ?? { label: item.recognizedClassText || '未识别到班级文字', indexes: [] };
+      current.indexes.push(index);
+      groups.set(key, current);
+    });
+    return [...groups.values()];
+  }, [draft]);
+  const applyClassChoice = (indexes: number[], value: string) => setDraft(current => current ? {
+    ...current,
+    items: current.items.map((item, index) => {
+      if (!indexes.includes(index)) return item;
+      if (value === '__unassigned__') return {
+        ...item, classId: '', className: '',
+        classMatch: { status: 'unassigned', reason: 'teacher-unassigned', candidateClassIds: [] },
+      };
+      const selectedClass = classes.find(itemClass => itemClass.id === value);
+      if (!selectedClass) return {
+        ...item, classId: '', className: '',
+        classMatch: { ...item.classMatch, status: 'unresolved' },
+      };
+      return {
+        ...item, classId: selectedClass.id, className: selectedClass.name,
+        classMatch: { status: 'matched', reason: 'teacher-selected', candidateClassIds: [selectedClass.id] },
+      };
+    }),
+  } : current);
+  const persistedItems = (draft?.items ?? []).map(({ recognizedClassText: _, classMatch: __, ...item }) => item);
   const footer = draft ? (
     <button
       onClick={async () => {
         setBusy(true);
-        await onApply(draft.items);
-        setBusy(false);
-        onClose();
+        setError('');
+        try {
+          await onApply(persistedItems);
+          onClose();
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : 'SCHEDULE_BATCH_SAVE_FAILED');
+        } finally {
+          setBusy(false);
+        }
       }}
-      disabled={busy || !draft.items.length}
-      className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-40"
+      disabled={busy || !draft.items.length || unresolvedItems.length > 0}
+      className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-40"
     >
       {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-      确认写入 {draft.items.length} 项
+      {unresolvedItems.length ? `还有 ${unresolvedItems.length} 项待确认` : `确认写入 ${draft.items.length} 项`}
     </button>
   ) : (
-    <button onClick={() => void recognize()} disabled={!file || busy} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">
+    <button onClick={() => void recognize()} disabled={!file || busy} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">
       {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FileScan className="h-4 w-4" />}
       开始识别
     </button>
   );
   return (
-    <Modal wide title="扫描纸质课表" onClose={onClose} footer={footer}>
+    <Modal wide compactFull title="扫描纸质课表" onClose={onClose} footer={footer}>
       {!draft ? (
         <div className="space-y-4">
           <label className="flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-white p-5 text-center dark:border-zinc-700 dark:bg-zinc-950">
@@ -1230,6 +1269,25 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
               • {w}
             </p>
           ))}
+          {error ? <p className="flex items-center gap-2 rounded-xl bg-red-50 p-3 text-sm text-red-700"><AlertCircle className="h-4 w-4 shrink-0" />{error}</p> : null}
+          {scope === 'teacher' && unresolvedGroups.length ? (
+            <section className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/20">
+              <div>
+                <strong className="text-sm text-amber-900 dark:text-amber-100">需要确认的班级写法</strong>
+                <p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-200">选择一次会应用到草稿中所有相同识别文字；确实不属于任何班级时请选择“不关联班级”。</p>
+              </div>
+              {unresolvedGroups.map(group => (
+                <label key={`${group.label}-${group.indexes[0]}`} className="grid gap-2 text-xs font-bold text-slate-700 sm:grid-cols-[minmax(150px,1fr)_minmax(220px,1.4fr)] sm:items-center dark:text-slate-200">
+                  <span className="break-words">识别到：{group.label} <span className="font-normal text-slate-500">（{group.indexes.length}项）</span></span>
+                  <select defaultValue="" onChange={event => applyClassChoice(group.indexes, event.target.value)} className={`${fieldClass} min-h-11 text-base sm:text-sm`}>
+                    <option value="">请选择已有班级</option>
+                    {classes.map(itemClass => <option key={itemClass.id} value={itemClass.id}>{itemClass.name} · {itemClass.term}</option>)}
+                    <option value="__unassigned__">不关联班级</option>
+                  </select>
+                </label>
+              ))}
+            </section>
+          ) : null}
           <div className="max-h-[58vh] overflow-y-auto rounded-xl border border-slate-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
             <div className="divide-y divide-slate-100 dark:divide-zinc-800">
               {orderedItems.map(({ item, index }) => (
@@ -1243,12 +1301,13 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
   );
 }
 
-function ImportDraftRow({ item, index, scope, classes, periods, onUpdate, onRemove }: { key?: React.Key; item: ScheduleItem; index: number; scope: 'teacher' | 'class'; classes: SchoolClass[]; periods: SchedulePeriod[]; onUpdate: (index: number, patch: Partial<ScheduleItem>) => void; onRemove: (index: number) => void }) {
+function ImportDraftRow({ item, index, scope, classes, periods, onUpdate, onRemove }: { key?: React.Key; item: ScheduleImportItemDraft; index: number; scope: 'teacher' | 'class'; classes: SchoolClass[]; periods: SchedulePeriod[]; onUpdate: (index: number, patch: Partial<ScheduleImportItemDraft>) => void; onRemove: (index: number) => void }) {
   const lowConfidence = item.confidence !== undefined && item.confidence < 0.75;
+  const matchLabel = item.classMatch.status === 'matched' ? (item.classMatch.reason === 'teacher-selected' ? '教师已确认' : '已自动匹配') : item.classMatch.status === 'unassigned' ? '不关联班级' : '需要确认';
   return (
     <div className={`grid gap-3 p-3 md:grid-cols-[190px_minmax(150px,1fr)_minmax(170px,1fr)_32px] ${lowConfidence ? 'bg-amber-50 dark:bg-amber-950/20' : 'bg-white dark:bg-zinc-900'}`}>
       <div className="grid grid-cols-2 gap-2">
-        <label className="min-w-0 text-[10px] font-bold text-slate-600">
+        <label className="min-w-0 text-xs font-bold text-slate-600">
           星期
           <select value={item.day} onChange={(event) => onUpdate(index, { day: Number(event.target.value) })} className={`${fieldClass} mt-1 min-w-[82px]`}>
             {dayNames.map((day, dayIndex) => (
@@ -1258,7 +1317,7 @@ function ImportDraftRow({ item, index, scope, classes, periods, onUpdate, onRemo
             ))}
           </select>
         </label>
-        <label className="min-w-0 text-[10px] font-bold text-slate-600">
+        <label className="min-w-0 text-xs font-bold text-slate-600">
           课节
           <select
             value={item.period}
@@ -1279,33 +1338,39 @@ function ImportDraftRow({ item, index, scope, classes, periods, onUpdate, onRemo
           </select>
         </label>
       </div>
-      <label className="text-[10px] font-bold text-slate-600">
+      <label className="text-xs font-bold text-slate-600">
         课程
         <input value={item.title} onChange={(event) => onUpdate(index, { title: event.target.value })} className={`${fieldClass} mt-1`} />
       </label>
       {scope === 'teacher' ? (
-        <label className="text-[10px] font-bold text-slate-600">
-          班级
+        <label className="text-xs font-bold text-slate-600">
+          <span className="flex items-center justify-between gap-2"><span>班级</span><span className={item.classMatch.status === 'unresolved' ? 'text-amber-700' : 'text-emerald-700'}>{matchLabel}</span></span>
           <select
-            value={item.classId}
-            onChange={(event) =>
-              onUpdate(index, {
-                classId: event.target.value,
-                className: classes.find((itemClass) => itemClass.id === event.target.value)?.name ?? '',
-              })
-            }
-            className={`${fieldClass} mt-1`}
+            value={item.classMatch.status === 'unassigned' ? '__unassigned__' : item.classId}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value === '__unassigned__') onUpdate(index, { classId: '', className: '', classMatch: { status: 'unassigned', reason: 'teacher-unassigned', candidateClassIds: [] } });
+              else {
+                const selectedClass = classes.find(itemClass => itemClass.id === value);
+                onUpdate(index, selectedClass
+                  ? { classId: selectedClass.id, className: selectedClass.name, classMatch: { status: 'matched', reason: 'teacher-selected', candidateClassIds: [selectedClass.id] } }
+                  : { classId: '', className: '', classMatch: { ...item.classMatch, status: 'unresolved' } });
+              }
+            }}
+            className={`${fieldClass} mt-1 min-h-11 text-base sm:text-sm`}
           >
-            <option value="">班级待确认</option>
+            <option value="">请选择已有班级</option>
             {classes.map((itemClass) => (
               <option key={itemClass.id} value={itemClass.id}>
                 {itemClass.name}
               </option>
             ))}
+            <option value="__unassigned__">不关联班级</option>
           </select>
+          <span className="mt-1 block break-words font-normal text-slate-500">识别到：{item.recognizedClassText || '未识别到班级文字'}</span>
         </label>
       ) : (
-        <label className="text-[10px] font-bold text-slate-600">
+        <label className="text-xs font-bold text-slate-600">
           教师
           <input value={item.teacherName ?? ''} onChange={(event) => onUpdate(index, { teacherName: event.target.value })} className={`${fieldClass} mt-1`} />
         </label>

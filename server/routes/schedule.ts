@@ -14,6 +14,7 @@ import { createReminderDrafts } from '../services/schedule/reminderImportService
 import { uploadFilePath } from '../context/workspaceContext';
 import { uploadRateLimit } from '../middleware/security';
 import { runtimeConfig } from '../config/runtimeConfig';
+import { logEvent } from '../observability/logger';
 
 const router = Router();
 const scheduleSchema = z.object({
@@ -124,6 +125,17 @@ router.post('/schedule/import', uploadRateLimit, upload.single('file'), async (r
     const result = await importScheduleDocument({
       assetId: randomUUID(), fileName: file.originalname, mimeType: file.mimetype, filePath: file.path,
       scope, classId: typeof request.body.classId === 'string' ? request.body.classId : ''
+    });
+    const reasonCounts = result.items.reduce<Record<string, number>>((counts, item) => {
+      counts[item.classMatch.reason] = (counts[item.classMatch.reason] ?? 0) + 1;
+      return counts;
+    }, {});
+    logEvent('info', 'schedule_import_class_matching_completed', {
+      scope,
+      itemCount: result.items.length,
+      matchedCount: result.items.filter(item => item.classMatch.status === 'matched').length,
+      unresolvedCount: result.items.filter(item => item.classMatch.status === 'unresolved').length,
+      reasonCounts,
     });
     response.json(result);
   } catch (error) {
