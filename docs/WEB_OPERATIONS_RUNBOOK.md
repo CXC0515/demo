@@ -1,7 +1,7 @@
 # DEMO 网页产品本地生产运行手册
 
-> 文档版本：`v1.8`
-> 日期：2026-09-09
+> 文档版本：`v1.9`
+> 日期：2026-09-10
 > 适用范围：网页产品第一阶段第 2、3 切片操作口径
 > 当前边界：代码、`var-product`、公网 HTTPS 和后台自启均已接通；限两名受邀试用者验证，暂不扩大范围
 
@@ -238,6 +238,14 @@ node /Users/cxc/Projects/DEMO/scripts/configure-production-env.mjs
 
 该修正只处理 MacBook 出口的 Tunnel 稳定性，不能绕过学校网络对 Cloudflare 入口的封锁；校园网仍需域名/SNI 白名单或另行批准国内入口。
 
+### 9.7 课表 OCR 班级匹配升级
+
+2026-09-10，课表 OCR 班级匹配修复通过 PR #15 合并并部署。升级前创建并验证独立产品快照 `product-2026-09-10T01-45-21-pre-pr15`，包含 192 个文件和 5 个 SQLite 数据库；未修改数据库结构，也未删除旧恢复点。
+
+母文件夹保留本地运维历史并普通合并远端 `main@dfdf87c`，重新安装锁定依赖、构建，并通过 26 项课表测试、9 项运维测试和 TypeScript 检查。应用 LaunchAgent 重启后第 2 次回环探测恢复；公网登录页和就绪接口为 200，存储、AI、PaddleOCR 均为 ready，本地与公网主脚本均为 `index-VP2ezFcr.js`。
+
+本次升级没有调整 Tunnel、DNS 或生产数据路径。PaddleOCR 外部队列繁忙仍可能发生；应用会有限重试，最终失败返回 503 和阶段化提示，不写入不完整课表草稿。
+
 ## 10. 修改历史
 
 | 版本 | 日期 | 状态 | 修改概要 |
@@ -250,4 +258,5 @@ node /Users/cxc/Projects/DEMO/scripts/configure-production-env.mjs
 | v1.5 | 2026-09-08 | 已被 v1.6 取代 | 记录 cloudflared、本地产品副本、自动备份去重、unified log 与合并后 LaunchAgent 安装顺序；公网入口仍未启用。 |
 | v1.6 | 2026-09-08 | 已被 v1.7 取代 | 记录 Cloudflare 免费 Zone、阿里云与 Cloudflare DNS 职责、精确名称服务器、切换前空记录核查、用户授权和回滚步骤。 |
 | v1.7 | 2026-09-09 | 已被 v1.8 取代 | 记录 DNS 生效、Tunnel 与 `td` 路由、三个 LaunchAgent、公网 HTTPS/鉴权检查及重启恢复实测；保留三网和微信 48 小时验收。 |
-| v1.8 | 2026-09-09 | 当前，观察中 | 记录 Shadowrocket TUN 与 Cloudflare QUIC 断线证据；HTTP/2 实测因 TCP 7844 被阻断而立即回滚，生产恢复自动协议，并保留校园网问题边界。 |
+| v1.8 | 2026-09-09 | 已被 v1.9 取代 | 记录 Shadowrocket TUN 与 Cloudflare QUIC 断线证据；HTTP/2 实测因 TCP 7844 被阻断而立即回滚，生产恢复自动协议，并保留校园网问题边界。 |
+| v1.9 | 2026-09-10 | 当前，观察中 | 记录 PR #15 课表 OCR 班级匹配升级、升级前快照、母文件夹检查、LaunchAgent 重启及公网构建一致性验收。 |
