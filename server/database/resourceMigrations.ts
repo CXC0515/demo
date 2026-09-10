@@ -297,6 +297,23 @@ const migrations = [
         REFERENCES knowledge_nodes(id) ON DELETE SET NULL;
     `,
   },
+  {
+    version: 8,
+    sql: `
+      ALTER TABLE resource_chunks ADD COLUMN source_type TEXT NOT NULL DEFAULT '';
+      ALTER TABLE resource_chunks ADD COLUMN content_type TEXT NOT NULL DEFAULT 'paragraph';
+      ALTER TABLE resource_chunks ADD COLUMN markdown TEXT NOT NULL DEFAULT '';
+      ALTER TABLE resource_chunks ADD COLUMN resource_urls_json TEXT NOT NULL DEFAULT '[]';
+
+      UPDATE resource_chunks
+      SET content_type = CASE
+        WHEN level = 'document' THEN 'page'
+        WHEN level = 'section' THEN 'heading'
+        ELSE 'paragraph'
+      END,
+      markdown = text;
+    `,
+  },
 ];
 
 export const runResourceMigrations = (database: Database.Database) => {

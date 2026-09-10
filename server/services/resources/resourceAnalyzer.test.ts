@@ -10,6 +10,7 @@ import {
   LibraryResource,
   NormalizedDocument,
 } from "../../../src/domain/types";
+import { normalizePaddleBlockType } from "../materials/PaddleVisionMaterialParser";
 import { buildResourceChunks, ResourceAnalyzer } from "./resourceAnalyzer";
 
 const resource: LibraryResource = {
@@ -32,6 +33,19 @@ const resource: LibraryResource = {
   updatedAt: "",
 };
 
+test("PaddleOCR block labels normalize for rendering without changing the raw source label", () => {
+  const rawTypes = ["paragraph_title", "FORMULA", "table", "image", "list_item", "header"];
+  assert.deepEqual(rawTypes.map(normalizePaddleBlockType), [
+    "heading",
+    "formula",
+    "table",
+    "image",
+    "list-item",
+    "paragraph",
+  ]);
+  assert.equal(rawTypes[0], "paragraph_title");
+});
+
 test("normalized blocks become document, section and located content chunks", () => {
   const document: NormalizedDocument = {
     assetId: resource.id,
@@ -52,8 +66,11 @@ test("normalized blocks become document, section and located content chunks", ()
       {
         id: "content",
         order: 2,
-        type: "paragraph",
-        text: "运用了比喻和拟人的修辞手法。",
+        type: "table",
+        sourceType: "table",
+        text: "<table><tr><td>运用了比喻和拟人的修辞手法。</td></tr></table>",
+        markdown: "<table><tr><td>运用了比喻和拟人的修辞手法。</td></tr></table>",
+        resourceUrls: ["/api/resources/resource-1/derived/resources/table.jpg"],
         pageNumber: 2,
         boundingBox: { x: 0.1, y: 0.2, width: 0.5, height: 0.1 },
       },
@@ -70,6 +87,11 @@ test("normalized blocks become document, section and located content chunks", ()
     11,
   );
   assert.ok(chunks.find((chunk) => chunk.text.includes("比喻"))?.boundingBox);
+  const table = chunks.find((chunk) => chunk.contentType === "table");
+  assert.equal(table?.sourceType, "table");
+  assert.equal(table?.text, "运用了比喻和拟人的修辞手法。");
+  assert.match(table?.markdown ?? "", /<td>/);
+  assert.deepEqual(table?.resourceUrls, ["/api/resources/resource-1/derived/resources/table.jpg"]);
 });
 
 test("unconfigured analyzer still proposes traceable matches to existing nodes", async () => {

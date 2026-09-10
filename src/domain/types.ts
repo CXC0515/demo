@@ -418,8 +418,10 @@ export interface NormalizedDocumentBlock {
   id: string;
   order: number;
   type: 'heading' | 'paragraph' | 'list-item' | 'table' | 'image' | 'formula' | 'page';
+  sourceType?: string;
   text: string;
   markdown?: string;
+  resourceUrls?: string[];
   listLabel?: string;
   level?: number;
   pageNumber?: number;
@@ -748,9 +750,13 @@ export interface ResourceChunk {
   resourceId: string;
   parentId?: string;
   level: 'document' | 'section' | 'content';
+  sourceType?: string;
+  contentType?: NormalizedDocumentBlock['type'];
   title: string;
   summary: string;
   text: string;
+  markdown?: string;
+  resourceUrls?: string[];
   tags: string[];
   pageStart: number;
   pageEnd: number;

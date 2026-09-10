@@ -54,15 +54,24 @@ test("resource review creates an authoritative node and source link", () => {
         resourceId: resource.id,
         parentId: `${resource.id}:document`,
         level: "content",
+        sourceType: "table",
+        contentType: "table",
         title: "第 12 页内容",
         summary: "",
         text: "这里讲解虚实结合的写景方法。",
+        markdown: "<table><tr><td>这里讲解虚实结合的写景方法。</td></tr></table>",
+        resourceUrls: ["/api/resources/example/derived/resources/table.jpg"],
         tags: [],
         pageStart: 12,
         pageEnd: 12,
         order: 1,
       },
     ]);
+    const storedChunk = repository.listChunks(resource.id).find(item => item.id === chunkId);
+    assert.equal(storedChunk?.sourceType, "table");
+    assert.equal(storedChunk?.contentType, "table");
+    assert.match(storedChunk?.markdown ?? "", /<td>/);
+    assert.deepEqual(storedChunk?.resourceUrls, ["/api/resources/example/derived/resources/table.jpg"]);
     const suggestionId = randomUUID();
     repository.replacePendingSuggestions(resource.id, [
       {

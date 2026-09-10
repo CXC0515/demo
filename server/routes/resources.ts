@@ -297,7 +297,7 @@ router.get("/resources/:resourceId/pages/:pageNumber/image", async (request, res
     response.sendFile(imagePath);
   } catch (error) {
     const code = error instanceof Error ? error.message : "PAGE_RENDER_FAILED";
-    response.status(code === "RESOURCE_NOT_FOUND" ? 404 : 400).json({ code });
+    response.status(code === "RESOURCE_NOT_FOUND" || code === "RESOURCE_PAGE_IMAGE_NOT_FOUND" ? 404 : 400).json({ code });
   }
 });
 

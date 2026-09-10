@@ -40,6 +40,7 @@ import {
   analyzeLibraryResource,
   batchReviewSuggestions,
   deleteLibraryResource,
+  getResourceErrorMessage,
   ResourceMetadataInput,
   reviewSuggestion,
   retrieveLibraryResource,
@@ -47,6 +48,7 @@ import {
   updateLibraryResource,
   uploadLibraryResource,
 } from "../../services/resourceApi";
+import { formatFileSize, RESOURCE_UPLOAD_LIMIT_BYTES, RESOURCE_UPLOAD_LIMIT_LABEL } from "../../domain/uploadPolicy";
 import {
   entityLabels,
   entityTones,
@@ -157,17 +159,78 @@ const OcrFormula = ({ expression }: { expression: string }) => {
 };
 
 const OcrRichText = ({ text, className = "" }: { text: string; className?: string }) => {
-  const parts = text.split(/(\$[^$]+\$)/g).filter(Boolean);
+  const formulaPattern = /(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$[^$\n]+\$)/g;
+  const parts = text.split(formulaPattern).filter(Boolean);
   return (
     <span className={className}>
       {parts.map((part, index) => {
-        if (!(part.startsWith("$") && part.endsWith("$"))) return <React.Fragment key={index}>{part}</React.Fragment>;
-        const expression = part.slice(1, -1).trim();
+        const delimiters = part.startsWith("$$") || part.startsWith("\\(") || part.startsWith("\\[") ? 2 : 1;
+        const isFormula = (part.startsWith("$$") && part.endsWith("$$"))
+          || (part.startsWith("$") && part.endsWith("$"))
+          || (part.startsWith("\\(") && part.endsWith("\\)"))
+          || (part.startsWith("\\[") && part.endsWith("\\]"));
+        if (!isFormula) return <React.Fragment key={index}>{part}</React.Fragment>;
+        const expression = part.slice(delimiters, -delimiters).trim();
         if (!expression) return null;
         return <React.Fragment key={index}><OcrFormula expression={expression} /></React.Fragment>;
       })}
     </span>
   );
+};
+
+interface OcrTableCell {
+  text: string;
+  header: boolean;
+  colSpan: number;
+  rowSpan: number;
+}
+
+const parseOcrTable = (markup: string): OcrTableCell[][] => {
+  if (typeof DOMParser === "undefined") return [];
+  const document = new DOMParser().parseFromString(markup, "text/html");
+  const table = document.querySelector("table");
+  if (!table) return [];
+  return Array.from(table.rows).slice(0, 200).map((row) =>
+    Array.from(row.cells).slice(0, 40).map((cell) => ({
+      text: cell.textContent?.trim() ?? "",
+      header: cell.tagName.toLowerCase() === "th",
+      colSpan: Math.min(Math.max(cell.colSpan || 1, 1), 20),
+      rowSpan: Math.min(Math.max(cell.rowSpan || 1, 1), 100),
+    })),
+  );
+};
+
+const OcrContentBlock = ({ chunk }: { chunk: ResourceChunk }) => {
+  if (chunk.contentType === "table") {
+    const rows = parseOcrTable(chunk.markdown ?? chunk.text);
+    if (rows.length) return (
+      <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-zinc-700">
+        <table className="min-w-full border-collapse text-left text-xs">
+          <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex} className="border-b border-slate-200 last:border-0 dark:border-zinc-700">{row.map((cell, cellIndex) => {
+            const Cell = cell.header ? "th" : "td";
+            return <Cell key={cellIndex} colSpan={cell.colSpan} rowSpan={cell.rowSpan} className={`border-r border-slate-200 px-2 py-1.5 align-top last:border-r-0 dark:border-zinc-700 ${cell.header ? "bg-slate-100 font-bold dark:bg-zinc-800" : "bg-white dark:bg-zinc-900"}`}><OcrRichText text={cell.text} /></Cell>;
+          })}</tr>)}</tbody>
+        </table>
+      </div>
+    );
+  }
+  if (chunk.contentType === "image") return (
+    <figure className="space-y-2">
+      {chunk.resourceUrls?.length
+        ? chunk.resourceUrls.map((url) => <img key={url} loading="lazy" src={url} alt="OCR 提取图片" className="max-h-80 max-w-full rounded-lg border border-slate-200 object-contain dark:border-zinc-700" />)
+        : <p className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-500">识别到图片区域，但没有可用的本地图片文件；可查看上方页面底图。</p>}
+    </figure>
+  );
+  const content = chunk.markdown ?? chunk.text;
+  if (chunk.contentType === "heading") return <h4 className="text-sm font-black text-slate-700 dark:text-slate-200"><OcrRichText text={content} /></h4>;
+  return <p className="whitespace-pre-wrap"><OcrRichText text={content} /></p>;
+};
+
+const OcrPageImage = ({ src, pageNumber }: { src: string; pageNumber: number }) => {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  if (failed) return <div role="status" className="grid aspect-[210/297] place-items-center bg-slate-50 px-6 text-center text-sm text-slate-500"><span><strong className="block text-slate-700">第 {pageNumber} 页图片暂不可用</strong><span className="mt-1 block">文字结果仍然保留，可重新解析这一页以恢复底图。</span></span></div>;
+  return <img loading="lazy" src={src} alt={`第 ${pageNumber} 页 OCR 识别底图`} onError={() => setFailed(true)} className="w-full object-contain" />;
 };
 
 const MetadataDialog = ({
@@ -197,13 +260,19 @@ const MetadataDialog = ({
   );
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!resource && !file) {
-      onShowToast("请选择 PDF 文件");
+      setFormError("请选择 PDF 文件");
+      return;
+    }
+    if (file && file.size > RESOURCE_UPLOAD_LIMIT_BYTES) {
+      setFormError(`这个文件为 ${formatFileSize(file.size)}，超过 ${RESOURCE_UPLOAD_LIMIT_LABEL} 上限。请压缩或拆分 PDF，也可以联系管理员在 MacBook 本地导入。`);
       return;
     }
     setSaving(true);
+    setFormError("");
     try {
       const saved = resource
         ? await updateLibraryResource(resource.id, metadata)
@@ -212,9 +281,9 @@ const MetadataDialog = ({
       onShowToast(resource ? "资料信息已更新" : "资料已上传");
       onClose();
     } catch (error) {
-      onShowToast(
-        `保存失败：${error instanceof Error ? error.message : "未知错误"}`,
-      );
+      const message = getResourceErrorMessage(error);
+      setFormError(message);
+      onShowToast(message);
     } finally {
       setSaving(false);
     }
@@ -239,7 +308,7 @@ const MetadataDialog = ({
               {resource ? "编辑资料" : "上传资料"}
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              {resource ? resource.fileName : "PDF 最大 500 MB"}
+              {resource ? resource.fileName : `仅支持 PDF，单个文件不超过 ${RESOURCE_UPLOAD_LIMIT_LABEL}`}
             </p>
           </div>
           <button
@@ -255,7 +324,10 @@ const MetadataDialog = ({
           {!resource && (
             <button
               type="button"
-              onClick={() => inputRef.current?.click()}
+              onClick={() => {
+                if (inputRef.current) inputRef.current.value = "";
+                inputRef.current?.click();
+              }}
               className="h-28 border border-dashed border-slate-300 dark:border-zinc-700 rounded-xl hover:border-emerald-600 hover:bg-emerald-50/40 transition-colors grid place-items-center text-center sm:col-span-2"
             >
               <input
@@ -265,6 +337,12 @@ const MetadataDialog = ({
                 hidden
                 onChange={(event) => {
                   const selected = event.target.files?.[0] ?? null;
+                  setFormError("");
+                  if (selected && selected.type !== "application/pdf" && !selected.name.toLowerCase().endsWith(".pdf")) {
+                    setFile(null);
+                    setFormError("请选择 PDF 文件，其他文件类型暂不支持");
+                    return;
+                  }
                   setFile(selected);
                   if (selected && !metadata.title)
                     update("title", selected.name.replace(/\.pdf$/i, ""));
@@ -275,9 +353,13 @@ const MetadataDialog = ({
                 <span className="block text-sm font-bold text-slate-700 dark:text-slate-200">
                   {file?.name ?? "选择 PDF"}
                 </span>
+                <span className="mt-1 block text-xs text-slate-400">
+                  {file ? `${formatFileSize(file.size)} · ${file.size > RESOURCE_UPLOAD_LIMIT_BYTES ? `超过 ${RESOURCE_UPLOAD_LIMIT_LABEL} 上限` : '可以上传'}` : `单个文件不超过 ${RESOURCE_UPLOAD_LIMIT_LABEL}`}
+                </span>
               </span>
             </button>
           )}
+          {formError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 sm:col-span-2 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">{formError}</p>}
           <label className="space-y-1 sm:col-span-2">
             <span className="text-xs font-bold text-slate-500">资料名称</span>
             <input
@@ -584,12 +666,12 @@ const OcrPageReader = ({
                     <figure className="mx-auto max-w-3xl">
                       <figcaption className="mb-2 text-[10px] font-black uppercase tracking-wide text-emerald-700">OCR 识别版</figcaption>
                       <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-white">
-                        <img loading="lazy" src={imageUrl} alt={`第 ${page.pageNumber} 页 OCR 识别底图`} className="w-full object-contain" style={{ aspectRatio: "210 / 297" }} />
+                        <OcrPageImage src={imageUrl} pageNumber={page.pageNumber} />
                         {pageChunks.filter((chunk) => chunk.boundingBox).slice(0, 80).map((chunk) => (
-                          <span key={chunk.id} title={chunk.text.slice(0, 180)} className={`absolute overflow-hidden text-[7px] leading-tight ${showRecognitionBoxes ? "border border-emerald-500 bg-emerald-100/80 text-emerald-950" : "border border-transparent bg-transparent text-transparent selection:bg-blue-200/70"}`} style={{ left: `${chunk.boundingBox!.x * 100}%`, top: `${chunk.boundingBox!.y * 100}%`, width: `${chunk.boundingBox!.width * 100}%`, height: `${chunk.boundingBox!.height * 100}%` }}><OcrRichText text={chunk.text} /></span>
+                          <span key={chunk.id} title={chunk.text.slice(0, 180)} className={`absolute overflow-hidden text-[7px] leading-tight ${showRecognitionBoxes ? "border border-emerald-500 bg-emerald-100/80 text-emerald-950" : "border border-transparent bg-transparent text-transparent selection:bg-blue-200/70"}`} style={{ left: `${chunk.boundingBox!.x * 100}%`, top: `${chunk.boundingBox!.y * 100}%`, width: `${chunk.boundingBox!.width * 100}%`, height: `${chunk.boundingBox!.height * 100}%` }}>{chunk.contentType === "table" ? "表格" : chunk.contentType === "image" ? "图片" : <OcrRichText text={chunk.text} />}</span>
                         ))}
                       </div>
-                      <details className="mt-2 rounded-lg bg-slate-50 p-2 text-xs dark:bg-zinc-950"><summary className="cursor-pointer font-bold text-slate-600 dark:text-slate-300">查看提取文本（{pageChunks.length} 块）</summary><div className="mt-2 max-h-48 space-y-2 overflow-y-auto text-slate-500">{pageChunks.map((chunk) => <p key={chunk.id} className="whitespace-pre-wrap"><OcrRichText text={chunk.text} /></p>)}</div></details>
+                      <details className="mt-2 rounded-lg bg-slate-50 p-2 text-xs dark:bg-zinc-950"><summary className="cursor-pointer font-bold text-slate-600 dark:text-slate-300">查看结构化识别内容（{pageChunks.length} 块）</summary><div className="mt-2 max-h-80 space-y-3 overflow-y-auto text-slate-500">{pageChunks.map((chunk) => <section key={chunk.id} className="space-y-1"><span className="inline-flex rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-zinc-800 dark:text-slate-300">{chunk.sourceType || chunk.contentType || "text"}</span><OcrContentBlock chunk={chunk} /></section>)}</div></details>
                     </figure>
                 </div>
               </article>

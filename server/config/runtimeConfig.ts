@@ -5,6 +5,7 @@
 
 import { accessSync, constants, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { RESOURCE_UPLOAD_LIMIT_BYTES } from '../../src/domain/uploadPolicy';
 
 export interface RuntimeConfig {
   nodeEnv: string;
@@ -98,7 +99,7 @@ export const loadRuntimeConfig = (
     distDirectory: resolved(environment.APP_DIST_DIR, 'dist', cwd),
     shutdownTimeoutMs: positiveInteger(environment.SHUTDOWN_TIMEOUT_MS, 15_000, 'SHUTDOWN_TIMEOUT_MS'),
     uploadLimits: {
-      resourceFileBytes: 80 * MEBIBYTE,
+      resourceFileBytes: RESOURCE_UPLOAD_LIMIT_BYTES,
       gradingFileBytes: 4 * MEBIBYTE,
       gradingFileCount: 20,
       scheduleFileBytes: 10 * MEBIBYTE,

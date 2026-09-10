@@ -68,9 +68,13 @@ const toChunk = (row: JsonObject): ResourceChunk => ({
   resourceId: String(row.resource_id),
   parentId: row.parent_id ? String(row.parent_id) : undefined,
   level: row.level as ResourceChunk["level"],
+  sourceType: row.source_type ? String(row.source_type) : undefined,
+  contentType: row.content_type as ResourceChunk["contentType"],
   title: String(row.title),
   summary: String(row.summary),
   text: String(row.text),
+  markdown: row.markdown ? String(row.markdown) : undefined,
+  resourceUrls: parseJson(String(row.resource_urls_json ?? "[]"), []),
   tags: parseJson(String(row.tags_json), []),
   pageStart: Number(row.page_start),
   pageEnd: Number(row.page_end),
@@ -795,8 +799,8 @@ export class ResourceRepository {
     );
     const insert = this.database.prepare(`
       INSERT INTO resource_chunks
-      (id, resource_id, parent_id, level, title, summary, text, tags_json, page_start, page_end, bounding_box_json, sort_order, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, resource_id, parent_id, level, source_type, content_type, title, summary, text, markdown, resource_urls_json, tags_json, page_start, page_end, bounding_box_json, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     this.database.transaction(() => {
       remove.run(resourceId);
@@ -806,9 +810,13 @@ export class ResourceRepository {
           resourceId,
           chunk.parentId ?? null,
           chunk.level,
+          chunk.sourceType ?? "",
+          chunk.contentType ?? (chunk.level === "section" ? "heading" : chunk.level === "document" ? "page" : "paragraph"),
           chunk.title,
           chunk.summary,
           chunk.text,
+          chunk.markdown ?? chunk.text,
+          JSON.stringify(chunk.resourceUrls ?? []),
           JSON.stringify(chunk.tags),
           chunk.pageStart,
           chunk.pageEnd,
@@ -827,14 +835,16 @@ export class ResourceRepository {
     );
     const insert = this.database.prepare(`
       INSERT INTO resource_chunks
-      (id, resource_id, parent_id, level, title, summary, text, tags_json, page_start, page_end, bounding_box_json, sort_order, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, resource_id, parent_id, level, source_type, content_type, title, summary, text, markdown, resource_urls_json, tags_json, page_start, page_end, bounding_box_json, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const timestamp = new Date().toISOString();
     this.database.transaction(() => {
       remove.run(resourceId, pageStart, pageEnd);
       chunks.forEach((chunk) => insert.run(
-        chunk.id, resourceId, chunk.parentId ?? null, chunk.level, chunk.title, chunk.summary, chunk.text,
+        chunk.id, resourceId, chunk.parentId ?? null, chunk.level, chunk.sourceType ?? "",
+        chunk.contentType ?? (chunk.level === "section" ? "heading" : chunk.level === "document" ? "page" : "paragraph"),
+        chunk.title, chunk.summary, chunk.text, chunk.markdown ?? chunk.text, JSON.stringify(chunk.resourceUrls ?? []),
         JSON.stringify(chunk.tags), chunk.pageStart, chunk.pageEnd,
         chunk.boundingBox ? JSON.stringify(chunk.boundingBox) : null, chunk.order, timestamp, timestamp,
       ));

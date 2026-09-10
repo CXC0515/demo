@@ -20,6 +20,39 @@ import {
   ResourceChunk,
 } from "../domain/types";
 import { apiFetch } from './apiClient';
+import { RESOURCE_UPLOAD_LIMIT_BYTES } from '../domain/uploadPolicy';
+
+export class ResourceApiError extends Error {
+  constructor(public readonly code: string, public readonly status?: number) {
+    super(code);
+    this.name = 'ResourceApiError';
+  }
+}
+
+const resourceErrorMessages: Record<string, string> = {
+  LIMIT_FILE_SIZE: '文件超过 80 MB 上限，请压缩或拆分 PDF 后重试',
+  LIMIT_FILE_COUNT: '每次只能上传一个 PDF 文件',
+  REQUEST_TOO_LARGE: '文件超过 80 MB 上限，请压缩或拆分 PDF 后重试',
+  RESOURCE_FILE_TOO_LARGE: '文件超过 80 MB 上限，请压缩或拆分 PDF 后重试',
+  INVALID_PDF: '无法读取这个 PDF，文件可能已损坏或加密，请检查后重试',
+  UNAUTHORIZED: '登录已失效，请重新登录后继续',
+  FORBIDDEN: '当前账号没有操作这份资料的权限',
+  RATE_LIMITED: '操作过于频繁，请稍后再试',
+};
+
+export const getResourceErrorMessage = (error: unknown) => {
+  const code = error instanceof Error ? error.message : '';
+  const status = error instanceof ResourceApiError ? error.status : undefined;
+  if (resourceErrorMessages[code]) return resourceErrorMessages[code];
+  if (status === 413 || code === 'HTTP_413') return resourceErrorMessages.REQUEST_TOO_LARGE;
+  if (status === 401 || code === 'HTTP_401') return resourceErrorMessages.UNAUTHORIZED;
+  if (status === 403 || code === 'HTTP_403') return resourceErrorMessages.FORBIDDEN;
+  if (status === 429 || code === 'HTTP_429') return resourceErrorMessages.RATE_LIMITED;
+  if ([502, 503, 504].includes(status ?? 0) || /^HTTP_50[234]$/.test(code)) {
+    return '服务器或识别服务暂时不可用，本次内容没有保存，请稍后重试';
+  }
+  return '保存失败，请检查网络后重试；如果仍然失败，请联系管理员';
+};
 
 const readErrorCode = async (response: Response) => {
   const body = (await response.json().catch(() => ({}))) as { code?: string };
@@ -28,7 +61,7 @@ const readErrorCode = async (response: Response) => {
 
 const requestJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
   const response = await apiFetch(url, init);
-  if (!response.ok) throw new Error(await readErrorCode(response));
+  if (!response.ok) throw new ResourceApiError(await readErrorCode(response), response.status);
   return response.json() as Promise<T>;
 };
 
@@ -57,6 +90,9 @@ export const uploadLibraryResource = async (
   file: File,
   metadata: ResourceMetadataInput,
 ) => {
+  if (file.size > RESOURCE_UPLOAD_LIMIT_BYTES) {
+    throw new ResourceApiError('RESOURCE_FILE_TOO_LARGE', 413);
+  }
   const form = new FormData();
   form.set("file", file);
   Object.entries(metadata).forEach(([key, value]) =>
