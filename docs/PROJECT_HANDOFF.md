@@ -1,137 +1,91 @@
 # DEMO 项目当前交接
 
 > 本文是当前统一交接入口。历史专项文档只用于追溯当时的决策，不再代表当前 Git、数据路径或部署状态。
+> 更新时间：2026-09-10；当前生产基线：`origin/main@54ff5dc`（PR #17）。
 
-## 1. 目标与当前阶段
+## 1. 当前阶段与产品边界
 
-DEMO 正从本地教师工作台原型转向可持续使用的产品。当前主要矛盾已经从“功能是否存在”转为“真实数据能否安全持续保存、网页部署后能否稳定访问、教师能否看见并纠正 AI 的处理过程”。
+DEMO 已从本地原型进入“三名教师以内的私有网页试用”阶段。当前主要任务不是继续扩张架构，而是通过真实教师使用发现稳定性、交互和识别质量问题。
 
-当前产品仍是单教师、本地优先的 React + Express 应用，不是已经完成账号、权限、租户隔离和云存储的 SaaS。下一阶段应先完成一个可备份、可恢复、可观测的私有网页部署闭环，再决定是否进入多人 SaaS 架构。
+- 正式入口：`https://td.unreached.cn`
+- 运行机器：Cleo 的 MacBook，单实例 Node/Express 长期进程
+- 用户：管理员 Cleo 与最多两名受邀教师
+- 身份边界：邀请注册、密码登录、管理员权限、每教师独立工作区
+- 暂不承诺：校园网可达率、多人高并发、跨实例容灾和异地备份
 
 ## 2. Git 与协作基线
 
-- GitHub 是代码唯一基线。
-- 截至本文更新，最低基线为 `origin/main@fb09e151f435652e42c9501f631f884ced0b746f`，已包含 PR #6。
-- 每个新任务先执行 `git fetch origin`，再从最新 `origin/main` 创建独立的 `codex/<功能名>` 分支和 worktree。
-- 母文件夹 `/Users/cxc/Projects/DEMO` 当前可能检出其他分支，不得把它误认为 `main`。
-- 项目修改必须遵守根目录 `AGENTS.md`：先调查和提交具体修改方案，得到明确授权后再写入。
-- 真实环境变量只使用 `/Users/cxc/Projects/DEMO/.env`，不得提交、复制到文档或输出其值。
+- GitHub `origin/main` 是代码唯一稳定基线；当前为 `54ff5dc`，已包含 PR #17。
+- 母文件夹固定为 `/Users/cxc/Projects/DEMO`，正式服务只从这里运行，不从临时 worktree 运行。
+- 每个代码任务先 `git fetch origin`，再从最新 `origin/main` 创建独立的 `codex/<功能名>` 分支和 worktree。
+- 文档按用户约定可在母文件夹先同步 Git 后直接更新；代码仍不得在 `main` 上开发。
+- 修改必须遵守根目录 `AGENTS.md`：先只读调查并提交具体方案，得到明确授权后写入；推送、PR、合并和部署分别需要授权。
+- 真实环境变量只使用 `/Users/cxc/Projects/DEMO/.env`，不得提交、复制或输出其中的密钥。
 
-## 3. 已落地能力
-
-- 教师工作台、班级与学生管理、座位、班委体系、课表、日程和系统设置。
-- 学生画像与日常表现标签，以及班级/学生列表排序。
-- 作业图片 OCR、AI 试批、证据复核和教师终审流程。
-- PDF 资料上传、原生预览、分页 OCR、LaTeX 展示、解析耗时和任务状态。
-- OCR 内容进入资源检索数据，并可产生待教师确认的知识节点和母子关系建议。
-- 知识主干与资料编辑共用同一导航状态，桌面和移动视图已完成第一轮响应式适配。
-
-关键控制边界：OCR 和 AI 生成的是可追溯的草稿或建议；教师确认前，不应静默改变正式知识结构或评分结果。局部解析失败应隔离，不应阻塞已完成页面的查看。
-
-## 4. 当前运行结构
+## 3. 当前生产架构
 
 ```mermaid
 flowchart LR
-    U[教师浏览器] -->|HTTP| V[Vite 前端<br/>开发端口 3000]
-    V -->|/api 与 /uploads 代理| E[Express API<br/>默认端口 3001]
-    E --> R[(roster.sqlite)]
-    E --> K[(resources.sqlite)]
-    E --> F[var/uploads 与任务文件]
-    E --> O[PaddleOCR / 本地文档工具]
-    E --> M[OpenAI-compatible 模型服务]
+    U[教师浏览器] -->|HTTPS| C[Cloudflare Tunnel<br/>td.unreached.cn]
+    C -->|127.0.0.1:4317| E[单实例 Express]
+    E --> V[Vite dist 静态文件]
+    E --> A[同源 API 与受保护资料]
+    A --> S[(system/auth.sqlite)]
+    A --> W[(各教师 workspace SQLite)]
+    A --> F[各 workspace 上传与解析产物]
+    A --> P[PaddleOCR-VL 远程服务]
+    A --> M[OpenAI-compatible 模型服务]
 ```
 
-- 前端：React 19、Vite 6、TypeScript、Tailwind CSS。
-- API：Express 4，由 `tsx` 直接运行 TypeScript。
-- 数据：两个 SQLite 数据库、本地上传文件、解析产物和 JSON 任务状态。
-- 外部依赖：OpenAI-compatible 模型接口、PaddleOCR API；部分文档流程还依赖本机 `paddleocr`/Python 和 PDF 工具。
-- 健康检查：`GET /api/health`，目前只报告 API 存活和多模态模型是否配置。
+- 前端：React 19、Vite 6、TypeScript、Tailwind CSS；桌面和手机共用一个响应式应用。
+- 服务端：Express 5 同源托管生产前端、API 和受权限保护的资料内容。
+- 数据：系统认证库与每教师工作区的 SQLite、上传文件、OCR 产物和任务状态全部位于持久目录。
+- 后台：应用、Cloudflare Tunnel、每日变更检测备份由三个用户级 LaunchAgent 运行。
+- 健康检查：`/api/health/live` 与 `/api/health/ready`；后者检查存储并报告 AI、PaddleOCR 配置状态。
+- 长任务：OCR/AI 使用可查询状态；重启时进行中的任务标记为中断/失败，由用户重试，不阻塞已完成 PDF/OCR 查看。
 
-当前 `vite.config.ts` 中 `/api`、`/uploads` 代理仅服务开发环境；`server/index.ts` 不托管 `dist`。因此现状不能仅执行 `npm run build` 后当作完整生产服务，也不适合直接部署到纯静态托管平台。
+## 4. 数据权威性与恢复边界
 
-## 5. 权威本地数据
+- 原始母数据 `/Users/cxc/Projects/DEMO/var` 保留为不可直接试错的历史母数据。
+- 当前网页产品的运行权威数据为 `/Users/cxc/Projects/DEMO/var-product`。
+- 自动备份位于 `var-product/backups/automatic`，仅在数据变化时创建，保留最近两份成功快照。
+- 升级前独立恢复点位于 `/Users/cxc/Projects/DEMO/var/backups`，不参与自动清理。
+- 最新部署前恢复点：`product-2026-09-10T14-55-20-pre-pr17`，包含 198 个文件和 5 个 SQLite，清单哈希与完整性校验均通过。
+- 恢复必须落到新目录，禁止覆盖故障目录。若故障版本已经产生用户新写入，先冻结并导出差异，再单独审批数据合并。
 
-2026-09-06 已通过 SQLite 在线备份，把最新工作树数据同步到母文件夹：
+## 5. 已落地能力
 
-- `/Users/cxc/Projects/DEMO/var/data/roster.sqlite`
-- `/Users/cxc/Projects/DEMO/var/data/resources.sqlite`
-- `/Users/cxc/Projects/DEMO/var/uploads/`
-- `/Users/cxc/Projects/DEMO/var/data/grading-tasks.json`
-- `/Users/cxc/Projects/DEMO/var/data/parser-artifacts/`
+- 班级、学生、座位图、班委、课表、日程和系统设置。
+- 作业图片 OCR、AI 试批、证据复核、学情诊断和教师终审。
+- PDF 资料上传、分页 PaddleOCR、原文/OCR 阅读、知识检索与知识结构建议。
+- 邀请注册、管理员门禁、会话保护、跨用户工作区隔离和受保护资料下载。
+- 作息完整时间输入；80 MiB 上传限制和中文错误；资料会话缓存与请求去重。
+- PaddleOCR 原始块类型、Markdown、坐标和图片引用持久保存；表格、图片和公式安全渲染。
 
-同步后的核验结果：
+关键控制边界：OCR 与 AI 只产生可追溯草稿或建议；教师确认前不得静默改变正式知识结构或评分结果。局部解析失败应隔离，不阻塞已完成页面。
 
-| 数据 | 数量 |
-| --- | ---: |
-| 班级 | 4 |
-| 学生 | 53 |
-| 课表项目 | 46 |
-| 日程 | 24 |
-| 班委角色 / 委派 | 3 / 4 |
-| 上传资料 | 2 |
-| 资料页 | 522 |
-| 检索分块 | 220 |
-| 知识节点 / 关系 | 62 / 16 |
-| 待审发现 | 43 |
+## 6. PR #17 部署状态
 
-两库 `PRAGMA integrity_check` 均为 `ok`，资源库记录的两个 `disk_path` 已改为母文件夹绝对路径，关联原文件均存在。
+- PR：`https://github.com/CXC0515/demo/pull/17`
+- 生产提交：`54ff5dc`
+- 回填：2 个工作区、3 份资料、230 个候选块；安全更新 217 个内容块和 11 张页面底图。
+- 保留异常：两个没有既有内容块的历史页面不自动补写，需要用户主动重新解析。
+- 数据校验：两个 `resources.sqlite` 的 `integrity_check` 均为 `ok`；原始 PaddleOCR 标签没有被规范类型覆盖。
+- 服务验收：本机与公网 `ready` 为 200，存储、AI、PaddleOCR 均为 ready；公网与本地构建资源哈希一致；未登录资料 API 返回 401。
 
-同步前母文件夹数据库及被覆盖文件的恢复材料位于：
+详细实现与验证见 [RESOURCE_EDITOR_AND_SCHEDULE_UX_PLAN.md](./RESOURCE_EDITOR_AND_SCHEDULE_UX_PLAN.md)，运行和恢复操作见 [WEB_OPERATIONS_RUNBOOK.md](./WEB_OPERATIONS_RUNBOOK.md) 与 [WEB_DATA_MIGRATION_RUNBOOK.md](./WEB_DATA_MIGRATION_RUNBOOK.md)。
 
-`/Users/cxc/Projects/DEMO/var/backups/pre-deployment-sync-20260906-195251/`
+## 7. 当前风险与下一步
 
-SQLite 使用 WAL 模式。后续迁移不得只复制主 `.sqlite` 文件；应使用 SQLite 在线备份并在迁移后检查完整性、关键表数量和资料文件存在性。
+1. Cloudflare 免费网络不保证中国大陆校园网可达或高速；继续用真实学校网络、三网和微信内置浏览器观察，不扩大邀请范围。
+2. 生产依赖 MacBook 的供电、网络和本地磁盘；自动备份同盘，不能抵御整机丢失或物理损坏。
+3. PaddleOCR 与模型服务可能排队或短暂返回 5xx；保留阶段状态、有限重试和人工重试入口。
+4. 两个历史 OCR 页面缺少可一一对应的旧内容块，保持原状，重新解析后才进入新结构。
+5. `npm ci` 仍报告 4 项既有依赖审计问题（1 low、2 moderate、1 high）；尚未评估破坏性升级，不能直接运行 `npm audit fix --force`。
 
-## 6. 本地启动
+## 8. 修改历史
 
-在从最新 `origin/main` 创建的工作树中安装依赖，并让进程读取母文件夹 `.env`。数据库和上传路径是相对当前工作目录解析的；如不复制数据，应显式设置绝对路径或建立经过确认的数据挂载方案。
-
-开发模式：
-
-```bash
-npm install
-node --env-file=/Users/cxc/Projects/DEMO/.env node_modules/tsx/dist/cli.mjs server/index.ts
-npm run dev
-```
-
-默认访问地址是 `http://localhost:3000`，API 是 `http://localhost:3001`。
-
-提交前按影响范围运行：
-
-```bash
-npm run lint
-npm run test:roster
-npm run test:classroom
-npm run test:schedule
-npm run test:resources
-npm run build
-```
-
-涉及批改、视觉识别时，再运行对应的 `test:grading-*` 和 `test:vision-validation`。
-
-## 7. 网页部署前的阻塞项
-
-1. **生产入口缺失**：API 目前不托管构建后的前端，没有统一的生产启动脚本和优雅退出。
-2. **持久化依赖单机文件系统**：SQLite、上传文件、解析产物必须位于持久卷，不能部署到会随实例重建而丢盘的纯无状态环境。
-3. **身份边界缺失**：当前没有可靠的登录、会话、权限和租户隔离；公开暴露会泄露学生与教学资料。
-4. **后台任务不耐重启**：OCR 任务在进程内执行，服务重启会把运行中任务标记为中断，尚无持久队列和自动恢复。
-5. **资源与超时未定**：资料上传可达数百 MB，OCR/AI 可能持续数分钟；反向代理、平台请求体、请求超时和并发限制必须明确。
-6. **运行依赖未封装**：本地 Python、PaddleOCR 和 PDF 工具是否进入镜像、是否改用远程服务，尚未作出部署决策。
-7. **备份恢复未产品化**：已有本地快照，但没有定时备份、异地副本、恢复演练和数据保留策略。
-8. **配置清单不完整**：代码支持 `RESOURCE_DB_PATH`，但 `.env.example` 尚未列出；生产环境变量和启动时校验需要统一。
-
-## 8. 推荐部署路径
-
-最短可验证路径是“单实例 Node 服务 + 持久磁盘 + 同源前后端 + 私有访问保护”：
-
-- Express 同源托管 `dist`、`/api` 和受控的资料下载入口。
-- SQLite、`var/uploads`、解析产物和备份目录统一挂载到持久卷。
-- 在公开互联网之前至少加入可靠的单用户登录或平台访问门禁、HTTPS 和安全响应头。
-- 增加启动配置校验、就绪/存活检查、结构化日志、优雅退出和备份脚本。
-- 先迁移母文件夹真实数据的副本并完成一次恢复演练，再切换权威数据位置。
-
-这条路径适合当前单教师验证，成本和迁移风险最低。只有在明确需要多教师并发、跨实例伸缩或协作编辑后，再进入 PostgreSQL + 对象存储 + 持久任务队列的第二阶段；不要为了“未来 SaaS”提前改写全部数据层。
-
-## 9. 下一任务入口
-
-执行部署任务前，将 [WEB_DEPLOYMENT_PROMPT.md](./WEB_DEPLOYMENT_PROMPT.md) 作为启动提示词。下一任务先完成只读部署审计与决策确认，不应在平台、域名、访问范围和预算未明确时直接写部署代码。
+| 版本 | 日期 | 状态 | 修改概要 |
+| --- | --- | --- | --- |
+| v1.0 | 2026-09-06 | 已归档 | 记录本地原型、母数据同步和网页部署前阻塞项。 |
+| v2.0 | 2026-09-10 | 当前 | 重写为真实生产交接：记录邀请登录、工作区隔离、`var-product`、Cloudflare Tunnel、LaunchAgent、PR #17 OCR 富内容迁移、恢复点和当前试用风险。 |
