@@ -6,6 +6,8 @@
 import React, { useEffect, useState } from 'react';
 import { BookOpen, Database, Palette, Pencil, Plus, Save, Settings2, Sliders, Trash2, UserRound } from 'lucide-react';
 import { CommitteeRole, ScheduleItem, SchedulePeriod, SchoolClass, TeacherProfile } from '../../domain/types';
+import ScheduleTimeInput from '../../components/ScheduleTimeInput';
+import { isScheduleTime } from '../../domain/scheduleTime';
 import AccountAccessPanel from './AccountAccessPanel';
 import { useAuth } from '../auth/AuthGate';
 
@@ -147,8 +149,9 @@ export default function SystemSettingsPanel({
 
   const saveSchedulePeriodSettings = async (announce = true) => {
     if (!hasUnsavedScheduleChanges) return true;
-    if (localSchedulePeriods.some(period => !period.label.trim() || period.startTime >= period.endTime)) {
-      const message = '请检查学校作息：名称不能为空，结束时间须晚于开始时间';
+    const invalidPeriod = localSchedulePeriods.find(period => !period.label.trim() || !isScheduleTime(period.startTime) || !isScheduleTime(period.endTime) || period.startTime >= period.endTime);
+    if (invalidPeriod) {
+      const message = `${invalidPeriod.label.trim() || `第 ${invalidPeriod.period} 节`}的时间不正确：请填写完整时间，且结束时间须晚于开始时间`;
       setScheduleSaveError(message);
       onShowToast(message);
       return false;
@@ -290,24 +293,23 @@ export default function SystemSettingsPanel({
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   {hasUnsavedScheduleChanges && <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400">有未保存修改</span>}
-                  <button type="button" onClick={removeLastSchedulePeriod} disabled={localSchedulePeriods.length <= 1} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-500 disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-950"><Trash2 className="h-3.5 w-3.5"/>减少一节</button>
-                  <button type="button" onClick={addSchedulePeriod} disabled={localSchedulePeriods.length >= 12} className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs font-bold text-emerald-700 disabled:opacity-40 dark:border-emerald-900 dark:bg-zinc-950 dark:text-emerald-300"><Plus className="h-3.5 w-3.5"/>增加一节</button>
-                  <button type="button" onClick={() => void saveSchedulePeriodSettings()} disabled={!hasUnsavedScheduleChanges || isScheduleSaving} className="inline-flex min-w-[78px] items-center justify-center rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white disabled:bg-slate-300 dark:disabled:bg-zinc-700">{isScheduleSaving ? '保存中…' : hasUnsavedScheduleChanges ? '保存作息' : '已同步'}</button>
+                  <button type="button" onClick={removeLastSchedulePeriod} disabled={localSchedulePeriods.length <= 1} className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500 disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-950"><Trash2 className="h-3.5 w-3.5"/>减少一节</button>
+                  <button type="button" onClick={addSchedulePeriod} disabled={localSchedulePeriods.length >= 12} className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-bold text-emerald-700 disabled:opacity-40 dark:border-emerald-900 dark:bg-zinc-950 dark:text-emerald-300"><Plus className="h-3.5 w-3.5"/>增加一节</button>
+                  <button type="button" onClick={() => void saveSchedulePeriodSettings()} disabled={!hasUnsavedScheduleChanges || isScheduleSaving} className="inline-flex min-h-11 min-w-[88px] items-center justify-center rounded-xl bg-emerald-700 px-3 py-2 text-xs font-bold text-white disabled:bg-slate-300 dark:disabled:bg-zinc-700">{isScheduleSaving ? '保存中…' : hasUnsavedScheduleChanges ? '保存作息' : '已同步'}</button>
                 </div>
               </div>
               {scheduleSaveError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">{scheduleSaveError}</p>}
               <div className="grid gap-2 sm:grid-cols-2">
                 {localSchedulePeriods.map((period, index) => (
-                  <div key={period.period} className="grid grid-cols-[1fr_12px_1fr] items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 sm:grid-cols-[76px_1fr_12px_1fr] dark:border-zinc-700 dark:bg-zinc-950">
+                  <div key={period.period} className="grid grid-cols-2 items-end gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[96px_1fr_1fr] dark:border-zinc-700 dark:bg-zinc-950">
                     <input
                       value={period.label}
                       aria-label={`第${period.period}节名称`}
                       onChange={event => updateSchedulePeriod(index, { label: event.target.value })}
-                      className="col-span-3 min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs font-bold sm:col-span-1 dark:border-zinc-700 dark:bg-zinc-900"
+                      className="col-span-2 min-h-11 min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-base font-bold sm:col-span-1 dark:border-zinc-700 dark:bg-zinc-900"
                     />
-                    <input type="time" value={period.startTime} aria-label={`${period.label}开始时间`} onChange={event => updateSchedulePeriod(index, { startTime: event.target.value })} className="min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900" />
-                    <span className="text-center text-slate-400">—</span>
-                    <input type="time" value={period.endTime} aria-label={`${period.label}结束时间`} onChange={event => updateSchedulePeriod(index, { endTime: event.target.value })} className="min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900" />
+                    <ScheduleTimeInput id={`period-${period.period}-start`} label="开始时间" value={period.startTime} onChange={startTime => updateSchedulePeriod(index, { startTime })} onInvalid={message => setScheduleSaveError(message)} />
+                    <ScheduleTimeInput id={`period-${period.period}-end`} label="结束时间" value={period.endTime} onChange={endTime => updateSchedulePeriod(index, { endTime })} onInvalid={message => setScheduleSaveError(message)} />
                   </div>
                 ))}
               </div>

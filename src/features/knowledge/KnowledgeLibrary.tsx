@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Boxes, Network } from "lucide-react";
 import {
   KnowledgeGraphSnapshot,
@@ -11,7 +11,6 @@ import {
   ResourceDetail,
 } from "../../domain/types";
 import {
-  getKnowledgeGraph,
   getLibraryResource,
   listLibraryResources,
 } from "../../services/resourceApi";
@@ -20,8 +19,10 @@ import ResourceLibraryEditor from "./ResourceLibraryEditor";
 
 interface KnowledgeLibraryProps {
   mode: "graph" | "editor";
+  active: boolean;
+  graph: KnowledgeGraphSnapshot | null;
   onSwitchMode: (mode: "graph" | "editor") => void;
-  onKnowledgeChanged: () => Promise<void>;
+  onKnowledgeChanged: (force?: boolean) => Promise<KnowledgeGraphSnapshot>;
   onShowToast: (message: string) => void;
 }
 
@@ -37,18 +38,21 @@ const emptyGraph: KnowledgeGraphSnapshot = {
 
 export default function KnowledgeLibrary({
   mode,
+  active,
+  graph: graphSnapshot,
   onSwitchMode,
   onKnowledgeChanged,
   onShowToast,
 }: KnowledgeLibraryProps) {
   const [resources, setResources] = useState<LibraryResource[]>([]);
-  const [graph, setGraph] = useState<KnowledgeGraphSnapshot>(emptyGraph);
+  const graph = graphSnapshot ?? emptyGraph;
   const [selectedResourceId, setSelectedResourceId] = useState("");
   const [detail, setDetail] = useState<ResourceDetail | null>(null);
   const [selectedPage, setSelectedPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [narrowLayout, setNarrowLayout] = useState(false);
   const [openReaderOnCompact, setOpenReaderOnCompact] = useState(false);
+  const loadedRef = useRef(false);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 1023px)");
@@ -68,18 +72,18 @@ export default function KnowledgeLibrary({
     setSelectedPage((current) =>
       Math.min(Math.max(current, 1), next.pageCount ?? 1),
     );
+    return next;
   }, []);
 
   const loadAll = useCallback(
-    async (preferredResourceId?: string) => {
-      setLoading(true);
+    async (preferredResourceId?: string, forceGraph = false) => {
+      if (!loadedRef.current) setLoading(true);
       try {
-        const [nextResources, nextGraph] = await Promise.all([
+        const [nextResources] = await Promise.all([
           listLibraryResources(),
-          getKnowledgeGraph(),
+          onKnowledgeChanged(forceGraph),
         ]);
         setResources(nextResources);
-        setGraph(nextGraph);
         const resourceId =
           preferredResourceId &&
           nextResources.some((item) => item.id === preferredResourceId)
@@ -90,7 +94,7 @@ export default function KnowledgeLibrary({
               : (nextResources[0]?.id ?? "");
         setSelectedResourceId(resourceId);
         await loadResourceDetail(resourceId);
-        await onKnowledgeChanged();
+        loadedRef.current = true;
       } catch (error) {
         onShowToast(
           `资料库加载失败：${error instanceof Error ? error.message : "未知错误"}`,
@@ -103,22 +107,23 @@ export default function KnowledgeLibrary({
   );
 
   useEffect(() => {
-    void loadAll();
-  }, []);
+    if (active && !loadedRef.current) void loadAll();
+  }, [active, loadAll]);
 
   useEffect(() => {
-    if (detail?.status !== "processing") return;
+    if (!active || detail?.status !== "processing") return;
     const timer = window.setInterval(() => {
       void loadResourceDetail(detail.id)
-        .then(() => Promise.all([listLibraryResources(), getKnowledgeGraph()]))
-        .then(([nextResources, nextGraph]) => {
+        .then(async (nextDetail) => {
+          if (nextDetail.status === "processing") return;
+          const nextResources = await listLibraryResources();
           setResources(nextResources);
-          setGraph(nextGraph);
+          await onKnowledgeChanged(true);
         })
         .catch(() => undefined);
     }, 1800);
     return () => window.clearInterval(timer);
-  }, [detail?.id, detail?.status, loadResourceDetail]);
+  }, [active, detail?.id, detail?.status, loadResourceDetail, onKnowledgeChanged]);
 
   const selectResource = (resourceId: string) => {
     setSelectedResourceId(resourceId);
@@ -134,9 +139,7 @@ export default function KnowledgeLibrary({
   };
 
   const reloadGraph = async () => {
-    const next = await getKnowledgeGraph();
-    setGraph(next);
-    await onKnowledgeChanged();
+    await onKnowledgeChanged(true);
     if (detail) await loadResourceDetail(detail.id);
   };
 
@@ -204,7 +207,7 @@ export default function KnowledgeLibrary({
           openReaderOnCompact={openReaderOnCompact}
           onSelectResource={selectResource}
           onOpenPage={setSelectedPage}
-          onDataChanged={loadAll}
+          onDataChanged={(resourceId) => loadAll(resourceId, true)}
           onShowToast={onShowToast}
         />
       )}

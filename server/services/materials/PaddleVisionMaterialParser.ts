@@ -25,6 +25,18 @@ export interface PaddleVisionParserOptions {
   profile?: 'full' | 'schedule';
 }
 
+export const normalizePaddleBlockType = (sourceType: string) => sourceType.toLowerCase().includes('title')
+  ? 'heading' as const
+  : sourceType.toLowerCase().includes('formula')
+    ? 'formula' as const
+    : sourceType.toLowerCase().includes('table')
+      ? 'table' as const
+      : sourceType.toLowerCase().includes('image')
+        ? 'image' as const
+        : sourceType.toLowerCase().includes('list')
+          ? 'list-item' as const
+          : 'paragraph' as const;
+
 export class PaddleVisionMaterialParser implements MaterialParser {
   constructor(private readonly config: DocumentParserConfig, private readonly parserOptions: PaddleVisionParserOptions = {}) {}
 
@@ -83,22 +95,26 @@ export class PaddleVisionMaterialParser implements MaterialParser {
         }))
       });
       const resourceDirectory = uploadFilePath('parsed', input.assetId, 'resources');
-      await mkdir(resourceDirectory, { recursive: true });
+      const pageImageDirectory = uploadFilePath('parsed', input.assetId, 'page-images');
+      await Promise.all([mkdir(resourceDirectory, { recursive: true }), mkdir(pageImageDirectory, { recursive: true })]);
       const resourcePlans = scheduleProfile ? [] : result.pages.flatMap((page, pageIndex) => [
         ...(page.inputImageUrl ? [{
           fileName: `page-${pageOffset + pageIndex + 1}-source.jpg`,
+          sourceName: `input-page-${pageOffset + pageIndex + 1}`,
           resourceUrl: page.inputImageUrl,
           role: 'source-page' as const,
           pageNumber: pageOffset + pageIndex + 1
         }] : []),
         ...Object.entries(page.markdownImages).map(([resourceName, resourceUrl], resourceIndex) => ({
           fileName: `page-${pageOffset + pageIndex + 1}-content-${resourceIndex + 1}${path.extname(resourceName) || '.jpg'}`,
+          sourceName: resourceName,
           resourceUrl,
           role: 'content' as const,
           pageNumber: pageOffset + pageIndex + 1
         })),
         ...Object.entries(page.outputImages).map(([resourceName, resourceUrl], resourceIndex) => ({
           fileName: `page-${pageOffset + pageIndex + 1}-${resourceName.replace(/[^a-zA-Z0-9._-]/g, '-')}-${resourceIndex + 1}${path.extname(new URL(resourceUrl).pathname) || '.jpg'}`,
+          sourceName: resourceName,
           resourceUrl,
           role: 'layout-visualization' as const,
           pageNumber: pageOffset + pageIndex + 1
@@ -108,10 +124,13 @@ export class PaddleVisionMaterialParser implements MaterialParser {
       const downloadingStartedAt = performance.now();
       const savedResources = await Promise.all(resourcePlans.map(async plan => ({
         ...plan,
-        resourcePath: await client.saveResource(plan.resourceUrl, resourceDirectory, {
-          overwrite: true,
-          filename: plan.fileName
-        })
+        resourcePath: await client.saveResource(
+          plan.resourceUrl,
+          plan.role === 'source-page'
+            ? path.join(pageImageDirectory, `page-${plan.pageNumber}.jpg`)
+            : path.join(resourceDirectory, plan.fileName),
+          { overwrite: true }
+        )
       })));
       metrics.downloadingMs = Math.round(performance.now() - downloadingStartedAt);
       input.onProgress?.('enhancing', metrics);
@@ -126,6 +145,11 @@ export class PaddleVisionMaterialParser implements MaterialParser {
         code: 'PADDLEOCR_EMPTY_PAGE',
         message: `第 ${index + 1} 页没有生成可用的 Markdown。`
       }]);
+      const publicUrlForResource = (resource: typeof savedResources[number]) => input.publicAssetBaseUrl
+        ? resource.role === 'source-page'
+          ? `${input.publicAssetBaseUrl}/pages/${resource.pageNumber}/image`
+          : `${input.publicAssetBaseUrl}/derived/resources/${encodeURIComponent(path.basename(resource.resourcePath))}`
+        : '';
       return {
         assetId: input.assetId,
         sourceFormat: input.mimeType === 'application/pdf' ? 'pdf' as const : 'image' as const,
@@ -144,23 +168,29 @@ export class PaddleVisionMaterialParser implements MaterialParser {
           };
           const pageWidth = pageResult.width;
           const pageHeight = pageResult.height;
-          return pageResult.parsing_res_list
-            .filter(block => block.block_content.trim())
-            .map((block, blockIndex) => {
+          const pageBlocks = pageResult.parsing_res_list.filter(block => block.block_content.trim());
+          const pageContentResources = savedResources.filter(resource => resource.role === 'content' && resource.pageNumber === pageOffset + pageIndex + 1);
+          return pageBlocks.map((block, blockIndex) => {
               const [left, top, right, bottom] = block.block_bbox;
-              const type = block.block_label.includes('title')
-                ? 'heading' as const
-                : block.block_label.includes('formula')
-                  ? 'formula' as const
-                  : block.block_label.includes('table')
-                    ? 'table' as const
-                    : 'paragraph' as const;
+              const type = normalizePaddleBlockType(block.block_label);
+              const explicitlyLinkedResources = pageContentResources.filter(resource => block.block_content.includes(resource.sourceName));
+              const imageOrdinal = type === 'image'
+                ? pageBlocks.slice(0, blockIndex + 1).filter(candidate => normalizePaddleBlockType(candidate.block_label) === 'image').length - 1
+                : -1;
+              const blockResourceUrls = (explicitlyLinkedResources.length
+                ? explicitlyLinkedResources
+                : type === 'image' && pageContentResources[imageOrdinal]
+                  ? [pageContentResources[imageOrdinal]]
+                  : [])
+                .map(publicUrlForResource);
               return {
                 id: `page-${pageIndex + 1}-block-${block.block_id}`,
                 order: pageIndex * 10_000 + (block.block_order ?? blockIndex),
                 type,
+                sourceType: block.block_label,
                 text: block.block_content.trim(),
                 markdown: block.block_content.trim(),
+                resourceUrls: blockResourceUrls,
                 pageNumber: pageOffset + pageIndex + 1,
                 boundingBox: {
                   x: left / pageWidth,
@@ -176,7 +206,7 @@ export class PaddleVisionMaterialParser implements MaterialParser {
           fileName: path.basename(resource.resourcePath),
           mimeType: path.extname(resource.resourcePath).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg',
           publicUrl: input.publicAssetBaseUrl
-            ? `${input.publicAssetBaseUrl}/derived/resources/${encodeURIComponent(path.basename(resource.resourcePath))}`
+            ? publicUrlForResource(resource)
             : '',
           role: resource.role,
           pageNumber: resource.pageNumber

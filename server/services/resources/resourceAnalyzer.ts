@@ -61,6 +61,22 @@ export interface ResourceAnalysisResult {
   suggestions: DiscoverySuggestion[];
 }
 
+const decodeBasicEntities = (value: string) => value
+  .replace(/&nbsp;/gi, " ")
+  .replace(/&lt;/gi, "<")
+  .replace(/&gt;/gi, ">")
+  .replace(/&amp;/gi, "&")
+  .replace(/&quot;/gi, '"')
+  .replace(/&#39;/gi, "'");
+
+export const richBlockToPlainText = (value: string) => decodeBasicEntities(value
+  .replace(/<\/(td|th)>/gi, "\t")
+  .replace(/<\/tr>/gi, "\n")
+  .replace(/<br\s*\/?>/gi, "\n")
+  .replace(/<[^>]+>/g, "")
+  .replace(/[ \t]+\n/g, "\n")
+  .trim());
+
 export const buildResourceChunks = (
   resource: LibraryResource,
   document: NormalizedDocument,
@@ -95,8 +111,11 @@ export const buildResourceChunks = (
       }
       chunks.push({
         id: `${resource.id}:content:${stableBlockId}`, resourceId: resource.id, parentId: sectionId, level: "content",
-        title: block.type === "heading" ? block.text.slice(0, 80) : `第 ${pageNumber} 页内容`,
-        summary: "", text: block.text, tags: [], pageStart: pageNumber, pageEnd: pageNumber,
+        sourceType: block.sourceType,
+        contentType: block.type,
+        title: block.type === "heading" ? richBlockToPlainText(block.text).slice(0, 80) : `第 ${pageNumber} 页内容`,
+        summary: "", text: richBlockToPlainText(block.text), markdown: block.markdown ?? block.text,
+        resourceUrls: block.resourceUrls ?? [], tags: [], pageStart: pageNumber, pageEnd: pageNumber,
         boundingBox: block.boundingBox, order: pageNumber * 1_000_000 + index + 1,
       });
     });

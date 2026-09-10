@@ -10,7 +10,7 @@ import { createNavGroups, PageId } from './app/navigation';
 // Import Types and Mock Data
 import {
   Student, SchoolClass, WorkbenchTask, ScheduleItem, SchedulePeriod,
-  TimerReminder, ReviewItem, WorkflowState, TeacherObservation, RosterStudent, KnowledgeNode, CommitteeRole, CommitteeAssignment, TeacherProfile, ClassroomLayout
+  TimerReminder, ReviewItem, WorkflowState, TeacherObservation, RosterStudent, KnowledgeNode, CommitteeRole, CommitteeAssignment, TeacherProfile, ClassroomLayout, KnowledgeGraphSnapshot
 } from './domain/types';
 import { createEmptyWorkflowState } from './domain/gradingTask';
 import { listGradingTasks, saveGradingTask } from './services/gradingTaskApi';
@@ -101,10 +101,19 @@ export default function App() {
   const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([]);
   const [workflowStates, setWorkflowStates] = useState<Record<string, WorkflowState>>({});
   const [knowledgeNodes, setKnowledgeNodes] = useState<KnowledgeNode[]>([]);
+  const [knowledgeGraph, setKnowledgeGraph] = useState<KnowledgeGraphSnapshot | null>(null);
+  const knowledgeGraphCacheRef = useRef<KnowledgeGraphSnapshot | null>(null);
+  const knowledgeGraphRequestRef = useRef<Promise<KnowledgeGraphSnapshot> | null>(null);
   const [teacherProfile, setTeacherProfile] = useState<TeacherProfile>(authState.profile);
 
-  const loadKnowledgeCatalog = useCallback(async () => {
-    const graph = await getKnowledgeGraph();
+  const loadKnowledgeCatalog = useCallback(async (force = false) => {
+    if (!force && knowledgeGraphCacheRef.current) return knowledgeGraphCacheRef.current;
+    knowledgeGraphRequestRef.current ??= getKnowledgeGraph().finally(() => {
+      knowledgeGraphRequestRef.current = null;
+    });
+    const graph = await knowledgeGraphRequestRef.current;
+    knowledgeGraphCacheRef.current = graph;
+    setKnowledgeGraph(graph);
     setKnowledgeNodes(graph.nodes
       .filter(node => node.type === 'knowledge' || node.type === 'ability')
       .map(node => ({
@@ -115,6 +124,7 @@ export default function App() {
         desc: node.description,
         weight: 3
       })));
+    return graph;
   }, []);
 
   // Toast notifications state
@@ -723,16 +733,18 @@ export default function App() {
             />
           )}
 
-          {(activePage === 'knowledge-graph' || activePage === 'library-editor') && (
+          <div className={activePage === 'knowledge-graph' || activePage === 'library-editor' ? 'contents' : 'hidden'} aria-hidden={activePage !== 'knowledge-graph' && activePage !== 'library-editor'}>
             <KnowledgeLibrary
               mode={activePage === 'knowledge-graph' ? 'graph' : 'editor'}
+              active={activePage === 'knowledge-graph' || activePage === 'library-editor'}
+              graph={knowledgeGraph}
               onSwitchMode={(mode) => {
                 setActivePage(mode === 'graph' ? 'knowledge-graph' : 'library-editor');
               }}
               onKnowledgeChanged={loadKnowledgeCatalog}
               onShowToast={triggerToast}
             />
-          )}
+          </div>
 
           {activePage === 'tag-mgmt' && (
             <TagManagement onShowToast={triggerToast} />
