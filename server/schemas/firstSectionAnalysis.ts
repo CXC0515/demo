@@ -10,7 +10,11 @@ const evidenceSchema = z.object({
   assetId: z.string().min(1),
   fileName: z.string().min(1),
   blockIds: z.array(z.string()),
-  quote: z.string()
+  quote: z.string(),
+  segments: z.array(z.object({
+    blockId: z.string().min(1),
+    quote: z.string().min(1)
+  }))
 });
 
 const rubricPointSchema = z.object({

@@ -15,6 +15,12 @@ export interface StoredMaterial extends DocumentAsset {
 const store = () => workspaceMapStore<StoredMaterial[]>('materials.json');
 
 export const appendMaterialList = (current: StoredMaterial[], materials: StoredMaterial[]) => [...current, ...materials];
+export const removeMaterialListById = (current: StoredMaterial[], kind: StoredMaterial['kind'], materialIds: string[]) => {
+  const requested = new Set(materialIds);
+  const removed = current.filter(material => material.kind === kind && requested.has(material.id));
+  const removedIds = new Set(removed.map(material => material.id));
+  return { removed, remaining: current.filter(material => !removedIds.has(material.id)) };
+};
 
 export const replaceMaterialsForKind = (taskId: string, kind: StoredMaterial['kind'], materials: StoredMaterial[]) => {
   const { values: taskMaterials, persist: persistMaterials } = store();
@@ -43,11 +49,11 @@ export const updateMaterial = (taskId: string, materialId: string, update: Parti
   return next;
 };
 
-export const removeMaterialsForKind = (taskId: string, kind: StoredMaterial['kind']) => {
+export const removeMaterialsById = (taskId: string, kind: StoredMaterial['kind'], materialIds: string[]) => {
   const { values: taskMaterials, persist: persistMaterials } = store();
   const current = taskMaterials.get(taskId) ?? [];
-  const removed = current.filter(material => material.kind === kind);
-  taskMaterials.set(taskId, current.filter(material => material.kind !== kind));
+  const { removed, remaining } = removeMaterialListById(current, kind, materialIds);
+  taskMaterials.set(taskId, remaining);
   persistMaterials();
   return removed;
 };

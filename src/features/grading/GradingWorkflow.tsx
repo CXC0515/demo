@@ -30,6 +30,7 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  Trash2,
   Upload,
   UserCheck,
   Users,
@@ -65,7 +66,7 @@ import {
 } from '../../domain/types';
 import { orderCalibrationSamplesForTrial } from '../../domain/calibrationSamples';
 import SourceEvidenceViewer from './SourceEvidenceViewer';
-import { analyzeTaskMaterials, confirmBatchStudents, correctTrialOcr, getBatchGrading, getGradingDiagnosis, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, regradeTrialQuestion, runVisionValidation, saveTaskQuestionCorrection, saveTaskRubric, saveTeacherReview, setBatchGradingAction, startBatchGrading, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
+import { analyzeTaskMaterials, confirmBatchStudents, correctTrialOcr, getBatchGrading, getGradingDiagnosis, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, regradeTrialQuestion, removeStudentSubmissions, runVisionValidation, saveTaskQuestionCorrection, saveTaskRubric, saveTeacherReview, setBatchGradingAction, startBatchGrading, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
 import { listRosterClasses, listRosterStudents, matchRosterSubmissions } from '../../services/rosterApi';
 import { buildSubmissionPages, getReadableStudentNos, reconcileSubmissionRoster } from '../../domain/submissionRoster';
 
@@ -296,6 +297,9 @@ function AnalysisEvidenceDetails({ unit, scopeLabel }: { unit: AnalyzedQuestionU
     pageNumber: reference.pageNumber ?? 1,
     boundingBox: reference.boundingBox ?? { x: 0, y: 0, width: 1, height: 1 },
     ocrText: reference.quote,
+    blockIds: reference.blockIds,
+    segments: reference.segments,
+    isPartialBlock: reference.isPartialBlock,
     confidence: unit.confidence,
     imageUrl: reference.imageUrl,
     sourcePageUrl: reference.sourcePageUrl,
@@ -611,6 +615,10 @@ export default function GradingWorkflow({
   const [submissionFiles, setSubmissionFiles] = useState<File[]>([]);
   const [submissionUploadPhase, setSubmissionUploadPhase] = useState<'idle' | 'uploading' | 'parsing' | 'error'>('idle');
   const [submissionUploadError, setSubmissionUploadError] = useState<string | null>(null);
+  const [submissionManagement, setSubmissionManagement] = useState(false);
+  const [selectedSubmissionIds, setSelectedSubmissionIds] = useState<Set<string>>(() => new Set());
+  const [showSubmissionDeleteConfirm, setShowSubmissionDeleteConfirm] = useState(false);
+  const [submissionDeletePhase, setSubmissionDeletePhase] = useState<'idle' | 'deleting'>('idle');
   const [trialGradingPhase, setTrialGradingPhase] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [trialGradingError, setTrialGradingError] = useState<string | null>(null);
   const [trialProgress, setTrialProgress] = useState<{ phase: 'idle' | 'recognition' | 'grading' | 'complete' | 'error'; completed: number; total: number; currentLabel: string; startedAt: number | null; elapsedSeconds: number }>({ phase: 'idle', completed: 0, total: 0, currentLabel: '', startedAt: null, elapsedSeconds: 0 });
@@ -701,6 +709,9 @@ export default function GradingWorkflow({
     setMaterialUploadPhase('idle');
     setMaterialUploadError(null);
     setAnalysisErrorCode(null);
+    setSubmissionManagement(false);
+    setSelectedSubmissionIds(new Set());
+    setShowSubmissionDeleteConfirm(false);
   }, [selectedTask.id]);
 
   const updateAssignment = (updated: Partial<WorkflowState['assignment']>) => {
@@ -854,9 +865,7 @@ export default function GradingWorkflow({
     onShowToast('学号已更新，正在按当前班级名册重新匹配');
   };
 
-  const currentQuestionNos = [...new Set(selectedQuestions
-    .map(question => question.displayNo.match(/^\d+/)?.[0])
-    .filter((value): value is string => Boolean(value)))];
+  const currentQuestionNos = [...new Set(selectedQuestions.map(question => question.displayNo).filter(Boolean))];
 
   const openSubmissionPreview = (assetId: string) => {
     setExpandedOcrPageId(current => current === assetId ? null : assetId);
@@ -883,7 +892,16 @@ export default function GradingWorkflow({
       const code = error instanceof Error ? error.message : 'VISION_VALIDATION_FAILED';
       setVisionValidationPhase(current => ({ ...current, [assetId]: 'error' }));
       setVisionValidationError(current => ({ ...current, [assetId]: code }));
-      if (notify) onShowToast(code === 'VISION_VALIDATION_INPUT_NOT_READY' ? '该答卷需要重新解析后才能按题识别' : '原图识别失败，请检查模型服务');
+      if (notify) {
+        const message = code === 'VISION_VALIDATION_INPUT_NOT_READY'
+          ? '该答卷需要重新解析后才能按题识别'
+          : code === 'SOURCE_PAGE_FILE_NOT_FOUND'
+            ? '该答卷的原始页面文件缺失，请重新解析后重试'
+            : code === 'MODEL_REQUEST_FAILED:429'
+              ? 'AI 原图识别请求频率受限，请稍后单独重试'
+              : 'AI 原图识别失败，当前答卷已保留，可单独重试';
+        onShowToast(message);
+      }
     }
   };
 
@@ -898,6 +916,68 @@ export default function GradingWorkflow({
     setSubmissionUploadPhase('idle');
     setSubmissionUploadError(null);
     onUpdateState({ uploadedCount: files.length });
+  };
+
+  const removePendingSubmissionFile = (index: number) => {
+    setSubmissionFiles(current => current.filter((_, fileIndex) => fileIndex !== index));
+    setSubmissionUploadPhase('idle');
+    setSubmissionUploadError(null);
+  };
+
+  const toggleSubmissionSelection = (assetId: string) => setSelectedSubmissionIds(current => {
+    const next = new Set(current);
+    if (next.has(assetId)) next.delete(assetId);
+    else next.add(assetId);
+    return next;
+  });
+
+  const removableDisplayedIds = displayedRows.flatMap(row => {
+    const asset = submissionAssets.find(item => item.id === row.id);
+    return asset && asset.status !== 'processing' && asset.status !== 'uploaded' ? [row.id] : [];
+  });
+  const selectedSubmissionAssets = submissionAssets.filter(asset => selectedSubmissionIds.has(asset.id));
+
+  const toggleAllDisplayedSubmissions = () => setSelectedSubmissionIds(current => {
+    const next = new Set(current);
+    const allSelected = removableDisplayedIds.length > 0 && removableDisplayedIds.every(id => next.has(id));
+    removableDisplayedIds.forEach(id => allSelected ? next.delete(id) : next.add(id));
+    return next;
+  });
+
+  const deleteSelectedSubmissions = async () => {
+    const assetIds = [...selectedSubmissionIds];
+    if (!assetIds.length) return;
+    setSubmissionDeletePhase('deleting');
+    try {
+      await removeStudentSubmissions(selectedTask.id, assetIds);
+      const materials = await getTaskMaterials(selectedTask.id);
+      const removed = new Set(assetIds);
+      const nextStates = questionStates.map(state => ({
+        ...state,
+        calibrationSamples: state.calibrationSamples.filter(sample => !sample.sourceAssetId || !removed.has(sample.sourceAssetId))
+      }));
+      setQuestionStates(nextStates);
+      setBatch(null);
+      setExpandedOcrPageId(null);
+      setVisionValidationByAsset(current => Object.fromEntries(Object.entries(current).filter(([assetId]) => !removed.has(assetId))));
+      setVisionValidationPhase(current => Object.fromEntries(Object.entries(current).filter(([assetId]) => !removed.has(assetId))));
+      setVisionValidationError(current => Object.fromEntries(Object.entries(current).filter(([assetId]) => !removed.has(assetId))));
+      onUpdateState({
+        assignment: { ...workflowState.assignment, assets: materials.assets, documents: materials.documents },
+        submissionPages: matchRows.filter(row => !removed.has(row.id)),
+        questionGradingStates: nextStates,
+        uploadedCount: Math.max(0, submissionAssets.length - removed.size)
+      });
+      setSelectedSubmissionIds(new Set());
+      setShowSubmissionDeleteConfirm(false);
+      setSubmissionManagement(false);
+      onShowToast(`已删除 ${assetIds.length} 份答卷；教师电脑中的原文件未受影响`);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : 'SUBMISSION_DELETE_FAILED';
+      onShowToast(code === 'SUBMISSION_PROCESSING' ? '所选答卷仍在处理，完成后才能删除' : '答卷删除失败，现有数据未改变');
+    } finally {
+      setSubmissionDeletePhase('idle');
+    }
   };
 
   const submitStudentSubmissions = async () => {
@@ -930,7 +1010,12 @@ export default function GradingWorkflow({
       const code = error instanceof Error ? error.message : 'SUBMISSION_UPLOAD_FAILED';
       setSubmissionUploadPhase('error');
       setSubmissionUploadError(code);
-      onShowToast('答卷上传或解析失败，请检查文件后重试');
+      const message = code === 'PADDLEOCR_RATE_LIMITED'
+        ? 'PaddleOCR 请求频率受限，已上传文件会保留，请稍后重试解析'
+        : code === 'PADDLEOCR_TIMEOUT'
+          ? 'PaddleOCR 解析超时，已上传文件会保留，可稍后重试'
+          : '答卷上传或解析失败，已成功上传的文件会保留，请检查后重试';
+      onShowToast(message);
     }
   };
 
@@ -1536,7 +1621,7 @@ export default function GradingWorkflow({
   );
   const pendingSubmissionUpload = (
     <>
-      {submissionFiles.length ? <div className="w-full rounded-lg border border-slate-200 bg-slate-50 p-4 text-left dark:border-zinc-800 dark:bg-zinc-900"><div className="flex items-center justify-between gap-3"><strong className="text-sm">待提交 {submissionFiles.length} 个文件</strong><span className="text-xs text-slate-400">单次最多 20 个</span></div><div className="mt-3 space-y-1.5">{submissionFiles.slice(0, 5).map(file => <div key={`${file.name}-${file.size}`} className="truncate text-xs text-slate-600 dark:text-slate-300">{file.name}</div>)}{submissionFiles.length > 5 ? <div className="text-xs text-slate-400">另有 {submissionFiles.length - 5} 个文件</div> : null}</div><button type="button" disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onClick={() => void submitStudentSubmissions()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60">{submissionUploadPhase === 'uploading' ? '正在上传...' : submissionUploadPhase === 'parsing' ? '正在 OCR 解析...' : '提交并开始质检'}<Upload className="h-4 w-4" /></button></div> : null}
+      {submissionFiles.length ? <div className="w-full rounded-lg border border-slate-200 bg-slate-50 p-4 text-left dark:border-zinc-800 dark:bg-zinc-900"><div className="flex items-center justify-between gap-3"><strong className="text-sm">待提交 {submissionFiles.length} 个文件</strong><button type="button" disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onClick={() => setSubmissionFiles([])} className="min-h-11 rounded-xl px-3 text-xs font-bold text-rose-700 disabled:opacity-50">清空待提交</button></div><div className="mt-3 space-y-1.5">{submissionFiles.map((file, index) => <div key={`${file.name}-${file.size}-${index}`} className="flex min-h-11 items-center gap-2 rounded-xl bg-white px-3 dark:bg-zinc-950"><span className="min-w-0 flex-1 truncate text-xs text-slate-600 dark:text-slate-300">{file.name}</span><button type="button" disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onClick={() => removePendingSubmissionFile(index)} title={`移除 ${file.name}`} aria-label={`移除 ${file.name}`} className="flex h-11 w-11 flex-none items-center justify-center rounded-xl text-slate-400 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"><X className="h-4 w-4" /></button></div>)}</div><button type="button" disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onClick={() => void submitStudentSubmissions()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60">{submissionUploadPhase === 'uploading' ? '正在上传...' : submissionUploadPhase === 'parsing' ? '正在 OCR 解析...' : '提交并开始质检'}<Upload className="h-4 w-4" /></button></div> : null}
       {submissionUploadPhase === 'error' ? <div className="w-full text-xs font-bold text-rose-700">处理失败（{submissionUploadError}），可直接重新提交。</div> : null}
     </>
   );
@@ -1603,8 +1688,10 @@ export default function GradingWorkflow({
           </section>
           <div>
             <section className={`${panelClass} overflow-hidden`}>
-              <div className="border-b border-slate-200/70 p-5 dark:border-zinc-800"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-black text-slate-900 dark:text-white">上传与识别结果</h2><p className="mt-1 text-xs text-slate-500">按名单顺序上传，同一学生页面连续排列。</p></div><div className="flex flex-wrap items-center gap-2">{submissionFilePicker}<button type="button" onClick={() => { setShowOnlyOcrIssues(value => !value); setExpandedOcrPageId(null); }} disabled={!issueRows.length} className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-bold disabled:opacity-50 ${showOnlyOcrIssues ? 'border border-slate-200 bg-white text-slate-600 dark:border-zinc-700 dark:bg-zinc-900' : 'bg-rose-600 text-white'}`}><CircleAlert className="h-4 w-4" />{showOnlyOcrIssues ? '查看全部' : `仅看 ${issueRows.length} 项异常`}</button></div></div>{submissionFiles.length || submissionUploadPhase === 'error' ? <div className="mt-4">{pendingSubmissionUpload}</div> : null}</div>
-              <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead><tr className="border-b border-slate-200/70 text-xs font-bold text-slate-400 dark:border-zinc-800"><th className="px-5 py-3">顺序</th><th className="px-3 py-3">名单匹配</th><th className="px-3 py-3">识别学号</th><th className="px-3 py-3">页数</th><th className="px-3 py-3">文字识别</th><th className="px-3 py-3">处理状态</th><th className="px-3 py-3" /></tr></thead><tbody>{displayedRows.map(row => { const status = getSubmissionStatus(row); const asset = submissionAssets.find(item => item.id === row.id); const document = normalizedDocuments.find(item => item.assetId === row.id); const textConfidence = row.textConfidence ?? row.ocrConfidence; return <Fragment key={row.id}><tr className="border-b border-slate-200/50 last:border-0 dark:border-zinc-800/70"><td className="px-5 py-4 tabular-nums">{row.sequence}</td><td className="px-3 py-4 font-bold">{row.expectedStudentName}</td><td className="px-3 py-4 font-mono text-xs">{row.detectedStudentNo}</td><td className="px-3 py-4">{row.pageCount}</td><td className="px-3 py-4">{textConfidence > 0 ? `${Math.round(textConfidence * 100)}%` : '未提供'}</td><td className="px-3 py-4"><span className={`rounded-xl px-2.5 py-1.5 text-xs font-bold ${status.className}`}>{status.label}</span></td><td className="px-3 py-4"><button type="button" onClick={() => openSubmissionPreview(row.id)} className="rounded-xl p-2 text-emerald-700 hover:bg-emerald-50" title="查看答卷" aria-label={`查看 ${row.expectedStudentName} 的答卷`}><Eye className="h-4 w-4" /></button></td></tr>{expandedOcrPageId === row.id ? <tr><td colSpan={7} className="p-0"><SubmissionPreview page={row} asset={asset} document={document} validation={visionValidationByAsset[row.id]} validationPhase={visionValidationPhase[row.id] ?? 'idle'} validationError={visionValidationError[row.id]} humanThreshold={ocrHumanReviewThreshold} autoThreshold={ocrAutoPassThreshold} onClose={() => setExpandedOcrPageId(null)} onConfirm={studentNo => confirmSubmissionStudentNo(row.id, studentNo)} onRunVision={() => void validateSubmissionVision(row.id)} /></td></tr> : null}</Fragment>; })}</tbody></table></div>
+              <div className="border-b border-slate-200/70 p-4 sm:p-5 dark:border-zinc-800"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-black text-slate-900 dark:text-white">上传与识别结果</h2><p className="mt-1 text-xs text-slate-500">按名单顺序上传，同一学生页面连续排列。</p></div><div className="flex flex-wrap items-center gap-2">{submissionFilePicker}<button type="button" onClick={() => { setSubmissionManagement(value => !value); setSelectedSubmissionIds(new Set()); }} className="min-h-11 rounded-2xl border border-slate-200 px-4 text-sm font-bold text-slate-600 dark:border-zinc-700">{submissionManagement ? '退出管理' : '管理答卷'}</button><button type="button" onClick={() => { setShowOnlyOcrIssues(value => !value); setExpandedOcrPageId(null); setSelectedSubmissionIds(new Set()); }} disabled={!issueRows.length} className={`flex min-h-11 items-center gap-2 rounded-2xl px-4 text-sm font-bold disabled:opacity-50 ${showOnlyOcrIssues ? 'border border-slate-200 bg-white text-slate-600 dark:border-zinc-700 dark:bg-zinc-900' : 'bg-rose-600 text-white'}`}><CircleAlert className="h-4 w-4" />{showOnlyOcrIssues ? '查看全部' : `仅看 ${issueRows.length} 项异常`}</button></div></div>{submissionFiles.length || submissionUploadPhase === 'error' ? <div className="mt-4">{pendingSubmissionUpload}</div> : null}</div>
+              {submissionManagement ? <div className="sticky bottom-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 shadow-sm md:static md:shadow-none dark:border-zinc-800 dark:bg-zinc-950"><button type="button" onClick={toggleAllDisplayedSubmissions} disabled={!removableDisplayedIds.length} className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-600 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900">{removableDisplayedIds.length > 0 && removableDisplayedIds.every(id => selectedSubmissionIds.has(id)) ? '取消全选当前列表' : '全选当前列表'}</button><span className="text-sm font-bold text-slate-600 dark:text-slate-300">已选 {selectedSubmissionIds.size} 份</span><button type="button" disabled={!selectedSubmissionIds.size} onClick={() => setShowSubmissionDeleteConfirm(true)} className="min-h-11 rounded-xl bg-rose-600 px-4 text-sm font-bold text-white disabled:opacity-40"><Trash2 className="mr-2 inline h-4 w-4" />删除选中</button></div> : null}
+              <div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[760px] text-left text-sm"><thead><tr className="border-b border-slate-200/70 text-xs font-bold text-slate-400 dark:border-zinc-800">{submissionManagement ? <th className="px-4 py-3"><span className="sr-only">选择</span></th> : null}<th className="px-5 py-3">顺序</th><th className="px-3 py-3">名单匹配</th><th className="px-3 py-3">识别学号</th><th className="px-3 py-3">页数</th><th className="px-3 py-3">文字识别</th><th className="px-3 py-3">处理状态</th><th className="px-3 py-3" /></tr></thead><tbody>{displayedRows.map(row => { const status = getSubmissionStatus(row); const asset = submissionAssets.find(item => item.id === row.id); const document = normalizedDocuments.find(item => item.assetId === row.id); const textConfidence = row.textConfidence ?? row.ocrConfidence; const removable = asset?.status !== 'processing' && asset?.status !== 'uploaded'; return <Fragment key={row.id}><tr className="border-b border-slate-200/50 last:border-0 dark:border-zinc-800/70">{submissionManagement ? <td className="px-4 py-4"><input type="checkbox" checked={selectedSubmissionIds.has(row.id)} disabled={!removable} onChange={() => toggleSubmissionSelection(row.id)} aria-label={`选择 ${row.expectedStudentName} 的答卷`} className="h-5 w-5 accent-emerald-700 disabled:opacity-40" /></td> : null}<td className="px-5 py-4 tabular-nums">{row.sequence}</td><td className="px-3 py-4 font-bold">{row.expectedStudentName}</td><td className="px-3 py-4 font-mono text-xs">{row.detectedStudentNo}</td><td className="px-3 py-4">{row.pageCount}</td><td className="px-3 py-4">{textConfidence > 0 ? `${Math.round(textConfidence * 100)}%` : '未提供'}</td><td className="px-3 py-4"><span className={`rounded-xl px-2.5 py-1.5 text-xs font-bold ${status.className}`}>{status.label}</span></td><td className="px-3 py-4"><button type="button" onClick={() => openSubmissionPreview(row.id)} className="flex h-11 w-11 items-center justify-center rounded-xl text-emerald-700 hover:bg-emerald-50" title="查看答卷" aria-label={`查看 ${row.expectedStudentName} 的答卷`}><Eye className="h-4 w-4" /></button></td></tr>{expandedOcrPageId === row.id ? <tr><td colSpan={submissionManagement ? 8 : 7} className="p-0"><SubmissionPreview page={row} asset={asset} document={document} validation={visionValidationByAsset[row.id]} validationPhase={visionValidationPhase[row.id] ?? 'idle'} validationError={visionValidationError[row.id]} humanThreshold={ocrHumanReviewThreshold} autoThreshold={ocrAutoPassThreshold} onClose={() => setExpandedOcrPageId(null)} onConfirm={studentNo => confirmSubmissionStudentNo(row.id, studentNo)} onRunVision={() => void validateSubmissionVision(row.id)} /></td></tr> : null}</Fragment>; })}</tbody></table></div>
+              <div className="divide-y divide-slate-200 md:hidden dark:divide-zinc-800">{displayedRows.map(row => { const status = getSubmissionStatus(row); const asset = submissionAssets.find(item => item.id === row.id); const document = normalizedDocuments.find(item => item.assetId === row.id); const textConfidence = row.textConfidence ?? row.ocrConfidence; const removable = asset?.status !== 'processing' && asset?.status !== 'uploaded'; return <div key={row.id} className="p-4"><div className="flex items-start gap-3">{submissionManagement ? <input type="checkbox" checked={selectedSubmissionIds.has(row.id)} disabled={!removable} onChange={() => toggleSubmissionSelection(row.id)} aria-label={`选择 ${row.expectedStudentName} 的答卷`} className="mt-3 h-6 w-6 flex-none accent-emerald-700 disabled:opacity-40" /> : null}<button type="button" onClick={() => openSubmissionPreview(row.id)} className="min-h-11 min-w-0 flex-1 text-left"><div className="flex items-center justify-between gap-2"><strong className="truncate text-sm">{row.expectedStudentName}</strong><span className={`flex-none rounded-xl px-2.5 py-1.5 text-xs font-bold ${status.className}`}>{status.label}</span></div><p className="mt-2 text-xs text-slate-500">第 {row.sequence} 份 · 学号 {row.detectedStudentNo} · {row.pageCount} 页</p><p className="mt-1 text-xs text-slate-500">文字识别 {textConfidence > 0 ? `${Math.round(textConfidence * 100)}%` : '未提供'}</p></button></div>{expandedOcrPageId === row.id ? <div className="mt-3"><SubmissionPreview page={row} asset={asset} document={document} validation={visionValidationByAsset[row.id]} validationPhase={visionValidationPhase[row.id] ?? 'idle'} validationError={visionValidationError[row.id]} humanThreshold={ocrHumanReviewThreshold} autoThreshold={ocrAutoPassThreshold} onClose={() => setExpandedOcrPageId(null)} onConfirm={studentNo => confirmSubmissionStudentNo(row.id, studentNo)} onRunVision={() => void validateSubmissionVision(row.id)} /></div> : null}</div>; })}</div>
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200/70 p-5 dark:border-zinc-800"><span className="text-xs text-slate-500">未知、重复或无法识别的学号必须处理后才能进入试批。</span><button type="button" disabled={!gradingDataReady || trialGradingPhase === 'loading'} onClick={() => void prepareTrialCalibration()} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">{trialGradingPhase === 'loading' ? 'Luna 正在试批...' : '进入试批校准'}<ArrowRight className="h-4 w-4" /></button></div>
             </section>
           </div>
@@ -1689,6 +1776,16 @@ export default function GradingWorkflow({
 
       {activeStage === 'diagnosis' && diagnosis ? <section className="space-y-4"><div className="grid gap-3 sm:grid-cols-3"><div className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">完成批改</span><strong className="mt-2 block text-2xl">{diagnosis.gradedStudentCount} 人</strong></div><div className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">班级平均分</span><strong className="mt-2 block text-2xl">{diagnosis.averageScore?.toFixed(1) ?? '-'} / {diagnosis.averageFullScore}</strong></div><div className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">待复核证据</span><strong className="mt-2 block text-2xl">{pendingReviews} 项</strong></div></div><div className="grid gap-4 lg:grid-cols-2"><section className={`${panelClass} p-5`}><h2 className="font-black">各题表现</h2><div className="mt-4 space-y-3">{diagnosis.questionPerformance.map(item => <div key={item.questionId}><div className="flex justify-between text-xs"><strong>第 {item.displayNo} 题</strong><span>{Math.round(item.scoreRate * 100)}%</span></div><div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-emerald-600" style={{width:`${Math.round(item.scoreRate * 100)}%`}} /></div></div>)}</div></section><section className={`${panelClass} p-5`}><h2 className="font-black">主要失分点</h2><div className="mt-4 space-y-2">{diagnosis.commonIssues.length ? diagnosis.commonIssues.map(item => <div key={item.label} className="flex items-start justify-between gap-4 rounded-2xl bg-amber-50 p-3 text-xs text-amber-900"><span>{item.label}</span><strong>{item.count} 人次</strong></div>) : <p className="text-sm text-slate-500">暂无明确共性失分点。</p>}</div></section></div><section className={`${panelClass} p-5`}><h2 className="font-black">典型学生</h2><div className="mt-4 grid gap-3 sm:grid-cols-2">{diagnosis.typicalStudents.map(item => <div key={`${item.role}-${item.studentId}`} className="rounded-2xl border border-slate-200 p-4"><span className="text-xs font-bold text-emerald-700">{item.role}</span><strong className="mt-1 block">{item.studentName}</strong><span className="mt-1 block text-xs text-slate-500">总分 {item.totalScore} / {diagnosis.averageFullScore}</span></div>)}</div></section></section> : null}
       {activeStage === 'diagnosis' && !diagnosis ? <section className={`${panelClass} flex min-h-80 flex-col items-center justify-center p-8 text-center`}><BookOpenCheck className="h-10 w-10 text-emerald-700" /><h2 className="mt-4 font-black">正在汇总真实批改结果</h2></section> : null}
+
+      {showSubmissionDeleteConfirm ? createPortal(
+        <div className="fixed inset-0 z-[110] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="delete-submissions-title">
+          <div className="w-full rounded-t-[24px] bg-white p-5 shadow-2xl sm:max-w-lg sm:rounded-[24px] dark:bg-zinc-950">
+            <div className="flex items-start justify-between gap-3"><div><h2 id="delete-submissions-title" className="text-lg font-black text-slate-900 dark:text-white">确认删除 {selectedSubmissionAssets.length} 份答卷？</h2><p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">这是第二次确认。删除后会移除应用内上传副本、OCR、截图、质检和对应批改结果；题目、参考答案、评分细则及教师电脑中的原文件不会受影响。</p></div><button type="button" disabled={submissionDeletePhase === 'deleting'} onClick={() => setShowSubmissionDeleteConfirm(false)} aria-label="取消删除" className="flex h-11 w-11 flex-none items-center justify-center rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-zinc-800"><X className="h-4 w-4" /></button></div>
+            <div className="mt-4 max-h-40 overflow-y-auto rounded-xl bg-slate-50 p-3 dark:bg-zinc-900">{selectedSubmissionAssets.map(asset => <p key={asset.id} className="truncate py-1 text-xs text-slate-600 dark:text-slate-300">{asset.fileName}</p>)}</div>
+            <div className="mt-5 grid grid-cols-2 gap-3"><button type="button" disabled={submissionDeletePhase === 'deleting'} onClick={() => setShowSubmissionDeleteConfirm(false)} className="min-h-11 rounded-xl border border-slate-200 text-sm font-bold text-slate-600 disabled:opacity-50 dark:border-zinc-700">取消</button><button type="button" disabled={submissionDeletePhase === 'deleting'} onClick={() => void deleteSelectedSubmissions()} className="min-h-11 rounded-xl bg-rose-600 px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60">{submissionDeletePhase === 'deleting' ? '正在删除...' : `确认删除 ${selectedSubmissionAssets.length} 份`}</button></div>
+          </div>
+        </div>, document.body
+      ) : null}
 
       {previewImage ? <ImagePreviewDialog url={previewImage.url} label={previewImage.label} onClose={() => setPreviewImage(null)} /> : null}
 

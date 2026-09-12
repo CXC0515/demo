@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { dataFilePath } from '../context/workspaceContext';
 
@@ -40,3 +40,5 @@ export const getParserArtifact = (assetId: string) => {
     return undefined;
   }
 };
+
+export const deleteParserArtifact = (assetId: string) => rmSync(artifactPath(assetId), { force: true });

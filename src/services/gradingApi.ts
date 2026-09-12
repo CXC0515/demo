@@ -21,9 +21,14 @@ export const uploadTaskMaterials = async (taskId: string, kind: 'assignment' | '
   return body.assets;
 };
 
-export const clearStudentSubmissions = async (taskId: string) => {
-  const response = await apiFetch(`/api/grading-tasks/${taskId}/student-submissions`, { method: 'DELETE' });
+export const removeStudentSubmissions = async (taskId: string, assetIds: string[]) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/student-submissions`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetIds })
+  });
   if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { removed: DocumentAsset[] }).removed;
 };
 
 export interface TaskMaterialsResult {

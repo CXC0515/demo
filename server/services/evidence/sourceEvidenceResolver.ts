@@ -27,6 +27,8 @@ export const resolveSourceEvidence = (taskId: string, reference: AnalysisEvidenc
     const block = document.blocks.find(item => item.id === id);
     return block?.boundingBox && block.pageNumber ? [block] : [];
   });
+  const isPartialBlock = selectedBlocks.length > 0
+    && selectedBlocks.map(block => block.text.trim()).join('\n') !== reference.quote.trim();
   const pageNumbers = [...new Set(selectedBlocks.map(block => block.pageNumber!))];
   const pageNumber = pageNumbers[0] ?? 1;
   const sourcePage = document.resources.find(resource => resource.role === 'source-page' && (resource.pageNumber ?? 1) === pageNumber);
@@ -34,6 +36,7 @@ export const resolveSourceEvidence = (taskId: string, reference: AnalysisEvidenc
     return {
       ...reference,
       evidenceMode: 'source-crop',
+      isPartialBlock,
       pageNumber,
       locatorStatus: 'needs-teacher',
       locatorReasons: ['原始页面图像不可用']
@@ -72,6 +75,7 @@ export const resolveSourceEvidence = (taskId: string, reference: AnalysisEvidenc
   return {
     ...reference,
     evidenceMode: 'source-crop',
+    isPartialBlock,
     pageNumber,
     boundingBox,
     imageUrl: `/api/grading-tasks/${encodeURIComponent(taskId)}/materials/${encodeURIComponent(material.id)}/evidence-crop?${query}`,

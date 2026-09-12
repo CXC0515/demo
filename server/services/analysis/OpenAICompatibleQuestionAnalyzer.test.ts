@@ -9,12 +9,13 @@ import { firstSectionModelOutputSchema } from '../../schemas/firstSectionAnalysi
 import { StoredMaterial } from '../../repositories/materialRepository';
 import { OpenAICompatibleQuestionAnalyzer, sanitizeRecoverableFirstSectionOutput } from './OpenAICompatibleQuestionAnalyzer';
 
-const source = (assetKind: 'assignment' | 'reference-answer', assetId: string, fileName: string, blockId: string) => ({
+const source = (assetKind: 'assignment' | 'reference-answer', assetId: string, fileName: string, blockId: string, quote = assetKind === 'assignment' ? '第一题' : '答案') => ({
   assetKind,
   assetId,
   fileName,
   blockIds: [blockId],
-  quote: assetKind === 'assignment' ? '第一题' : '答案'
+  quote,
+  segments: [{ blockId, quote }]
 });
 
 const validQuestion = {
@@ -99,5 +100,52 @@ test('requests strict structured output and gives a non-empty knowledge candidat
   assert.ok(responseFormat.json_schema?.schema);
   assert.match(JSON.stringify(requestBody.messages), /knowledgeCandidates 非空时必须返回对象数组/);
   assert.match(JSON.stringify(requestBody.messages), /禁止返回/);
+  assert.match(JSON.stringify(requestBody.messages), /一个 block 可以包含多道题/);
+  assert.match(JSON.stringify(requestBody.messages), /中文数字、罗马数字、带圈序号/);
+  assert.equal(requestBody.reasoning_effort, 'medium');
   assert.equal(result.questions[0]?.stem, '第一题');
+});
+
+test('keeps distinct answer fragments from the same OCR block separated', async () => {
+  const questions = [
+    { ...validQuestion, displayNo: 'Ⅱ', standardAnswer: 'Ⅱ. 第二题答案', answerSource: source('reference-answer', 'answer-1', 'answer.txt', 'a-1', 'Ⅱ. 第二题答案') },
+    { ...validQuestion, displayNo: 'Ⅲ', title: '第三题', stem: '第三题', questionSource: source('assignment', 'assignment-1', 'question.txt', 'q-1', '第三题'), standardAnswer: 'Ⅲ. 第三题答案', answerSource: source('reference-answer', 'answer-1', 'answer.txt', 'a-1', 'Ⅲ. 第三题答案') }
+  ];
+  let calls = 0;
+  const fakeFetch = (async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ scope: '整份作业', questions }) } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  const materials: StoredMaterial[] = [
+    { id: 'assignment-1', taskId: 'task-1', kind: 'assignment', fileName: 'question.txt', mimeType: 'text/plain', status: 'ready', diskPath: '/tmp/question.txt', publicUrl: '/question.txt', normalizedDocument: { assetId: 'assignment-1', sourceFormat: 'text', markdown: '第一题\n第三题', blocks: [{ id: 'q-1', order: 0, type: 'paragraph', text: '第一题\n第三题' }], resources: [], warnings: [], parsedAt: '2026-09-12T00:00:00.000Z' } },
+    { id: 'answer-1', taskId: 'task-1', kind: 'reference-answer', fileName: 'answer.txt', mimeType: 'text/plain', status: 'ready', diskPath: '/tmp/answer.txt', publicUrl: '/answer.txt', normalizedDocument: { assetId: 'answer-1', sourceFormat: 'text', markdown: 'Ⅱ. 第二题答案 Ⅲ. 第三题答案', blocks: [{ id: 'a-1', order: 0, type: 'paragraph', text: 'Ⅱ. 第二题答案 Ⅲ. 第三题答案' }], resources: [], warnings: [], parsedAt: '2026-09-12T00:00:00.000Z' } }
+  ];
+  const analyzer = new OpenAICompatibleQuestionAnalyzer({ apiKey: 'test', baseUrl: 'https://example.test/v1', visionModel: 'test-model' }, fakeFetch);
+  const result = await analyzer.analyzeAssignment(materials, []);
+  assert.equal(calls, 1);
+  assert.equal(result.questions[0]?.standardAnswer, 'Ⅱ. 第二题答案');
+  assert.equal(result.questions[1]?.standardAnswer, 'Ⅲ. 第三题答案');
+  assert.equal(result.questions[0]?.answerSource?.blockIds[0], 'a-1');
+  assert.equal(result.questions[1]?.answerSource?.blockIds[0], 'a-1');
+});
+
+test('retries the whole analysis once when different questions reuse the same answer fragment', async () => {
+  const sharedAnswerSource = source('reference-answer', 'answer-1', 'answer.txt', 'a-1', '共同答案');
+  const firstQuestion = { ...validQuestion, displayNo: '一', standardAnswer: '共同答案', answerSource: sharedAnswerSource };
+  const duplicateQuestion = { ...validQuestion, displayNo: '二', title: '第二题', standardAnswer: '共同答案', answerSource: sharedAnswerSource };
+  const correctedQuestion = { ...duplicateQuestion, standardAnswer: '第二题答案', answerSource: source('reference-answer', 'answer-1', 'answer.txt', 'a-1', '第二题答案') };
+  const responses = [
+    { scope: '整份作业', questions: [firstQuestion, duplicateQuestion] },
+    { scope: '整份作业', questions: [firstQuestion, correctedQuestion] }
+  ];
+  let calls = 0;
+  const fakeFetch = (async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(responses[calls++]) } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch;
+  const materials: StoredMaterial[] = [
+    { id: 'assignment-1', taskId: 'task-1', kind: 'assignment', fileName: 'question.txt', mimeType: 'text/plain', status: 'ready', diskPath: '/tmp/question.txt', publicUrl: '/question.txt', normalizedDocument: { assetId: 'assignment-1', sourceFormat: 'text', markdown: '第一题', blocks: [{ id: 'q-1', order: 0, type: 'paragraph', text: '第一题' }], resources: [], warnings: [], parsedAt: '2026-09-12T00:00:00.000Z' } },
+    { id: 'answer-1', taskId: 'task-1', kind: 'reference-answer', fileName: 'answer.txt', mimeType: 'text/plain', status: 'ready', diskPath: '/tmp/answer.txt', publicUrl: '/answer.txt', normalizedDocument: { assetId: 'answer-1', sourceFormat: 'text', markdown: '共同答案 第二题答案', blocks: [{ id: 'a-1', order: 0, type: 'paragraph', text: '共同答案 第二题答案' }], resources: [], warnings: [], parsedAt: '2026-09-12T00:00:00.000Z' } }
+  ];
+  const analyzer = new OpenAICompatibleQuestionAnalyzer({ apiKey: 'test', baseUrl: 'https://example.test/v1', visionModel: 'test-model' }, fakeFetch);
+  const result = await analyzer.analyzeAssignment(materials, []);
+  assert.equal(calls, 2);
+  assert.equal(result.questions[1]?.standardAnswer, '第二题答案');
 });

@@ -10,20 +10,20 @@ import { Router } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
 import { z } from 'zod';
-import { AnalysisEvidenceRef, FirstSectionAnalysis, GradingMode, TrialGradingResult, VisionValidationResult } from '../../src/domain/types';
+import { FirstSectionAnalysis, GradingMode, TrialGradingResult, VisionValidationResult } from '../../src/domain/types';
 import { getModelConfig, isModelConfigured } from '../config/modelConfig';
 import { getDocumentParserConfig, isPaddleCloudConfigured } from '../config/documentParserConfig';
 import { assertPathInsideWorkspace, uploadFilePath } from '../context/workspaceContext';
 import { uploadRateLimit } from '../middleware/security';
 import { runtimeConfig } from '../config/runtimeConfig';
 import { deleteFirstSectionAnalysis, getFirstSectionAnalysis, saveFirstSectionAnalysis } from '../repositories/analysisRepository';
-import { appendMaterials, getMaterials, removeMaterialsForKind, replaceMaterialsForKind, StoredMaterial, updateMaterial } from '../repositories/materialRepository';
+import { appendMaterials, getMaterials, removeMaterialsById, replaceMaterialsForKind, StoredMaterial, updateMaterial } from '../repositories/materialRepository';
 import { getTaskRubrics, saveTaskRubric } from '../repositories/gradingRubricRepository';
 import { deleteGradingBatch, getGradingBatch, saveGradingBatch } from '../repositories/gradingBatchRepository';
-import { getParserArtifact } from '../repositories/parserArtifactRepository';
+import { deleteParserArtifact, getParserArtifact } from '../repositories/parserArtifactRepository';
 import { recordGradingError } from '../repositories/gradingErrorRepository';
-import { deleteTrialGradingResult, getTrialGradingResult, invalidateAiGradingForAsset, saveTrialGradingResult } from '../repositories/trialGradingRepository';
-import { deleteVisionValidationForTask, getVisionValidationResult, NON_CHOICE_RECOGNITION_VERSION, saveVisionValidationResult } from '../repositories/visionValidationRepository';
+import { deleteTrialGradingForAssets, deleteTrialGradingResult, getTrialGradingResult, invalidateAiGradingForAsset, saveTrialGradingResult } from '../repositories/trialGradingRepository';
+import { deleteVisionValidationForAssets, deleteVisionValidationForTask, getVisionValidationResult, NON_CHOICE_RECOGNITION_VERSION, saveVisionValidationResult } from '../repositories/visionValidationRepository';
 import { paddleParserArtifactSchema, visionValidationRequestSchema } from '../schemas/paddleParserArtifact';
 import { trialGradingRequestSchema } from '../schemas/trialGrading';
 import { gradingRubricInputSchema } from '../schemas/gradingRubric';
@@ -42,6 +42,7 @@ import { applyTeacherReviewDecision } from '../services/grading/teacherReviewDec
 import { FocusedPaddleRecognizer } from '../services/grading/FocusedPaddleRecognizer';
 import { MaterialParserError } from '../services/materials/MaterialParser';
 import { parseMaterial } from '../services/materials/materialParserRegistry';
+import { sourcePageImagePath } from '../services/materials/sourcePageImage';
 
 const router = Router();
 const supportedExtensions = new Set(['.docx', '.pdf', '.txt', '.png', '.jpg', '.jpeg', '.webp', '.heic', '.tif', '.tiff']);
@@ -101,6 +102,8 @@ const batchRequestSchema = trialGradingRequestSchema.extend({
   mode: z.enum(['per-submission', 'batch-checkpoint', 'auto-continue'])
 });
 
+const removeSubmissionSchema = z.object({ assetIds: z.array(z.string().uuid()).min(1).max(100) });
+
 const analysisQuestionCorrectionSchema = z.object({
   title: z.string().trim().min(1).max(500),
   stem: z.string().trim().min(1).max(10_000),
@@ -115,41 +118,6 @@ const evidenceCropQuerySchema = z.object({
   width: z.coerce.number().positive().max(1),
   height: z.coerce.number().positive().max(1)
 });
-
-const getTopLevelNumber = (value?: string) => value?.match(/^\s*(\d+)/)?.[1];
-
-interface ReferenceAnswerUnit {
-  displayNo: string;
-  standardAnswer: string;
-  answerSource?: AnalysisEvidenceRef | null;
-}
-
-const completeReferenceAnswer = <T extends ReferenceAnswerUnit>(unit: T, materials: StoredMaterial[]): T => {
-  const displayNo = getTopLevelNumber(unit.displayNo);
-  const source = unit.answerSource;
-  if (!displayNo || !source) return unit;
-  const material = materials.find(item => item.id === source.assetId && item.kind === 'reference-answer');
-  const blocks = material?.normalizedDocument?.blocks;
-  if (!material || !blocks?.length) return unit;
-  const start = blocks.findIndex(block => getTopLevelNumber(block.listLabel) === displayNo);
-  if (start < 0) return unit;
-  let end = start + 1;
-  while (end < blocks.length && !getTopLevelNumber(blocks[end].listLabel)) end += 1;
-  const answerBlocks = blocks.slice(start, end);
-  const completeAnswer = answerBlocks.map(block => block.text.trim()).filter(Boolean).join('\n');
-  if (!completeAnswer) return unit;
-  return {
-    ...unit,
-    standardAnswer: completeAnswer,
-    answerSource: {
-      assetKind: 'reference-answer',
-      assetId: material.id,
-      fileName: material.fileName,
-      blockIds: answerBlocks.map(block => block.id),
-      quote: completeAnswer
-    }
-  };
-};
 
 const classifyQuestionAnalysisError = (message: string) => {
   const status = Number(message.match(/^MODEL_REQUEST_FAILED:(\d{3})$/)?.[1]);
@@ -193,9 +161,25 @@ router.get('/:taskId/materials', (request, response) => {
 });
 
 router.delete('/:taskId/student-submissions', (request, response) => {
-  const removed = removeMaterialsForKind(request.params.taskId, 'student-submission');
-  deleteVisionValidationForTask(request.params.taskId);
-  deleteTrialGradingResult(request.params.taskId);
+  const parsed = removeSubmissionSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ code: 'INVALID_SUBMISSION_SELECTION' });
+  const materials = getMaterials(request.params.taskId);
+  const selected = materials.filter(material => parsed.data.assetIds.includes(material.id));
+  if (selected.some(material => material.kind !== 'student-submission') || selected.length !== parsed.data.assetIds.length) {
+    return response.status(404).json({ code: 'SUBMISSION_NOT_FOUND' });
+  }
+  if (selected.some(material => material.status === 'processing' || material.status === 'uploaded')) {
+    return response.status(409).json({ code: 'SUBMISSION_PROCESSING' });
+  }
+  const removed = removeMaterialsById(request.params.taskId, 'student-submission', parsed.data.assetIds);
+  for (const material of removed) {
+    rmSync(assertPathInsideWorkspace(material.diskPath), { force: true });
+    rmSync(assertPathInsideWorkspace(uploadFilePath('parsed', material.id)), { recursive: true, force: true });
+    rmSync(assertPathInsideWorkspace(uploadFilePath('validation', request.params.taskId, material.id)), { recursive: true, force: true });
+    deleteParserArtifact(material.id);
+  }
+  deleteVisionValidationForAssets(request.params.taskId, parsed.data.assetIds);
+  deleteTrialGradingForAssets(request.params.taskId, parsed.data.assetIds);
   deleteGradingBatch(request.params.taskId);
   response.json({ removed: removed.map(toPublicAsset) });
 });
@@ -253,6 +237,17 @@ router.get('/:taskId/materials/:assetId/validation/:fileName', (request, respons
   response.sendFile(assertPathInsideWorkspace(target));
 });
 
+router.get('/:taskId/materials/:assetId/pages/:pageNumber/image', (request, response) => {
+  const pageNumber = Number(request.params.pageNumber);
+  const material = getMaterials(request.params.taskId).find(item => item.id === request.params.assetId);
+  const sourcePage = material?.normalizedDocument?.resources.find(resource => resource.role === 'source-page' && (resource.pageNumber ?? 1) === pageNumber);
+  if (!material || !sourcePage || !Number.isInteger(pageNumber) || pageNumber < 1) return response.status(404).json({ code: 'SOURCE_PAGE_NOT_FOUND' });
+  const target = sourcePageImagePath(material.id, pageNumber, sourcePage.fileName);
+  if (!existsSync(target)) return response.status(404).json({ code: 'SOURCE_PAGE_FILE_NOT_FOUND' });
+  response.setHeader('Cache-Control', 'private, no-store');
+  response.sendFile(assertPathInsideWorkspace(target));
+});
+
 router.get('/:taskId/materials/:assetId/evidence-crop', async (request, response) => {
   const parsed = evidenceCropQuerySchema.safeParse(request.query);
   const material = getMaterials(request.params.taskId).find(item => item.id === request.params.assetId);
@@ -267,7 +262,7 @@ router.get('/:taskId/materials/:assetId/evidence-crop', async (request, response
     return;
   }
   try {
-    const sourcePath = uploadFilePath('parsed', material.id, 'resources', sourcePage.fileName);
+    const sourcePath = sourcePageImagePath(material.id, parsed.data.page, sourcePage.fileName);
     const image = sharp(sourcePath);
     const metadata = await image.metadata();
     if (!metadata.width || !metadata.height) throw new Error('SOURCE_PAGE_DIMENSIONS_MISSING');
@@ -332,7 +327,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
   try {
     const pageSources = sourceResources.map(resource => ({
       pageNumber: resource.pageNumber!,
-      sourceImagePath: uploadFilePath('parsed', material!.id, 'resources', resource.fileName)
+      sourceImagePath: sourcePageImagePath(material!.id, resource.pageNumber!, resource.fileName)
     }));
     const expectedEvidenceIds = new Map(analysis.questions
       .filter(question => parsedRequest.data.questionNos.includes(question.displayNo))
@@ -374,7 +369,8 @@ router.post('/:taskId/vision-validation', async (request, response) => {
       }));
       const locatedCandidates = locatedPages.flat();
       const sequenceFiltered = missingPaddleNumbers.flatMap(displayNo => {
-        const nextQuestionNo = analysis.questions.find(question => Number(question.displayNo) > Number(displayNo))?.displayNo;
+        const currentQuestionIndex = analysis.questions.findIndex(question => question.displayNo === displayNo);
+        const nextQuestionNo = currentQuestionIndex >= 0 ? analysis.questions[currentQuestionIndex + 1]?.displayNo : undefined;
         if (!nextQuestionNo) return locatedCandidates.filter(item => item.displayNo === displayNo);
         const candidates = locatedCandidates.filter(item => item.displayNo === displayNo);
         const preceding = candidates.filter(candidate => {
@@ -499,7 +495,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
           confidence: item?.confidence ?? 0,
           needsReview: region.locationStatus !== 'located' || evidenceUnits.some(unit => unit.needsReview) || (item?.needsReview ?? true)
         };
-      })].sort((first, second) => Number(first.displayNo) - Number(second.displayNo)),
+      })].sort((first, second) => parsedRequest.data.questionNos.indexOf(first.displayNo) - parsedRequest.data.questionNos.indexOf(second.displayNo)),
       createdAt: new Date().toISOString()
     };
     saveVisionValidationResult(result);
@@ -509,7 +505,11 @@ router.post('/:taskId/vision-validation', async (request, response) => {
     recordGradingError('vision_validation_failed', request.params.taskId, error, { assetId: parsedRequest.data.assetId, questionNos: parsedRequest.data.questionNos });
     console.error(JSON.stringify({ event: 'vision_validation_failed', taskId: request.params.taskId, assetId: parsedRequest.data.assetId, error: error instanceof Error ? error.message : String(error) }));
     const message = error instanceof Error ? error.message : 'VISION_VALIDATION_FAILED';
-    response.status(502).json({ code: message.startsWith('MODEL_REQUEST_FAILED:') ? message : 'VISION_VALIDATION_OUTPUT_INVALID' });
+    response.status(message.startsWith('Input file is missing:') ? 409 : 502).json({
+      code: message.startsWith('Input file is missing:')
+        ? 'SOURCE_PAGE_FILE_NOT_FOUND'
+        : message.startsWith('MODEL_REQUEST_FAILED:') ? message : 'VISION_VALIDATION_OUTPUT_INVALID'
+    });
   }
 });
 
@@ -858,7 +858,7 @@ router.post('/:taskId/analysis', async (request, response) => {
         .filter(point => point.point?.trim() || point.description?.trim())
         .map(point => ({ point: point.point?.trim() || point.description?.trim() || '', score: point.score ?? null, description: point.description ?? '' }));
     const questions = rawAnalysis.questions.map(rawQuestion => {
-      const question = completeReferenceAnswer(rawQuestion, analysisMaterials);
+      const question = rawQuestion;
       return {
         ...question,
         questionSource: resolveSourceEvidence(request.params.taskId, question.questionSource, analysisMaterials),

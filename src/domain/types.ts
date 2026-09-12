@@ -464,6 +464,8 @@ export interface AnalysisEvidenceRef {
   fileName: string;
   blockIds: string[];
   quote: string;
+  segments?: { blockId: string; quote: string }[];
+  isPartialBlock?: boolean;
   evidenceMode?: 'native-text' | 'source-crop';
   pageNumber?: number;
   boundingBox?: { x: number; y: number; width: number; height: number };
@@ -512,6 +514,9 @@ export interface SourceEvidence {
   pageNumber: number;
   boundingBox: { x: number; y: number; width: number; height: number };
   ocrText: string;
+  blockIds?: string[];
+  segments?: { blockId: string; quote: string }[];
+  isPartialBlock?: boolean;
   confidence: number;
   imageUrl?: string;
   sourcePageUrl?: string;
