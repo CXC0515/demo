@@ -372,6 +372,21 @@ const materialStatusLabel: Record<WorkflowState['assignment']['assets'][number][
   uploaded: '等待解析', processing: '解析中', ready: '已解析', 'needs-review': '需检查', failed: '失败'
 };
 
+const analysisErrorMessage = (code: string) => {
+  const messages: Record<string, { title: string; detail: string }> = {
+    MODEL_NOT_CONFIGURED: { title: 'AI 模型尚未配置', detail: '题目和答案材料已保存，请联系管理员完成模型配置后重试。' },
+    MODEL_AUTH_FAILED: { title: 'AI 模型鉴权失败', detail: '题目和答案材料已保存，请联系管理员检查模型授权后重试。' },
+    MODEL_RATE_LIMITED: { title: 'AI 服务请求过于频繁', detail: '题目和答案材料已保存，请稍后重新拆题。' },
+    MODEL_SERVICE_UNAVAILABLE: { title: 'AI 服务暂时繁忙', detail: '题目和答案材料已保存，本次没有生成拆题结果，请稍后重新拆题。' },
+    MODEL_REQUEST_REJECTED: { title: 'AI 服务未接受本次请求', detail: '题目和答案材料已保存，请稍后重试；若持续失败请联系管理员。' },
+    MODEL_OUTPUT_INVALID: { title: 'AI 返回的拆题结构不完整', detail: '题目和答案材料已保存，可以重新拆题。' },
+    ASSIGNMENT_MATERIAL_REQUIRED: { title: '缺少已解析的题目材料', detail: '请先选择题目文件并完成解析。' },
+    REFERENCE_ANSWER_REQUIRED: { title: '缺少已解析的参考答案', detail: '请先选择答案文件并完成解析。' },
+    MATERIALS_NOT_READY: { title: '材料尚未准备完成', detail: '请等待题目和答案解析完成后再拆题。' }
+  };
+  return messages[code] ?? { title: 'AI 拆题没有完成', detail: '题目和答案材料已保存，请稍后重新拆题。' };
+};
+
 const materialAccept = '.docx,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,application/pdf,image/*';
 const formatElapsed = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
@@ -578,6 +593,7 @@ export default function GradingWorkflow({
   const [isPaused, setIsPaused] = useState(false);
   const [diagnosisConfirmed, setDiagnosisConfirmed] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisErrorCode, setAnalysisErrorCode] = useState<string | null>(null);
   const [analysisQuestionNo, setAnalysisQuestionNo] = useState(workflowState.assignment.firstSectionAnalysis?.questions[0]?.displayNo ?? '');
   const [questionSelectionDraft, setQuestionSelectionDraft] = useState<string[]>(selectedTask.selectedQuestionIds ?? workflowState.assignment.selectedQuestionIds ?? workflowState.questions.map(question => question.id));
   const [questionSelectionSaving, setQuestionSelectionSaving] = useState(false);
@@ -589,6 +605,9 @@ export default function GradingWorkflow({
   const [rosterMatchPhase, setRosterMatchPhase] = useState<'loading' | 'ready' | 'error'>('loading');
   const [rosterMatchError, setRosterMatchError] = useState<string | null>(null);
   const [rosterRefreshKey, setRosterRefreshKey] = useState(0);
+  const [pendingMaterialFiles, setPendingMaterialFiles] = useState<{ assignment: File[]; referenceAnswer: File[] }>({ assignment: [], referenceAnswer: [] });
+  const [materialUploadPhase, setMaterialUploadPhase] = useState<'idle' | 'uploading' | 'parsing' | 'error'>('idle');
+  const [materialUploadError, setMaterialUploadError] = useState<string | null>(null);
   const [submissionFiles, setSubmissionFiles] = useState<File[]>([]);
   const [submissionUploadPhase, setSubmissionUploadPhase] = useState<'idle' | 'uploading' | 'parsing' | 'error'>('idle');
   const [submissionUploadError, setSubmissionUploadError] = useState<string | null>(null);
@@ -657,6 +676,10 @@ export default function GradingWorkflow({
   const gradingDataReady = selectedQuestions.length > 0 && matchRows.length > 0 && rosterMatchPhase === 'ready' && !issueRows.some(row => row.rosterMatchStatus !== 'matched');
   const normalizedDocuments = workflowState.assignment.documents ?? [];
   const assignmentAssets = workflowState.assignment.assets.filter(asset => asset.kind === 'assignment' || asset.kind === 'reference-answer');
+  const pendingMaterialCount = pendingMaterialFiles.assignment.length + pendingMaterialFiles.referenceAnswer.length;
+  const materialUploadBusy = materialUploadPhase === 'uploading' || materialUploadPhase === 'parsing';
+  const assignmentMaterialsReady = assignmentAssets.some(asset => asset.kind === 'assignment' && (asset.status === 'ready' || asset.status === 'needs-review'))
+    && assignmentAssets.some(asset => asset.kind === 'reference-answer' && (asset.status === 'ready' || asset.status === 'needs-review'));
   const assignmentAssetIds = new Set(assignmentAssets.map(asset => asset.id));
   const assignmentDocuments = normalizedDocuments.filter(document => assignmentAssetIds.has(document.assetId));
   const activeClassRoster = classRoster.filter(student => student.enrollmentStatus === 'active');
@@ -672,6 +695,13 @@ export default function GradingWorkflow({
   const rubricDirty = Boolean(currentQuestionState && persistedCurrentQuestionState && JSON.stringify({ standardAnswer: currentQuestionState.standardAnswer, gradingRubric: currentQuestionState.gradingRubric, teacherRules: currentQuestionState.teacherRules }) !== JSON.stringify({ standardAnswer: persistedCurrentQuestionState.standardAnswer, gradingRubric: persistedCurrentQuestionState.gradingRubric, teacherRules: persistedCurrentQuestionState.teacherRules }));
 
   useEffect(() => { questionStatesRef.current = questionStates; }, [questionStates]);
+
+  useEffect(() => {
+    setPendingMaterialFiles({ assignment: [], referenceAnswer: [] });
+    setMaterialUploadPhase('idle');
+    setMaterialUploadError(null);
+    setAnalysisErrorCode(null);
+  }, [selectedTask.id]);
 
   const updateAssignment = (updated: Partial<WorkflowState['assignment']>) => {
     onUpdateState({ assignment: { ...workflowState.assignment, ...updated } });
@@ -904,30 +934,83 @@ export default function GradingWorkflow({
     }
   };
 
-  const handleMaterialFiles = async (kind: 'assignment' | 'reference-answer', fileList: FileList | null) => {
+  const selectMaterialFiles = (kind: 'assignment' | 'referenceAnswer', fileList: FileList | null) => {
     const files = getFiles(fileList);
     if (!files.length) return;
-    const names = files.map(file => file.name);
-    updateAssignment({ analysisStatus: 'uploading', ...(kind === 'assignment' ? { questionFileNames: names } : { answerFileNames: names }) });
+    if (files.length > 20) {
+      onShowToast('题目或答案单次最多选择 20 个文件');
+      return;
+    }
+    setPendingMaterialFiles(current => ({ ...current, [kind]: files }));
+    setMaterialUploadPhase('idle');
+    setMaterialUploadError(null);
+  };
+
+  const clearPendingMaterialFiles = (kind: 'assignment' | 'referenceAnswer') => {
+    setPendingMaterialFiles(current => ({ ...current, [kind]: [] }));
+    setMaterialUploadPhase('idle');
+    setMaterialUploadError(null);
+  };
+
+  const startMaterialParsing = async () => {
+    const pendingGroups = [
+      { kind: 'assignment' as const, files: pendingMaterialFiles.assignment },
+      { kind: 'reference-answer' as const, files: pendingMaterialFiles.referenceAnswer }
+    ].filter(group => group.files.length);
+    if (!pendingGroups.length) return;
+    setMaterialUploadPhase('uploading');
+    setMaterialUploadError(null);
+    setAnalysisErrorCode(null);
+    updateAssignment({ analysisStatus: 'uploading' });
     try {
-      const uploaded = await uploadTaskMaterials(selectedTask.id, kind, files);
-      const assets = [...workflowState.assignment.assets.filter(asset => asset.kind !== kind), ...uploaded];
+      const uploadedGroups = await Promise.all(pendingGroups.map(group => uploadTaskMaterials(selectedTask.id, group.kind, group.files)));
+      const uploaded = uploadedGroups.flat();
+      const replacedKinds = new Set(pendingGroups.map(group => group.kind));
+      const assets = [...workflowState.assignment.assets.filter(asset => !replacedKinds.has(asset.kind as 'assignment' | 'reference-answer')), ...uploaded];
       updateAssignment({ assets, analysisStatus: 'parsing' });
+      setMaterialUploadPhase('parsing');
       const result = await waitForTaskMaterials(selectedTask.id, uploaded.map(asset => asset.id));
-      const needsReview = result.documents.some(document => document.warnings.length > 0);
+      const nextAssignmentAssets = result.assets.filter(asset => asset.kind === 'assignment' || asset.kind === 'reference-answer');
+      const needsReview = nextAssignmentAssets.some(asset => asset.status === 'needs-review');
       onUpdateState({
         assignment: {
           ...workflowState.assignment,
-          ...(kind === 'assignment' ? { questionFileNames: names } : { answerFileNames: names }),
+          questionFileNames: nextAssignmentAssets.filter(asset => asset.kind === 'assignment').map(asset => asset.fileName),
+          answerFileNames: nextAssignmentAssets.filter(asset => asset.kind === 'reference-answer').map(asset => asset.fileName),
           assets: result.assets,
           documents: result.documents,
           analysisStatus: needsReview ? 'needs-review' : 'ready'
         }
       });
-      onShowToast(needsReview ? '材料解析完成，存在需要检查的内容' : `已解析 ${result.documents.length} 份材料`);
+      setPendingMaterialFiles({ assignment: [], referenceAnswer: [] });
+      setMaterialUploadPhase('idle');
+      onShowToast(needsReview ? '材料解析完成，存在需要检查的内容' : `已解析 ${uploaded.length} 份材料`);
     } catch (error) {
       const code = error instanceof Error ? error.message : 'MATERIAL_PARSE_FAILED';
-      updateAssignment({ analysisStatus: 'failed' });
+      setMaterialUploadPhase('error');
+      setMaterialUploadError(code);
+      void getTaskMaterials(selectedTask.id).then(result => {
+        const currentMaterials = result.assets.filter(asset => asset.kind === 'assignment' || asset.kind === 'reference-answer');
+        const analysisStatus = currentMaterials.some(asset => asset.status === 'failed')
+          ? 'failed'
+          : currentMaterials.some(asset => asset.status === 'uploaded' || asset.status === 'processing')
+            ? 'parsing'
+            : currentMaterials.some(asset => asset.status === 'needs-review')
+              ? 'needs-review'
+              : currentMaterials.length
+                ? 'ready'
+                : 'idle';
+        onUpdateState({
+          assignment: {
+            ...workflowState.assignment,
+            questionFileNames: currentMaterials.filter(asset => asset.kind === 'assignment').map(asset => asset.fileName),
+            answerFileNames: currentMaterials.filter(asset => asset.kind === 'reference-answer').map(asset => asset.fileName),
+            assets: result.assets,
+            documents: result.documents,
+            analysisStatus
+          }
+        });
+      }).catch(() => updateAssignment({ analysisStatus: 'failed' }));
       const messageByCode: Record<string, string> = {
         DOCX_PARSER_NOT_INSTALLED: 'DOCX 解析环境尚未安装',
         PADDLEOCR_NOT_CONFIGURED: 'PaddleOCR API 尚未配置',
@@ -976,6 +1059,7 @@ export default function GradingWorkflow({
       onShowToast('请先完成题目和参考答案解析');
       return;
     }
+    setAnalysisErrorCode(null);
     setIsAnalyzing(true);
     const startedAt = Date.now();
     setAnalysisStartedAt(startedAt);
@@ -993,14 +1077,8 @@ export default function GradingWorkflow({
       onShowToast(`拆题完成，共识别 ${analysis.questions.length} 道一级题`);
     } catch (error) {
       const code = error instanceof Error ? error.message : 'ANALYSIS_FAILED';
-      const messageByCode: Record<string, string> = {
-        MODEL_NOT_CONFIGURED: 'AI 模型尚未配置',
-        MODEL_OUTPUT_INVALID: '模型返回结构不完整，请重新分析',
-        ASSIGNMENT_MATERIAL_REQUIRED: '缺少已解析的题目材料',
-        REFERENCE_ANSWER_REQUIRED: '缺少已解析的参考答案',
-        MATERIALS_NOT_READY: '材料仍在解析，请稍后再试'
-      };
-      onShowToast(messageByCode[code] ?? 'AI 拆题失败，请检查模型配置');
+      setAnalysisErrorCode(code);
+      onShowToast(analysisErrorMessage(code).title);
     } finally {
       setIsAnalyzing(false);
       setAnalysisStartedAt(null);
@@ -1482,16 +1560,24 @@ export default function GradingWorkflow({
           <div className={`${panelClass} p-6`}>
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-5 dark:border-zinc-800"><div><h2 className="font-black text-slate-900 dark:text-white">作业材料</h2><p className="mt-1 text-xs text-slate-500">先确定学生收到的题目和本次评分参考。</p></div><div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-xs"><span className="flex items-center gap-1.5 text-slate-500"><CalendarClock className="h-4 w-4 text-emerald-700" /><strong className="text-slate-700 dark:text-slate-200">收作业提醒</strong>{selectedTask.deadline}</span><span className="text-slate-500"><strong className="mr-1.5 text-slate-700 dark:text-slate-200">当前班级</strong>{currentClassName} · 应交 {expectedStudentCount} 人</span><span className="rounded-xl bg-slate-100 px-2.5 py-1.5 font-bold text-slate-600 dark:bg-zinc-800 dark:text-slate-300">{analysisStatusLabel[workflowState.assignment.analysisStatus]}</span><span className={`rounded-xl px-2.5 py-1.5 font-bold ${assignmentReady ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{assignmentReady ? '已布置' : '待准备'}</span></div></div>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors hover:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900/50"><Upload className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">作业题目或试卷</strong><span className="mt-1 max-w-full truncate text-xs text-slate-400">{workflowState.assignment.questionFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" onChange={event => void handleMaterialFiles('assignment', event.currentTarget.files)} /></label>
-              <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors hover:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900/50"><FileText className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">参考答案</strong><span className="mt-1 max-w-full truncate text-xs text-slate-400">{workflowState.assignment.answerFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" onChange={event => void handleMaterialFiles('reference-answer', event.currentTarget.files)} /></label>
+              <label className={`flex min-h-36 flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors dark:border-zinc-700 dark:bg-zinc-900/50 ${materialUploadBusy ? 'cursor-wait opacity-60' : 'cursor-pointer hover:border-emerald-500'}`}><Upload className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">作业题目或试卷</strong><span className={`mt-1 max-w-full truncate text-xs ${pendingMaterialFiles.assignment.length ? 'font-bold text-amber-700' : 'text-slate-400'}`}>{pendingMaterialFiles.assignment.length ? `待解析 ${pendingMaterialFiles.assignment.length} 份：${pendingMaterialFiles.assignment.map(file => file.name).join('、')}` : workflowState.assignment.questionFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" disabled={materialUploadBusy} onClick={event => { event.currentTarget.value = ''; }} onChange={event => selectMaterialFiles('assignment', event.currentTarget.files)} /></label>
+              <label className={`flex min-h-36 flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors dark:border-zinc-700 dark:bg-zinc-900/50 ${materialUploadBusy ? 'cursor-wait opacity-60' : 'cursor-pointer hover:border-emerald-500'}`}><FileText className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">参考答案</strong><span className={`mt-1 max-w-full truncate text-xs ${pendingMaterialFiles.referenceAnswer.length ? 'font-bold text-amber-700' : 'text-slate-400'}`}>{pendingMaterialFiles.referenceAnswer.length ? `待解析 ${pendingMaterialFiles.referenceAnswer.length} 份：${pendingMaterialFiles.referenceAnswer.map(file => file.name).join('、')}` : workflowState.assignment.answerFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" disabled={materialUploadBusy} onClick={event => { event.currentTarget.value = ''; }} onChange={event => selectMaterialFiles('referenceAnswer', event.currentTarget.files)} /></label>
             </div>
+            {pendingMaterialCount || materialUploadPhase === 'error' ? <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900 dark:bg-amber-950/20">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0"><strong className="text-sm text-amber-950 dark:text-amber-100">{materialUploadBusy ? materialUploadPhase === 'uploading' ? '正在上传材料' : '正在并行解析材料' : `已选择 ${pendingMaterialCount} 份待解析材料`}</strong><p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-200">选择文件不会自动解析。开始后，新文件会替换对应的旧材料，并使已有拆题结果失效。</p>{materialUploadError ? <p className="mt-2 text-xs font-bold text-rose-700">处理失败（{materialUploadError}）。已成功上传的材料会保留，可检查后重试。</p> : null}</div>
+                <button type="button" disabled={!pendingMaterialCount || materialUploadBusy} onClick={() => void startMaterialParsing()} className="flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"><Play className="h-4 w-4" />{materialUploadPhase === 'uploading' ? '正在上传...' : materialUploadPhase === 'parsing' ? '正在解析...' : '上传并开始解析'}</button>
+              </div>
+              {pendingMaterialCount && !materialUploadBusy ? <div className="mt-3 flex flex-col gap-2 border-t border-amber-200 pt-3 sm:flex-row dark:border-amber-900">{pendingMaterialFiles.assignment.length ? <button type="button" onClick={() => clearPendingMaterialFiles('assignment')} className="min-h-11 rounded-xl border border-amber-300 px-3 text-xs font-bold text-amber-900 dark:border-amber-800 dark:text-amber-100">清除待解析题目</button> : null}{pendingMaterialFiles.referenceAnswer.length ? <button type="button" onClick={() => clearPendingMaterialFiles('referenceAnswer')} className="min-h-11 rounded-xl border border-amber-300 px-3 text-xs font-bold text-amber-900 dark:border-amber-800 dark:text-amber-100">清除待解析答案</button> : null}</div> : null}
+            </section> : null}
             {assignmentAssets.length ? <section className="mt-5 border-y border-slate-200 dark:border-zinc-800"><div className="flex flex-wrap items-center gap-2 py-3">{assignmentAssets.map(asset => <span key={asset.id} className={`inline-flex max-w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs font-bold ${asset.status === 'failed' ? 'bg-rose-100 text-rose-800' : asset.status === 'needs-review' ? 'bg-amber-100 text-amber-800' : asset.status === 'ready' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-slate-300'}`}><span className="max-w-56 truncate">{asset.fileName}</span><span>{materialStatusLabel[asset.status]}</span></span>)}</div>{assignmentDocuments.map(document => <Fragment key={document.assetId}><MaterialDocumentDetails document={document} asset={assignmentAssets.find(item => item.id === document.assetId)} /></Fragment>)}</section> : null}
             {workflowState.assignment.assets.length ? <section className="mt-5 border-y border-slate-200 py-4 dark:border-zinc-800">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div><h3 className="text-sm font-black">AI 拆题</h3><p className="mt-1 text-xs text-slate-500">识别题目后，选择本次需要批改的范围。</p></div>
-                <button type="button" disabled={isAnalyzing} onClick={() => void analyzeAssignment()} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60"><Sparkles className="h-4 w-4" />{isAnalyzing ? '正在拆题' : assignmentAnalysis ? '重新拆题' : '开始拆题'}</button>
+                <button type="button" disabled={isAnalyzing || !assignmentMaterialsReady} onClick={() => void analyzeAssignment()} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"><Sparkles className="h-4 w-4" />{isAnalyzing ? '正在拆题' : assignmentAnalysis ? '重新拆题' : '开始拆题'}</button>
               </div>
               {isAnalyzing ? <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900 dark:bg-emerald-950/20"><div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm text-emerald-900 dark:text-emerald-100">AI 正在识别作业结构</strong><span className="text-xs font-bold text-emerald-700">已用时 {formatElapsed(analysisElapsedSeconds)}</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-emerald-100 dark:bg-emerald-950"><div className="h-full w-1/2 animate-pulse rounded-full bg-emerald-600" /></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-3"><span className="font-bold text-emerald-800">1. 题目与答案材料已就绪</span><span className="font-bold text-emerald-800">2. 正在核对题号、题干和答案</span><span className="text-slate-400">3. 生成评分依据</span></div></div> : null}
+              {analysisErrorCode && !isAnalyzing ? <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-rose-900 dark:bg-rose-950/20"><div><strong className="text-sm text-rose-900 dark:text-rose-100">{analysisErrorMessage(analysisErrorCode).title}</strong><p className="mt-1 text-xs leading-5 text-rose-700 dark:text-rose-200">{analysisErrorMessage(analysisErrorCode).detail}</p></div><button type="button" disabled={!assignmentMaterialsReady} onClick={() => void analyzeAssignment()} className="min-h-11 w-full shrink-0 rounded-xl border border-rose-300 px-4 text-sm font-bold text-rose-800 disabled:opacity-50 sm:w-auto dark:border-rose-800 dark:text-rose-100">重新拆题</button></div> : null}
               {assignmentAnalysis && selectedAnalysisQuestion ? <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 lg:grid-cols-[220px_minmax(0,1fr)] dark:border-zinc-800">
                 <aside className="space-y-2"><div className="flex items-center justify-between gap-2 text-xs">{questionSelectionEditing && !questionSelectionLocked ? <label className="flex items-center gap-2 font-bold"><input type="checkbox" checked={allQuestionsSelected} onChange={toggleAllQuestions} aria-label="全选本次批改题目" className="h-4 w-4 accent-emerald-700" />全选</label> : <strong className="text-slate-700 dark:text-slate-200">本次批改题目</strong>}<span className="font-medium text-slate-600 dark:text-slate-300">已选 {questionSelectionDraft.length} / {assignmentAnalysis.questions.length}</span></div>{assignmentAnalysis.questions.map(question => { const questionId = `${selectedTask.id}-q-${question.displayNo}`; const included = questionSelectionDraft.includes(questionId); const active = selectedAnalysisQuestion.displayNo === question.displayNo; return <div key={question.displayNo} className={`flex items-center gap-2 rounded-lg border p-2 ${active ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/20' : 'border-slate-200 dark:border-zinc-800'}`}>{questionSelectionEditing && !questionSelectionLocked ? <input type="checkbox" checked={included} onChange={() => toggleQuestionSelection(question.displayNo)} aria-label={`选择第 ${question.displayNo} 题`} className="h-4 w-4 accent-emerald-700" /> : <span aria-hidden="true" className={`h-2 w-2 rounded-full ${included ? 'bg-emerald-600' : 'bg-slate-200 dark:bg-zinc-700'}`} />}<button type="button" onClick={() => setAnalysisQuestionNo(question.displayNo)} className="min-w-0 flex-1 text-left"><strong className="block text-xs">第 {question.displayNo} 题</strong><span className="mt-0.5 block truncate text-[11px] text-slate-500">{question.title || question.stem}</span></button></div>; })}{questionSelectionLocked ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-bold text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">{submissionAssets.length ? '已上传答卷，题目范围已锁定' : '已确认布置，题目范围已锁定'}</div> : questionSelectionEditing ? <div className="grid grid-cols-2 gap-2"><button type="button" disabled={questionSelectionSaving} onClick={() => { setQuestionSelectionDraft(selectedQuestionIds); setQuestionSelectionEditing(false); }} className="rounded-lg border border-slate-300 px-3 py-2.5 text-xs font-bold text-slate-700 dark:border-zinc-700 dark:text-slate-200">取消</button><button type="button" disabled={!questionSelectionDirty || questionSelectionSaving} onClick={() => void saveQuestionSelection()} className="rounded-lg bg-emerald-700 px-3 py-2.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600">{questionSelectionSaving ? '正在保存...' : '保存题目范围'}</button></div> : <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-900 dark:bg-emerald-950/30"><strong className="text-xs text-emerald-900 dark:text-emerald-100">题目范围已保存</strong><button type="button" onClick={() => setQuestionSelectionEditing(true)} className="text-xs font-bold text-emerald-800 underline underline-offset-2 dark:text-emerald-200">修改</button></div>}</aside>
                 <AnalysisQuestionCard question={selectedAnalysisQuestion} standardAnswer={questionStates.find(state => state.questionId === `${selectedTask.id}-q-${selectedAnalysisQuestion.displayNo}`)?.standardAnswer ?? selectedAnalysisQuestion.standardAnswer} onSave={correction => saveAnalysisQuestion(selectedAnalysisQuestion.displayNo, correction)} />
