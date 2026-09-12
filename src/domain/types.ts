@@ -465,6 +465,7 @@ export interface AnalysisEvidenceRef {
   blockIds: string[];
   quote: string;
   segments?: { blockId: string; quote: string }[];
+  matchStatus?: 'exact' | 'normalized' | 'block-level';
   isPartialBlock?: boolean;
   evidenceMode?: 'native-text' | 'source-crop';
   pageNumber?: number;
@@ -504,6 +505,11 @@ export interface FirstSectionAnalysis {
   materialAssetIds: string[];
   questions: AnalyzedQuestion[];
   createdAt: string;
+  processingMetrics?: {
+    startedAt: string;
+    completedAt: string;
+    durationMs: number;
+  };
 }
 
 export interface SourceEvidence {

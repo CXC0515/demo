@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { firstSectionModelOutputSchema } from '../../schemas/firstSectionAnalysis';
 import { StoredMaterial } from '../../repositories/materialRepository';
+import { AnalysisEvidenceRef } from '../../../src/domain/types';
 import { OpenAICompatibleQuestionAnalyzer, sanitizeRecoverableFirstSectionOutput } from './OpenAICompatibleQuestionAnalyzer';
 
 const source = (assetKind: 'assignment' | 'reference-answer', assetId: string, fileName: string, blockId: string, quote = assetKind === 'assignment' ? '第一题' : '答案') => ({
@@ -148,4 +149,30 @@ test('retries the whole analysis once when different questions reuse the same an
   const result = await analyzer.analyzeAssignment(materials, []);
   assert.equal(calls, 2);
   assert.equal(result.questions[1]?.standardAnswer, '第二题答案');
+});
+
+test('keeps a readable answer when punctuation differs and removes repeated small-question text from the mother question', async () => {
+  const question = {
+    ...validQuestion,
+    stem: '公共要求\n(1)小题',
+    questionSource: source('assignment', 'assignment-1', 'question.txt', 'q-1', '公共要求\n(1)小题'),
+    standardAnswer: '4. 老舍；舒庆春；《骆驼祥子》；《四世同堂》；《茶馆》',
+    answerSource: source('reference-answer', 'answer-1', 'answer.txt', 'a-1', '4. 老舍；舒庆春；《骆驼祥子》；《四世同堂》；《茶馆》'),
+    subquestions: [{
+      ...validQuestion,
+      displayNo: '1(1)',
+      stem: '(1)小题',
+      questionSource: source('assignment', 'assignment-1', 'question.txt', 'q-1', '(1)小题')
+    }]
+  };
+  const fakeFetch = (async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ scope: '整份作业', questions: [question] }) } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch;
+  const materials: StoredMaterial[] = [
+    { id: 'assignment-1', taskId: 'task-1', kind: 'assignment', fileName: 'question.txt', mimeType: 'text/plain', status: 'ready', diskPath: '/tmp/question.txt', publicUrl: '/question.txt', normalizedDocument: { assetId: 'assignment-1', sourceFormat: 'text', markdown: '公共要求\n(1)小题', blocks: [{ id: 'q-1', order: 0, type: 'paragraph', text: '公共要求\n(1)小题' }], resources: [], warnings: [], parsedAt: '2026-09-12T00:00:00.000Z' } },
+    { id: 'answer-1', taskId: 'task-1', kind: 'reference-answer', fileName: 'answer.txt', mimeType: 'text/plain', status: 'ready', diskPath: '/tmp/answer.txt', publicUrl: '/answer.txt', normalizedDocument: { assetId: 'answer-1', sourceFormat: 'text', markdown: '4. 老舍 舒庆春 骆驼祥子 四世同堂 茶馆 5. CD', blocks: [{ id: 'a-1', order: 0, type: 'paragraph', text: '4. 老舍 舒庆春 骆驼祥子 四世同堂 茶馆 5. CD' }], resources: [], warnings: [], parsedAt: '2026-09-12T00:00:00.000Z' } }
+  ];
+  const result = await new OpenAICompatibleQuestionAnalyzer({ apiKey: 'test', baseUrl: 'https://example.test/v1', visionModel: 'test-model' }, fakeFetch).analyzeAssignment(materials, []);
+  assert.equal(result.questions[0]?.stem, '公共要求');
+  assert.equal(result.questions[0]?.standardAnswer, question.standardAnswer);
+  assert.equal(result.questions[0]?.answerSource?.quote, '4. 老舍 舒庆春 骆驼祥子 四世同堂 茶馆');
+  assert.equal((result.questions[0]?.answerSource as AnalysisEvidenceRef | null)?.matchStatus, 'normalized');
 });

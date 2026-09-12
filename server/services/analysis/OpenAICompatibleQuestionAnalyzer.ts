@@ -25,6 +25,28 @@ interface AnalyzerDocument {
 
 const invalidKnowledgeCandidateReason = '知识点返回格式异常，未自动关联';
 
+const comparableText = (value: string) => value
+  .normalize('NFKC')
+  .toLocaleLowerCase('zh-CN')
+  .replace(/[\s\p{P}\p{S}]/gu, '');
+
+const normalizedSourceSlice = (source: string, candidate: string) => {
+  const target = comparableText(candidate);
+  if (!target) return '';
+  let normalized = '';
+  const sourceIndexes: number[] = [];
+  for (let index = 0; index < source.length; index += 1) {
+    const next = comparableText(source[index]!);
+    for (const character of next) {
+      normalized += character;
+      sourceIndexes.push(index);
+    }
+  }
+  const start = normalized.indexOf(target);
+  if (start < 0) return '';
+  return source.slice(sourceIndexes[start], (sourceIndexes[start + target.length - 1] ?? source.length - 1) + 1);
+};
+
 interface ModelOutputRecovery {
   questionNo: string;
   droppedKnowledgeCandidateCount: number;
@@ -97,40 +119,55 @@ export class OpenAICompatibleQuestionAnalyzer {
       `${document.kind}:${document.assetId}`,
       new Map(document.blocks.map(block => [block.id, block.text]))
     ]));
-    const authoritativeQuote = (source: typeof result.questions[number]['questionSource']) => {
+    const resolveSource = (source: typeof result.questions[number]['questionSource'], displayText: string) => {
       const blocks = blocksByDocument.get(`${source.assetKind}:${source.assetId}`);
-      if (!blocks) return '';
-      const segments = source.segments.filter(segment => blocks.get(segment.blockId)?.includes(segment.quote));
-      if (segments.length !== source.segments.length) return '';
-      return segments.map(segment => segment.quote.trim()).filter(Boolean).join('\n').trim();
+      if (!blocks) return null;
+      const exactSegments = source.segments.flatMap(segment => {
+        const block = blocks.get(segment.blockId);
+        return block?.includes(segment.quote) ? [segment] : [];
+      });
+      if (source.segments.length > 0 && exactSegments.length === source.segments.length) {
+        return { ...source, quote: exactSegments.map(segment => segment.quote.trim()).filter(Boolean).join('\n').trim(), segments: exactSegments, matchStatus: 'exact' as const };
+      }
+      for (const blockId of [...new Set([...source.segments.map(segment => segment.blockId), ...source.blockIds])]) {
+        const block = blocks.get(blockId);
+        if (!block) continue;
+        const matched = normalizedSourceSlice(block, displayText) || normalizedSourceSlice(block, source.quote);
+        if (matched) return { ...source, blockIds: [blockId], quote: matched, segments: [{ blockId, quote: matched }], matchStatus: 'normalized' as const };
+      }
+      const fallbackSegments = [...new Set(source.blockIds)].flatMap(blockId => {
+        const quote = blocks.get(blockId);
+        return quote ? [{ blockId, quote }] : [];
+      });
+      return fallbackSegments.length ? {
+        ...source,
+        blockIds: fallbackSegments.map(segment => segment.blockId),
+        quote: fallbackSegments.map(segment => segment.quote).join('\n'),
+        segments: fallbackSegments,
+        matchStatus: 'block-level' as const
+      } : null;
     };
     const useSourceText = <T extends typeof result.questions[number] | typeof result.questions[number]['subquestions'][number]>(question: T): T => {
-      const questionQuote = authoritativeQuote(question.questionSource);
-      const answerQuote = question.answerSource ? authoritativeQuote(question.answerSource) : '';
-      const answerInvalid = Boolean(question.answerSource && !answerQuote);
+      const questionSource = resolveSource(question.questionSource, question.stem);
+      const answerSource = question.answerSource ? resolveSource(question.answerSource, question.standardAnswer) : null;
+      const answerNeedsReview = answerSource?.matchStatus === 'block-level';
       return {
         ...question,
-        stem: questionQuote || question.stem,
-        standardAnswer: answerInvalid ? '' : answerQuote || question.standardAnswer,
-        questionSource: {
-          ...question.questionSource,
-          blockIds: [...new Set(question.questionSource.segments.map(segment => segment.blockId))],
-          quote: questionQuote || question.questionSource.quote
-        },
-        answerSource: answerInvalid ? null : question.answerSource ? {
-          ...question.answerSource,
-          blockIds: [...new Set(question.answerSource.segments.map(segment => segment.blockId))],
-          quote: answerQuote
-        } : null,
-        reviewReasons: answerInvalid
-          ? [...new Set([...question.reviewReasons, '参考答案来源未通过原文校验，需教师确认'])]
+        questionSource: questionSource ?? question.questionSource,
+        answerSource,
+        reviewReasons: answerNeedsReview
+          ? [...new Set([...question.reviewReasons, '答案已识别，来源仅定位到 OCR 文本块，需教师确认'])]
           : question.reviewReasons
       };
     };
-    const normalizedQuestions = result.questions.map(question => ({
-      ...useSourceText(question),
-      subquestions: question.subquestions.map(useSourceText)
-    }));
+    const normalizedQuestions = result.questions.map(question => {
+      const subquestions = question.subquestions.map(useSourceText);
+      const motherQuestion = useSourceText(question);
+      const stem = subquestions.reduce((current, subquestion) => current.replace(subquestion.stem.trim(), '').trim(), motherQuestion.stem)
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      return { ...motherQuestion, stem: stem || motherQuestion.stem, subquestions };
+    });
     const duplicateKeys = new Map<string, string[]>();
     normalizedQuestions.forEach(question => {
       const key = question.answerSource && question.standardAnswer.length > 2
@@ -146,12 +183,7 @@ export class OpenAICompatibleQuestionAnalyzer {
           : '';
         const duplicates = key ? duplicateKeys.get(key) ?? [] : [];
         if (duplicates.length < 2 || question.reviewReasons.some(reason => reason.includes('答案确实相同'))) return question;
-        return {
-          ...question,
-          standardAnswer: '',
-          answerSource: null,
-          reviewReasons: [...new Set([...question.reviewReasons, `与第 ${duplicates.filter(no => no !== question.displayNo).join('、')} 题返回了完全相同的答案来源，需教师确认`])]
-        };
+        return { ...question, reviewReasons: [...new Set([...question.reviewReasons, `与第 ${duplicates.filter(no => no !== question.displayNo).join('、')} 题返回了完全相同的答案来源，需教师确认`])] };
       })
     };
   }
@@ -167,12 +199,8 @@ export class OpenAICompatibleQuestionAnalyzer {
       for (const [label, source] of [['题目', unit.questionSource], ['答案', unit.answerSource]] as const) {
         if (!source) continue;
         const sourceBlocks = blocks.get(`${source.assetKind}:${source.assetId}`);
-        if (!sourceBlocks || source.segments.some(segment => !sourceBlocks.get(segment.blockId)?.includes(segment.quote))) {
+        if (!sourceBlocks || !source.segments.length || source.segments.some(segment => !sourceBlocks.get(segment.blockId)?.includes(segment.quote))) {
           issues.push(`第 ${unit.displayNo} 题${label}引用的片段不在指定 OCR block 中`);
-        } else {
-          const segmentText = source.segments.map(segment => segment.quote.trim()).filter(Boolean).join('\n');
-          const expected = label === '题目' ? unit.stem.trim() : unit.standardAnswer.trim();
-          if (segmentText !== expected) issues.push(`第 ${unit.displayNo} 题${label}文本与引用片段不一致`);
         }
       }
     }
@@ -189,13 +217,13 @@ export class OpenAICompatibleQuestionAnalyzer {
 
   private async analyzeDocuments(documents: AnalyzerDocument[], catalog: string, correction?: { previous: unknown; issues: string[] }) {
     const prompt = [
-      '你是作业结构化分析器。题目和参考答案材料均已完整提供，本次只调用一次完成整份材料的对应。',
-      '题目与参考答案的全部 OCR 原文、页面顺序及 block id 都已提供。你负责理解整份材料，识别题号层级、题型、题目与答案对应关系、评分依据和知识点；不得缩写、概括、润色或补写题干与答案。',
-      '识别材料中的全部一级题，不得按章节、题型或前若干题截断。',
-      '一级题放在 questions；明确子题放在对应 subquestions。按原题号和原始顺序输出。',
-      'subquestions 中每个小题必须返回与一级题相同的全部字段：displayNo、title、stem、score、questionType、answerRequirement、standardAnswer、explanation、rubricPoints、knowledgeCandidates、questionSource、answerSource、confidence、reviewReasons。不得使用简写对象；小题来源无法单独定位时沿用父题来源。',
+      '你是作业结构化分析器。题目和参考答案材料均已完整提供，请一次完成整份材料的对应。',
+      '题目与参考答案的全部 OCR 原文、页面顺序及 block id 都已提供。你负责理解整份材料，识别题号层级、题型、题目与答案对应关系、评分依据和知识点；不得缩写、概括或补写题干与答案，只允许修正纯排版转义。',
+      '识别材料中的全部母题，不得按章节、题型或前若干题截断。',
+      '母题放在 questions；明确小题放在对应 subquestions。母题 stem 只包含公共材料和公共要求，不得重复已经写入 subquestions 的小题题干。按原题号和原始顺序输出。',
+      'subquestions 中每个小题必须返回与母题相同的全部字段：displayNo、title、stem、score、questionType、answerRequirement、standardAnswer、explanation、rubricPoints、knowledgeCandidates、questionSource、answerSource、confidence、reviewReasons。不得使用简写对象；小题来源无法单独定位时沿用母题来源。',
       '每个来源都必须返回 segments，格式为 [{"blockId":"真实 block id","quote":"从该 block 逐字截取的本题片段"}]。一个 block 可以包含多道题，此时每道题引用同一 block 的不同 quote，绝不能把整个 block 当作每道题的答案。',
-      'stem 必须等于 questionSource.segments 中 quote 按顺序拼接的文本；standardAnswer 必须等于 answerSource.segments 中 quote 按顺序拼接的文本。quote 必须是对应 block.text 中真实存在的连续原文。无法确定时 standardAnswer 为空、answerSource 为 null，并写入 reviewReasons，禁止猜测。',
+      'stem 和 standardAnswer 面向教师阅读：保持原意和数学表达，保留可渲染的 LaTeX，不要暴露转义错误；questionSource/answerSource 的 quote 与 segments 则必须逐字引用 OCR 原文。展示文本可以与证据原文存在空格、全半角标点和排版标记差异。无法确定答案内容时 standardAnswer 为空、answerSource 为 null，并写入 reviewReasons，禁止猜测。',
       'standardAnswer 与答案材料按题号对应；答案为“略”时原样保留。rubricPoints 只能依据明确答案、分值或可直接推出的得分要求生成。',
       '同一道题的答案若跨多个 block 或包含多个示例，segments 应依原文顺序引用全部相关片段。不得依据固定题号格式切分，需理解中文数字、罗马数字、带圈序号、字母和无编号题目。',
       '不同题目的答案确实相同时，在两题 reviewReasons 中加入“答案确实相同”；否则不得为不同题目返回完全相同的答案来源。',

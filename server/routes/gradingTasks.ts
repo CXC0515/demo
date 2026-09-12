@@ -820,6 +820,7 @@ router.post('/:taskId/trial-grading', async (request, response) => {
 });
 
 router.post('/:taskId/analysis', async (request, response) => {
+  const analysisStartedAt = new Date();
   const config = getModelConfig();
   if (!isModelConfigured(config)) {
     response.status(503).json({ code: 'MODEL_NOT_CONFIGURED' });
@@ -874,6 +875,7 @@ router.post('/:taskId/analysis', async (request, response) => {
         }))
       };
     }) as FirstSectionAnalysis['questions'];
+    const analysisCompletedAt = new Date();
     const analysis = saveFirstSectionAnalysis({
       taskId: request.params.taskId,
       scope: rawAnalysis.scope,
@@ -881,7 +883,12 @@ router.post('/:taskId/analysis', async (request, response) => {
       model: config.visionModel,
       materialAssetIds: analysisMaterials.map(material => material.id),
       questions,
-      createdAt: new Date().toISOString()
+      createdAt: analysisCompletedAt.toISOString(),
+      processingMetrics: {
+        startedAt: analysisStartedAt.toISOString(),
+        completedAt: analysisCompletedAt.toISOString(),
+        durationMs: analysisCompletedAt.getTime() - analysisStartedAt.getTime()
+      }
     });
     deleteTrialGradingResult(request.params.taskId);
     deleteGradingBatch(request.params.taskId);
