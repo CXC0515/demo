@@ -19,7 +19,7 @@ const rubricPointSchema = z.object({
   description: z.string()
 });
 
-const knowledgeCandidateSchema = z.object({
+export const knowledgeCandidateSchema = z.object({
   nodeId: z.string(),
   nodeName: z.string(),
   confidence: z.number().min(0).max(1)

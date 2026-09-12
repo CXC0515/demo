@@ -5,7 +5,7 @@
 
 import { ModelConfig } from '../../config/modelConfig';
 import { extractJson } from '../model/extractJson';
-import { firstSectionModelOutputSchema } from '../../schemas/firstSectionAnalysis';
+import { firstSectionAnalysisJsonSchema, firstSectionModelOutputSchema, knowledgeCandidateSchema } from '../../schemas/firstSectionAnalysis';
 import { StoredMaterial } from '../../repositories/materialRepository';
 
 interface KnowledgeCatalogItem {
@@ -22,8 +22,52 @@ interface AnalyzerDocument {
   blocks: { id: string; text: string; listLabel?: string }[];
 }
 
+const invalidKnowledgeCandidateReason = '知识点返回格式异常，未自动关联';
+
+interface ModelOutputRecovery {
+  questionNo: string;
+  droppedKnowledgeCandidateCount: number;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+export const sanitizeRecoverableFirstSectionOutput = (value: unknown) => {
+  const recoveries: ModelOutputRecovery[] = [];
+  const sanitizeQuestion = (question: unknown): unknown => {
+    if (!isRecord(question)) return question;
+    const next = { ...question };
+    if (Array.isArray(question.knowledgeCandidates)) {
+      const knowledgeCandidates = question.knowledgeCandidates.flatMap(candidate => {
+        const parsed = knowledgeCandidateSchema.safeParse(candidate);
+        return parsed.success ? [parsed.data] : [];
+      });
+      const droppedKnowledgeCandidateCount = question.knowledgeCandidates.length - knowledgeCandidates.length;
+      if (droppedKnowledgeCandidateCount > 0) {
+        next.knowledgeCandidates = knowledgeCandidates;
+        if (Array.isArray(question.reviewReasons) && question.reviewReasons.every(reason => typeof reason === 'string')) {
+          next.reviewReasons = question.reviewReasons.includes(invalidKnowledgeCandidateReason)
+            ? [...question.reviewReasons]
+            : [...question.reviewReasons, invalidKnowledgeCandidateReason];
+        }
+        recoveries.push({
+          questionNo: typeof question.displayNo === 'string' ? question.displayNo : '',
+          droppedKnowledgeCandidateCount
+        });
+      }
+    }
+    if (Array.isArray(question.subquestions)) {
+      next.subquestions = question.subquestions.map(sanitizeQuestion);
+    }
+    return next;
+  };
+
+  if (!isRecord(value) || !Array.isArray(value.questions)) return { output: value, recoveries };
+  return { output: { ...value, questions: value.questions.map(sanitizeQuestion) }, recoveries };
+};
+
 export class OpenAICompatibleQuestionAnalyzer {
-  constructor(private readonly config: ModelConfig) {}
+  constructor(private readonly config: ModelConfig, private readonly fetcher: typeof fetch = fetch) {}
 
   async analyzeAssignment(materials: StoredMaterial[], knowledgeCatalog: KnowledgeCatalogItem[]) {
     const documents: AnalyzerDocument[] = materials.flatMap(material => material.normalizedDocument ? [{
@@ -80,12 +124,13 @@ export class OpenAICompatibleQuestionAnalyzer {
       '同一道题的答案若由连续多个段落或多个示例组成，standardAnswer、answerSource.blockIds 和 answerSource.quote 必须包含下一道题开始前的全部内容，不得只取第一段或第一个示例。',
       'questionSource/answerSource 中 assetId、fileName、blockIds 必须引用输入中真实值；无法定位答案时 answerSource 为 null。',
       '知识点只能使用资源库中的真实 nodeId；没有合适节点时返回空数组。所有 confidence 取 0 到 1。',
+      'knowledgeCandidates 非空时必须返回对象数组，例如 [{"nodeId":"资源库中的真实ID","nodeName":"对应节点名称","confidence":0.8}]；禁止返回 ["知识点名称"] 这类字符串数组。',
       '严格返回以下字段结构：{"scope":"整份作业","questions":[{"displayNo":"1","title":"","stem":"","score":0,"questionType":"","answerRequirement":"","standardAnswer":"","explanation":"","rubricPoints":[{"point":"","score":0,"description":""}],"knowledgeCandidates":[],"questionSource":{"assetKind":"assignment","assetId":"","fileName":"","blockIds":[],"quote":""},"answerSource":null,"confidence":0,"reviewReasons":[],"subquestions":[]}]}。',
       `资源库节点：\n${catalog || '（当前没有可用资源节点）'}`,
       `材料：\n${JSON.stringify(documents)}`
     ].join('\n\n');
 
-    const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+    const response = await this.fetcher(`${this.config.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${this.config.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -94,6 +139,7 @@ export class OpenAICompatibleQuestionAnalyzer {
           { role: 'system', content: '只返回符合要求的 JSON，不要输出解释性文字。' },
           { role: 'user', content: prompt }
         ],
+        response_format: { type: 'json_schema', json_schema: { name: 'first_section_analysis', strict: true, schema: firstSectionAnalysisJsonSchema } },
         reasoning_effort: 'low'
       }),
       signal: AbortSignal.timeout(300_000)
@@ -102,6 +148,10 @@ export class OpenAICompatibleQuestionAnalyzer {
     const payload = await response.json() as { choices?: { message?: { content?: string } }[] };
     const content = payload.choices?.[0]?.message?.content;
     if (!content) throw new Error('MODEL_EMPTY_RESPONSE');
-    return firstSectionModelOutputSchema.parse(extractJson(content));
+    const { output, recoveries } = sanitizeRecoverableFirstSectionOutput(extractJson(content));
+    if (recoveries.length) {
+      console.warn(JSON.stringify({ event: 'first_section_analysis_output_recovered', recoveries }));
+    }
+    return firstSectionModelOutputSchema.parse(output);
   }
 }
