@@ -151,6 +151,15 @@ const completeReferenceAnswer = <T extends ReferenceAnswerUnit>(unit: T, materia
   };
 };
 
+const classifyQuestionAnalysisError = (message: string) => {
+  const status = Number(message.match(/^MODEL_REQUEST_FAILED:(\d{3})$/)?.[1]);
+  if (status === 401 || status === 403) return { statusCode: 503, code: 'MODEL_AUTH_FAILED' };
+  if (status === 429) return { statusCode: 429, code: 'MODEL_RATE_LIMITED' };
+  if (status === 502 || status === 503 || status === 504) return { statusCode: 503, code: 'MODEL_SERVICE_UNAVAILABLE' };
+  if (Number.isInteger(status)) return { statusCode: 502, code: 'MODEL_REQUEST_REJECTED' };
+  return { statusCode: 502, code: 'MODEL_OUTPUT_INVALID' };
+};
+
 const toPublicAsset = ({ diskPath: _diskPath, normalizedDocument: _normalizedDocument, ...asset }: StoredMaterial) => asset;
 
 const parseUploadedMaterial = async (material: StoredMaterial) => {
@@ -881,7 +890,8 @@ router.post('/:taskId/analysis', async (request, response) => {
   } catch (error) {
     console.error(JSON.stringify({ event: 'first_section_analysis_failed', taskId: request.params.taskId, error: error instanceof Error ? error.message : String(error) }));
     const message = error instanceof Error ? error.message : 'ANALYSIS_FAILED';
-    response.status(502).json({ code: message.startsWith('MODEL_REQUEST_FAILED:') ? message : 'MODEL_OUTPUT_INVALID' });
+    const failure = classifyQuestionAnalysisError(message);
+    response.status(failure.statusCode).json({ code: failure.code });
   }
 });
 
