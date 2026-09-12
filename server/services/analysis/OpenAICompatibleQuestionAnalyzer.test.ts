@@ -101,7 +101,7 @@ test('requests strict structured output and gives a non-empty knowledge candidat
   assert.ok(responseFormat.json_schema?.schema);
   assert.match(JSON.stringify(requestBody.messages), /knowledgeCandidates 非空时必须返回对象数组/);
   assert.match(JSON.stringify(requestBody.messages), /禁止返回/);
-  assert.match(JSON.stringify(requestBody.messages), /一个 block 可以包含多道题/);
+  assert.match(JSON.stringify(requestBody.messages), /OCR block 只是可选的证据定位/);
   assert.match(JSON.stringify(requestBody.messages), /中文数字、罗马数字、带圈序号/);
   assert.equal(requestBody.reasoning_effort, 'medium');
   assert.equal(result.questions[0]?.stem, '第一题');
@@ -130,7 +130,7 @@ test('keeps distinct answer fragments from the same OCR block separated', async 
   assert.equal(result.questions[1]?.answerSource?.blockIds[0], 'a-1');
 });
 
-test('retries the whole analysis once when different questions reuse the same answer fragment', async () => {
+test('does not retry or discard answers when questions share an OCR block', async () => {
   const sharedAnswerSource = source('reference-answer', 'answer-1', 'answer.txt', 'a-1', '共同答案');
   const firstQuestion = { ...validQuestion, displayNo: '一', standardAnswer: '共同答案', answerSource: sharedAnswerSource };
   const duplicateQuestion = { ...validQuestion, displayNo: '二', title: '第二题', standardAnswer: '共同答案', answerSource: sharedAnswerSource };
@@ -147,8 +147,8 @@ test('retries the whole analysis once when different questions reuse the same an
   ];
   const analyzer = new OpenAICompatibleQuestionAnalyzer({ apiKey: 'test', baseUrl: 'https://example.test/v1', visionModel: 'test-model' }, fakeFetch);
   const result = await analyzer.analyzeAssignment(materials, []);
-  assert.equal(calls, 2);
-  assert.equal(result.questions[1]?.standardAnswer, '第二题答案');
+  assert.equal(calls, 1);
+  assert.equal(result.questions[1]?.standardAnswer, '共同答案');
 });
 
 test('keeps a readable answer when punctuation differs and removes repeated small-question text from the mother question', async () => {

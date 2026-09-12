@@ -149,8 +149,11 @@ export class OpenAICompatibleQuestionAnalyzer {
     };
     const useSourceText = <T extends typeof result.questions[number] | typeof result.questions[number]['subquestions'][number]>(question: T): T => {
       const questionSource = resolveSource(question.questionSource, question.stem);
-      const answerSource = question.answerSource ? resolveSource(question.answerSource, question.standardAnswer) : null;
-      const answerNeedsReview = answerSource?.matchStatus === 'block-level';
+      // OCR blocks are evidence locations, not a boundary for the AI's full-text answer.
+      const answerSource = question.answerSource
+        ? (resolveSource(question.answerSource, question.standardAnswer) ?? question.answerSource)
+        : null;
+      const answerNeedsReview = (answerSource as ({ matchStatus?: string } | null))?.matchStatus === 'block-level';
       return {
         ...question,
         questionSource: questionSource ?? question.questionSource,
@@ -199,18 +202,8 @@ export class OpenAICompatibleQuestionAnalyzer {
       for (const [label, source] of [['题目', unit.questionSource], ['答案', unit.answerSource]] as const) {
         if (!source) continue;
         const sourceBlocks = blocks.get(`${source.assetKind}:${source.assetId}`);
-        if (!sourceBlocks || !source.segments.length || source.segments.some(segment => !sourceBlocks.get(segment.blockId)?.includes(segment.quote))) {
-          issues.push(`第 ${unit.displayNo} 题${label}引用的片段不在指定 OCR block 中`);
-        }
+        if (!sourceBlocks) issues.push(`第 ${unit.displayNo} 题${label}引用的材料不存在`);
       }
-    }
-    const seen = new Map<string, string>();
-    for (const unit of units) {
-      if (!unit.answerSource || unit.standardAnswer.length <= 2 || unit.reviewReasons.some(reason => reason.includes('答案确实相同'))) continue;
-      const key = `${unit.answerSource.assetId}:${JSON.stringify(unit.answerSource.segments)}:${unit.standardAnswer}`;
-      const previous = seen.get(key);
-      if (previous) issues.push(`第 ${previous} 题与第 ${unit.displayNo} 题返回了完全相同的答案和来源`);
-      else seen.set(key, unit.displayNo);
     }
     return issues;
   }
@@ -219,14 +212,13 @@ export class OpenAICompatibleQuestionAnalyzer {
     const prompt = [
       '你是作业结构化分析器。题目和参考答案材料均已完整提供，请一次完成整份材料的对应。',
       '题目与参考答案的全部 OCR 原文、页面顺序及 block id 都已提供。你负责理解整份材料，识别题号层级、题型、题目与答案对应关系、评分依据和知识点；不得缩写、概括或补写题干与答案，只允许修正纯排版转义。',
-      '识别材料中的全部母题，不得按章节、题型或前若干题截断。',
-      '母题放在 questions；明确小题放在对应 subquestions。母题 stem 只包含公共材料和公共要求，不得重复已经写入 subquestions 的小题题干。按原题号和原始顺序输出。',
-      'subquestions 中每个小题必须返回与母题相同的全部字段：displayNo、title、stem、score、questionType、answerRequirement、standardAnswer、explanation、rubricPoints、knowledgeCandidates、questionSource、answerSource、confidence、reviewReasons。不得使用简写对象；小题来源无法单独定位时沿用母题来源。',
-      '每个来源都必须返回 segments，格式为 [{"blockId":"真实 block id","quote":"从该 block 逐字截取的本题片段"}]。一个 block 可以包含多道题，此时每道题引用同一 block 的不同 quote，绝不能把整个 block 当作每道题的答案。',
+      '识别材料中的全部题目，不得按章节、题型或前若干题截断。',
+      '题目放在 questions；明确子题放在对应 subquestions。题目 stem 只包含公共材料和公共要求，不得重复已经写入 subquestions 的小题题干。按原题号和原始顺序输出。',
+      'subquestions 中每个子题必须返回与题目相同的全部字段：displayNo、title、stem、score、questionType、answerRequirement、standardAnswer、explanation、rubricPoints、knowledgeCandidates、questionSource、answerSource、confidence、reviewReasons。不得使用简写对象；子题来源无法单独定位时沿用题目来源。',
+      '题目和答案必须基于各自材料的完整 OCR 文本理解并按题号、顺序和语义对应。OCR block 只是可选的证据定位，不是题目或答案的内容边界；答案跨 block、多个题共享 block 或 quote 无法精确切分时，仍须返回完整、正确的 standardAnswer。',
       'stem 和 standardAnswer 面向教师阅读：保持原意和数学表达，保留可渲染的 LaTeX，不要暴露转义错误；questionSource/answerSource 的 quote 与 segments 则必须逐字引用 OCR 原文。展示文本可以与证据原文存在空格、全半角标点和排版标记差异。无法确定答案内容时 standardAnswer 为空、answerSource 为 null，并写入 reviewReasons，禁止猜测。',
       'standardAnswer 与答案材料按题号对应；答案为“略”时原样保留。rubricPoints 只能依据明确答案、分值或可直接推出的得分要求生成。',
-      '同一道题的答案若跨多个 block 或包含多个示例，segments 应依原文顺序引用全部相关片段。不得依据固定题号格式切分，需理解中文数字、罗马数字、带圈序号、字母和无编号题目。',
-      '不同题目的答案确实相同时，在两题 reviewReasons 中加入“答案确实相同”；否则不得为不同题目返回完全相同的答案来源。',
+      '如能定位来源，segments 按原文顺序提供；无法精确定位时可提供覆盖范围较大的 blockIds/quote，但不得因此改变或省略 standardAnswer。需理解中文数字、罗马数字、带圈序号、字母和无编号题目。',
       'questionSource/answerSource 中 assetId、fileName、blockIds 必须引用输入中真实值；无法定位答案时 answerSource 为 null。',
       '知识点只能使用资源库中的真实 nodeId；没有合适节点时返回空数组。所有 confidence 取 0 到 1。',
       'knowledgeCandidates 非空时必须返回对象数组，例如 [{"nodeId":"资源库中的真实ID","nodeName":"对应节点名称","confidence":0.8}]；禁止返回 ["知识点名称"] 这类字符串数组。',
