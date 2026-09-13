@@ -12,7 +12,6 @@ import sharp from 'sharp';
 import { z } from 'zod';
 import { FirstSectionAnalysis, GradingMode, TrialGradingResult, VisionValidationResult } from '../../src/domain/types';
 import { getModelConfig, isModelConfigured } from '../config/modelConfig';
-import { getDocumentParserConfig, isPaddleCloudConfigured } from '../config/documentParserConfig';
 import { assertPathInsideWorkspace, uploadFilePath } from '../context/workspaceContext';
 import { uploadRateLimit } from '../middleware/security';
 import { runtimeConfig } from '../config/runtimeConfig';
@@ -29,17 +28,14 @@ import { trialGradingRequestSchema } from '../schemas/trialGrading';
 import { gradingRubricInputSchema } from '../schemas/gradingRubric';
 import { OpenAICompatibleQuestionAnalyzer } from '../services/analysis/OpenAICompatibleQuestionAnalyzer';
 import { resolveSourceEvidence } from '../services/evidence/sourceEvidenceResolver';
-import { OpenAICompatibleVisionRecognizer } from '../services/grading/OpenAICompatibleVisionRecognizer';
 import { OpenAICompatibleVisionRegionLocator } from '../services/grading/OpenAICompatibleVisionRegionLocator';
 import { createVisionLocatedRegions } from '../services/grading/questionRegionCropper';
-import { hasSuspiciousRepeatedShortAnswer, inferAnswerCardOption } from '../services/grading/trialScore';
+import { inferAnswerCardOption } from '../services/grading/trialScore';
 import { authenticatedUploadPath, resumeAuthenticatedWorkspace } from '../middleware/authenticated';
-import { buildExpectedAnswerFields } from '../services/grading/answerFieldSchema';
 import { buildTeacherAnswerOverrides, findSubmissionsNeedingTrialGrading, mergeCurrentTrialSamples, mergeRegradedQuestionSamples } from '../services/grading/trialResultReconciler';
 import { gradeTrialSubmissions } from '../services/grading/trialGradingService';
 import { buildGradingDiagnosis } from '../services/grading/gradingDiagnosis';
 import { applyTeacherReviewDecision } from '../services/grading/teacherReviewDecision';
-import { FocusedPaddleRecognizer } from '../services/grading/FocusedPaddleRecognizer';
 import { MaterialParserError } from '../services/materials/MaterialParser';
 import { parseMaterial } from '../services/materials/materialParserRegistry';
 import { sourcePageImagePath } from '../services/materials/sourcePageImage';
@@ -352,105 +348,25 @@ router.post('/:taskId/vision-validation', async (request, response) => {
     const expectedQuestionKinds = new Map(analysis.questions
       .filter(question => parsedRequest.data.questionNos.includes(question.displayNo))
       .map(question => [question.displayNo, /选择题/.test(question.questionType) ? 'choice' as const : 'text' as const]));
-    let regions = await createVisionLocatedRegions(
+    const locator = new OpenAICompatibleVisionRegionLocator(config);
+    const extraction = await locator.locatePages(pageSources.map(page => ({
+      ...page,
+      blocks: material.normalizedDocument!.blocks
+        .filter(block => block.pageNumber === page.pageNumber && block.boundingBox)
+        .map(block => ({ blockId: block.id, order: block.order, text: block.text, boundingBox: block.boundingBox! }))
+    })), parsedRequest.data.questionNos, analysis);
+    const extractionByNo = new Map(extraction.items.map(item => [item.displayNo, item]));
+    const regions = await createVisionLocatedRegions(
       request.params.taskId,
       material.id,
       pageSources,
       parsedRequest.data.questionNos,
       expectedEvidenceIds,
-      [],
+      extraction.items,
       parsedArtifact.data,
-      expectedQuestionKinds
+      expectedQuestionKinds,
+      true
     );
-    const missingPaddleNumbers = regions
-      .filter(region => region.locationStatus === 'needs-teacher' && region.locationReasons.some(reason => reason.includes('视觉与 Paddle 均未定位')))
-      .map(region => region.displayNo);
-    if (missingPaddleNumbers.length) {
-      const locator = new OpenAICompatibleVisionRegionLocator(config);
-      const locatedPages = await Promise.all(pageSources.map(async page => {
-        const artifactPage = parsedArtifact.data.pages.find(candidate => candidate.pageNumber === page.pageNumber);
-        const layoutHints = artifactPage?.prunedResult.parsing_res_list.map(block => {
-          const [left, top, right, bottom] = block.block_bbox;
-          return {
-            text: block.block_content.trim().slice(0, 160),
-            boundingBox: {
-              x: left / artifactPage.prunedResult.width,
-              y: top / artifactPage.prunedResult.height,
-              width: (right - left) / artifactPage.prunedResult.width,
-              height: (bottom - top) / artifactPage.prunedResult.height
-            }
-          };
-        }) ?? [];
-        const located = await locator.locate(page.sourceImagePath, missingPaddleNumbers, analysis, layoutHints);
-        return located.items.map(item => ({ ...item, pageNumber: page.pageNumber }));
-      }));
-      const locatedCandidates = locatedPages.flat();
-      const sequenceFiltered = missingPaddleNumbers.flatMap(displayNo => {
-        const currentQuestionIndex = analysis.questions.findIndex(question => question.displayNo === displayNo);
-        const nextQuestionNo = currentQuestionIndex >= 0 ? analysis.questions[currentQuestionIndex + 1]?.displayNo : undefined;
-        if (!nextQuestionNo) return locatedCandidates.filter(item => item.displayNo === displayNo);
-        const candidates = locatedCandidates.filter(item => item.displayNo === displayNo);
-        const preceding = candidates.filter(candidate => {
-          const artifactPage = parsedArtifact.data.pages.find(page => page.pageNumber === candidate.pageNumber);
-          if (!artifactPage) return false;
-          const nextAnchor = artifactPage.prunedResult.parsing_res_list
-            .filter(block => block.block_content.trim().match(/^(\d+)(?:\s|[.、（(])/u)?.[1] === nextQuestionNo)
-            .sort((first, second) => first.block_bbox[1] - second.block_bbox[1])[0];
-          if (!nextAnchor) return true;
-          const anchorTop = nextAnchor.block_bbox[1] / artifactPage.prunedResult.height;
-          return candidate.boundingBox.y < anchorTop + 0.02;
-        });
-        return preceding.length ? preceding : candidates;
-      });
-      const recovered = await createVisionLocatedRegions(
-        request.params.taskId,
-        material.id,
-        pageSources,
-        missingPaddleNumbers,
-        expectedEvidenceIds,
-        sequenceFiltered,
-        parsedArtifact.data,
-        expectedQuestionKinds
-      );
-      const recoveredByNo = new Map(recovered.map(region => [region.displayNo, region]));
-      regions = regions.map(region => recoveredByNo.get(region.displayNo) ?? region);
-    }
-    const recognizer = new OpenAICompatibleVisionRecognizer(config);
-    const recognizableRegions = regions.filter(region => region.locationStatus === 'located');
-    let recognition = await recognizer.recognize(recognizableRegions);
-    const initialRecognitionByNo = new Map(recognition.items.map(item => [item.displayNo, item]));
-    const focusedRegions = recognizableRegions.filter(region =>
-      region.needsFocusedOcr || initialRecognitionByNo.get(region.displayNo)?.requiresFocusedOcr
-    );
-    if (focusedRegions.length) {
-      const paddleConfig = getDocumentParserConfig();
-      if (isPaddleCloudConfigured(paddleConfig)) {
-        const focusedRecognizer = new FocusedPaddleRecognizer(paddleConfig);
-        const focusedResults = await Promise.allSettled(focusedRegions.map(async region => ({
-          displayNo: region.displayNo,
-          text: await focusedRecognizer.recognize(region.cropPath)
-        })));
-        const focusedTextByNo = new Map(focusedResults.flatMap(result =>
-          result.status === 'fulfilled' && result.value.text ? [[result.value.displayNo, result.value.text] as const] : []
-        ));
-        regions = regions.map(region => focusedTextByNo.has(region.displayNo)
-          ? { ...region, paddleText: focusedTextByNo.get(region.displayNo)!, needsFocusedOcr: false }
-          : region
-        );
-        const refreshedRegions = regions.filter(region => focusedTextByNo.has(region.displayNo));
-        if (refreshedRegions.length) {
-          const refreshed = await recognizer.recognize(refreshedRegions);
-          const refreshedNumbers = new Set(refreshed.items.map(item => item.displayNo));
-          recognition = {
-            items: [
-              ...recognition.items.filter(item => !refreshedNumbers.has(item.displayNo)),
-              ...refreshed.items
-            ]
-          };
-        }
-      }
-    }
-    const recognitionByNo = new Map(recognition.items.map(item => [item.displayNo, item]));
     const previousResult = getVisionValidationResult(request.params.taskId, material.id);
     const requestedNumbers = new Set(parsedRequest.data.questionNos);
     const result: VisionValidationResult = {
@@ -458,39 +374,21 @@ router.post('/:taskId/vision-validation', async (request, response) => {
       assetId: material.id,
       model: config.visionModel,
       items: [...(previousResult?.items.filter(item => !requestedNumbers.has(item.displayNo)) ?? []), ...regions.map(region => {
-        const item = recognitionByNo.get(region.displayNo);
-        const question = analysis.questions.find(candidate => candidate.displayNo === region.displayNo);
-        const expectedFields = question ? buildExpectedAnswerFields(question) : [];
-        const answerFields = item?.answerFields.map(field => ({
-          ...field,
-          label: expectedFields.find(candidate => candidate.fieldId === field.fieldId)?.label ?? field.fieldId
-        })) ?? [];
+        const item = extractionByNo.get(region.displayNo);
         const paddleSelectedOption = inferAnswerCardOption(region.paddleText);
         const selectedOption = paddleSelectedOption ?? item?.selectedOption ?? null;
-        const structuredText = selectedOption
-          ? selectedOption
-          : answerFields.length
-          ? answerFields.map(field => `${field.label}：${field.text || '[未填写]'}`).join('\n')
-          : item?.recognizedAnswer ?? '';
+        const structuredText = selectedOption || item?.recognizedAnswer || '';
         const evidenceUnits = region.evidenceUnits.map(unit => {
-          const transcriptionConfidence = unit.kind === 'choice' ? item?.confidence : undefined;
-          const transcriptionNeedsReview = unit.kind === 'choice' ? item?.needsReview : false;
-          const literalText = unit.kind === 'choice' ? selectedOption ?? '' : '';
-          const paddleCandidate = unit.paddleText;
-          const suspiciousPaddleRepetition = hasSuspiciousRepeatedShortAnswer(paddleCandidate);
           return {
           evidenceId: unit.evidenceId,
           kind: unit.kind,
           region: unit.region,
           cropUrl: unit.cropUrl,
-          provisionalText: paddleCandidate,
-          literalText,
-          confidence: unit.kind === 'choice' ? Math.min(unit.confidence, transcriptionConfidence ?? 0) : unit.confidence,
-          needsReview: unit.needsReview || suspiciousPaddleRepetition || (transcriptionNeedsReview ?? false),
-          reviewReasons: [...new Set([
-            ...unit.reviewReasons,
-            ...(suspiciousPaddleRepetition ? ['PaddleOCR 短答案存在连续重复，需核验'] : [])
-          ])]
+          provisionalText: unit.paddleText,
+          literalText: selectedOption || structuredText,
+          confidence: Math.min(unit.confidence, item?.confidence ?? 0),
+          needsReview: unit.needsReview || (item?.needsReview ?? true),
+          reviewReasons: unit.reviewReasons
           };
         });
         return {
@@ -504,7 +402,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
           evidenceUnits,
           paddleText: region.locationStatus === 'located' ? region.paddleText : '',
           lunaText: structuredText,
-          answerFields,
+          answerFields: [],
           crossedOutText: item?.crossedOutText ?? [],
           selectedOption,
           visualEvidence: item?.visualEvidence ?? '',

@@ -20,7 +20,14 @@ interface AnalyzerDocument {
   kind: StoredMaterial['kind'];
   fileName: string;
   fullText: string;
-  blocks: { id: string; text: string; listLabel?: string }[];
+  blocks: {
+    id: string;
+    text: string;
+    listLabel?: string;
+    pageNumber?: number;
+    order: number;
+    boundingBox?: { x: number; y: number; width: number; height: number };
+  }[];
 }
 
 const invalidKnowledgeCandidateReason = '知识点返回格式异常，未自动关联';
@@ -101,7 +108,10 @@ export class OpenAICompatibleQuestionAnalyzer {
       blocks: (material.normalizedDocument?.blocks ?? []).map(block => ({
         id: block.id,
         text: block.listLabel && !block.text.trim().startsWith(block.listLabel) ? `${block.listLabel} ${block.text}` : block.text,
-        listLabel: block.listLabel
+        listLabel: block.listLabel,
+        pageNumber: block.pageNumber,
+        order: block.order,
+        boundingBox: block.boundingBox
       }))
     }] : []);
     const catalog = knowledgeCatalog.map(item => `${item.id}\t${item.type}\t${item.name}\t${item.description}`).join('\n');

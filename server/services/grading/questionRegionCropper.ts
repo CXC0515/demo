@@ -506,7 +506,8 @@ export const createVisionLocatedRegions = async (
   expectedEvidenceIds: Map<string, string[]>,
   visionRegions: VisionLocatedRegion[],
   artifact?: PaddleParserArtifact,
-  expectedQuestionKinds: Map<string, VisionEvidenceKind> = new Map()
+  expectedQuestionKinds: Map<string, VisionEvidenceKind> = new Map(),
+  preferVisionGeometry = false
 ): Promise<LocatedRegion[]> => {
   const cropDirectory = uploadFilePath('validation', taskId, assetId);
   await mkdir(cropDirectory, { recursive: true });
@@ -526,10 +527,10 @@ export const createVisionLocatedRegions = async (
     } : undefined;
     const visionIsChoice = Boolean(vision?.evidenceUnits.length && vision.evidenceUnits.every(unit => unit.kind === 'choice'));
     const firstExpectedId = (expectedEvidenceIds.get(displayNo) ?? [`${displayNo}-answer`])[0];
-    const paddleQuestion = !vision && artifact && expectedKind !== 'choice'
+    const paddleQuestion = !preferVisionGeometry && !vision && artifact && expectedKind !== 'choice'
       ? questionPageFromPaddle(artifact, displayNo, firstExpectedId, expectedKind ?? 'text')
       : undefined;
-    const paddleChoice = (expectedKind === 'choice' || visionIsChoice) && artifact ? choiceRowAcrossPages(artifact, displayNo) : undefined;
+    const paddleChoice = !preferVisionGeometry && (expectedKind === 'choice' || visionIsChoice) && artifact ? choiceRowAcrossPages(artifact, displayNo) : undefined;
     const page = paddleChoice ? pageByNumber.get(paddleChoice.pageNumber)
       : paddleQuestion ? pageByNumber.get(paddleQuestion.pageNumber)
       : vision ? pageByNumber.get(vision.pageNumber)
@@ -560,14 +561,15 @@ export const createVisionLocatedRegions = async (
       reason: '视觉定位漏项，已用 Paddle 题号与答案块恢复证据'
     })) : []);
     const evidencePlans = await Promise.all(sourceEvidence.map(async evidence => {
-      const locatedRow = fallbackChoiceRow ?? (artifact ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, evidence.evidenceId, evidence.kind, visualQuestion) : undefined);
+      const visualRegion = toPixels(evidence.boundingBox, metadata.width!, metadata.height!);
+      const locatedRow = fallbackChoiceRow ?? (!preferVisionGeometry && artifact ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, evidence.evidenceId, evidence.kind, visualQuestion) : undefined);
       const usePaddleGeometry = Boolean(locatedRow);
       const paddleRow = usePaddleGeometry ? await alignBlockLineToInk(page.sourceImagePath, locatedRow) : undefined;
       return {
         evidence,
-        visualRegion: toPixels(evidence.boundingBox, metadata.width!, metadata.height!),
+        visualRegion,
         paddleRow,
-        paddleText: locatedRow?.text ?? '',
+        paddleText: preferVisionGeometry && artifact ? paddleTextInsideRegion(artifact, page.pageNumber, visualRegion) : locatedRow?.text ?? '',
         paddleTextKey: locatedRow?.textKey
       };
     }));
@@ -579,7 +581,7 @@ export const createVisionLocatedRegions = async (
     const boundedVisualPanel = vision && artifact
       ? await panelBeforeNextQuestion(page.sourceImagePath, artifact, page.pageNumber, displayNo, visualQuestion)
       : undefined;
-    const questionPixels = alignedChoiceRow?.region
+    const questionPixels = preferVisionGeometry && vision ? visualQuestion : alignedChoiceRow?.region
       ?? (paddleRows.length && (usingPaddleFallback || paddleRows.length === usableEvidencePlans.length)
         ? unionRegions(paddleRows)
         : paddleQuestionRow?.region ?? boundedVisualPanel ?? answerPanel ?? visualQuestion);

@@ -12,10 +12,7 @@ const normalizeNameText = (value: string) => value
 
 const fileNameWithoutExtension = (fileName: string) => fileName.replace(/\.[^.]+$/, '');
 
-const assetText = (asset: DocumentAsset, document?: NormalizedDocument) => [
-  fileNameWithoutExtension(asset.fileName),
-  ...(document?.blocks.map(block => block.text) ?? [])
-].join('\n');
+const documentText = (document?: NormalizedDocument) => document?.blocks.map(block => block.text).join('\n') ?? '';
 
 export const buildSubmissionPages = (
   assets: DocumentAsset[],
@@ -27,10 +24,11 @@ export const buildSubmissionPages = (
 
   const pages: SubmissionPage[] = assets.filter(asset => asset.kind === 'student-submission').map((asset, index) => {
     const document = documentsByAssetId.get(asset.id);
-    const normalizedText = normalizeNameText(assetText(asset, document));
+    const normalizedFileName = normalizeNameText(fileNameWithoutExtension(asset.fileName));
+    const normalizedDocumentText = normalizeNameText(documentText(document));
     const nameCandidates = activeStudents.filter(student => {
       const normalizedName = normalizeNameText(student.name);
-      return Boolean(normalizedName && normalizedText.includes(normalizedName));
+      return Boolean(normalizedName && (normalizedFileName.includes(normalizedName) || normalizedDocumentText.includes(normalizedName)));
     });
     const uniqueNames = [...new Set(nameCandidates.map(student => student.name))];
     const matchedStudent = nameCandidates.length === 1 ? nameCandidates[0] : undefined;
@@ -49,6 +47,9 @@ export const buildSubmissionPages = (
       // Persisted-state compatibility only. OCR numbers are never used to match identity.
       detectedStudentNo: matchedStudent?.studentNo ?? '未使用学号识别',
       matchedStudentNo: matchedStudent?.studentNo,
+      nameMatchSource: matchedStudent
+        ? normalizedDocumentText.includes(normalizeNameText(matchedStudent.name)) ? 'ocr' : 'file-name'
+        : undefined,
       pageCount: document?.pageCount ?? asset.pageCount ?? 1,
       ocrConfidence,
       studentNoConfidence: undefined,

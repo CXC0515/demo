@@ -170,6 +170,7 @@ export interface SubmissionPage {
   detectedStudentNo: string;
   detectedStudentName?: string;
   matchedStudentNo?: string;
+  nameMatchSource?: 'ocr' | 'file-name' | 'teacher';
   pageCount: number;
   ocrConfidence: number;
   studentNoConfidence?: number;
@@ -477,6 +478,8 @@ export interface AnalysisEvidenceRef {
   sourcePageUrl?: string;
   locatorStatus?: 'located' | 'needs-visual' | 'needs-teacher';
   locatorReasons?: string[];
+  cropMode?: 'block' | 'estimated-segment';
+  blockImageUrl?: string;
 }
 
 export interface AnalyzedQuestionUnit {
@@ -534,6 +537,8 @@ export interface SourceEvidence {
   evidenceMode?: 'native-text' | 'source-crop';
   locatorStatus?: 'located' | 'needs-visual' | 'needs-teacher';
   locatorReasons?: string[];
+  cropMode?: 'block' | 'estimated-segment';
+  blockImageUrl?: string;
   isMock?: boolean;
 }
 

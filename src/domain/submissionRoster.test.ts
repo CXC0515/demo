@@ -30,12 +30,14 @@ test('matches a unique roster name anywhere in OCR content', () => {
   const pages = buildSubmissionPages([asset('a1')], [document('a1', blocks)], [student('5001', '学生甲')]);
   assert.equal(pages[0].studentId, 'student-5001');
   assert.equal(pages[0].detectedStudentName, '学生甲');
+  assert.equal(pages[0].nameMatchSource, 'ocr');
   assert.equal(pages[0].rosterMatchStatus, 'matched');
 });
 
 test('matches a roster name from the file name', () => {
   const pages = buildSubmissionPages([asset('a1', '七五班-学生乙.pdf')], [], [student('5002', '学生乙')]);
   assert.equal(pages[0].studentId, 'student-5002');
+  assert.equal(pages[0].nameMatchSource, 'file-name');
 });
 
 test('does not use question numbers to infer identity', () => {
