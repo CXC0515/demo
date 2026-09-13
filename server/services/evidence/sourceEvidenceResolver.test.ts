@@ -136,3 +136,16 @@ test('does not create a separate visual crop for a subquestion source', () => {
   }, [source]);
   assert.equal(result.cropMode, 'block');
 });
+
+test('uses a teacher-selected region without constraining it to the OCR block', () => {
+  const result = resolveSourceEvidence('task-1', {
+    ...reference,
+    manualRegion: {
+      pageNumber: 1,
+      boundingBox: { x: 0.02, y: 0.12, width: 0.9, height: 0.3 },
+      selectedAt: '2026-09-14T00:00:00.000Z'
+    }
+  }, [material('pdf')], true);
+  assert.equal(result.cropMode, 'teacher-manual');
+  assert.deepEqual(result.boundingBox, { x: 0.02, y: 0.12, width: 0.9, height: 0.3 });
+});

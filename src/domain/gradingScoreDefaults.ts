@@ -5,12 +5,13 @@
 
 import { AnalyzedQuestion, AnalyzedQuestionUnit, GradingRubricPoint } from './types';
 
-export const resolvedUnitScore = (unit: Pick<AnalyzedQuestionUnit, 'score'>) => unit.score ?? 1;
+export const resolvedUnitScore = (unit: Pick<AnalyzedQuestionUnit, 'score'> & Partial<Pick<AnalyzedQuestionUnit, 'rubricPoints'>>) =>
+  unit.score ?? Math.max(1, unit.rubricPoints?.length ?? 0);
 
-export const resolvedQuestionScore = (question: Pick<AnalyzedQuestion, 'score' | 'subquestions'>) =>
+export const resolvedQuestionScore = (question: Pick<AnalyzedQuestion, 'score' | 'subquestions'> & Partial<Pick<AnalyzedQuestion, 'rubricPoints'>>) =>
   question.score ?? (question.subquestions.length
     ? question.subquestions.reduce((total, unit) => total + resolvedUnitScore(unit), 0)
-    : 1);
+    : resolvedUnitScore(question));
 
 export const resolveRubricScores = (
   points: AnalyzedQuestionUnit['rubricPoints'],

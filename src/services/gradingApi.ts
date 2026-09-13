@@ -98,6 +98,34 @@ export const getTaskAnalysis = async (taskId: string) => {
   return body.analysis;
 };
 
+export interface EvidenceRegionComparison {
+  originalQuote: string;
+  intersectingText: string;
+  geometricStatus: 'covered' | 'different' | 'empty';
+  focusedOcrText?: string;
+  ocrStatus: 'not-run' | 'completed' | 'failed';
+}
+
+export const compareTaskEvidenceRegion = async (taskId: string, displayNo: string, assetKind: 'assignment' | 'reference-answer', pageNumber: number, boundingBox: { x: number; y: number; width: number; height: number }, runOcr = false) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/analysis/questions/${encodeURIComponent(displayNo)}/evidence/compare`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetKind, pageNumber, boundingBox, runOcr })
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return response.json() as Promise<EvidenceRegionComparison>;
+};
+
+export const saveTaskEvidenceRegion = async (taskId: string, displayNo: string, assetKind: 'assignment' | 'reference-answer', pageNumber: number, boundingBox: { x: number; y: number; width: number; height: number }) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/analysis/questions/${encodeURIComponent(displayNo)}/evidence`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetKind, pageNumber, boundingBox })
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { analysis: FirstSectionAnalysis }).analysis;
+};
+
 export const saveTaskQuestionCorrection = async (taskId: string, displayNo: string, correction: { title: string; stem: string; answerRequirement: string; standardAnswer?: string }) => {
   const response = await apiFetch(`/api/grading-tasks/${taskId}/analysis/questions/${encodeURIComponent(displayNo)}`, {
     method: 'PUT',
