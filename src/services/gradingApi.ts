@@ -41,6 +41,12 @@ export const retryStudentSubmissionParsing = async (taskId: string, assetIds: st
   return (await response.json() as { assets: DocumentAsset[] }).assets;
 };
 
+export const retryTaskMaterialParsing = async (taskId: string, assetId: string) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/materials/${encodeURIComponent(assetId)}/reparse`, { method: 'POST' });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { asset: DocumentAsset }).asset;
+};
+
 export interface TaskMaterialsResult {
   assets: DocumentAsset[];
   documents: NormalizedDocument[];

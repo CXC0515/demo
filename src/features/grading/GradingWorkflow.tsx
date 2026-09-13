@@ -67,7 +67,7 @@ import {
 import { orderCalibrationSamplesForTrial } from '../../domain/calibrationSamples';
 import SourceEvidenceViewer from './SourceEvidenceViewer';
 import RichOcrText from './RichOcrText';
-import { analyzeTaskMaterials, confirmBatchStudents, correctTrialOcr, getBatchGrading, getGradingDiagnosis, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, regradeTrialQuestion, removeStudentSubmissions, retryStudentSubmissionParsing, runVisionValidation, saveTaskQuestionCorrection, saveTaskRubric, saveTeacherReview, setBatchGradingAction, setTaskQuestionKnowledgeLink, startBatchGrading, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
+import { analyzeTaskMaterials, confirmBatchStudents, correctTrialOcr, getBatchGrading, getGradingDiagnosis, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, regradeTrialQuestion, removeStudentSubmissions, retryStudentSubmissionParsing, retryTaskMaterialParsing, runVisionValidation, saveTaskQuestionCorrection, saveTaskRubric, saveTeacherReview, setBatchGradingAction, setTaskQuestionKnowledgeLink, startBatchGrading, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
 import { listRosterClasses, listRosterStudents } from '../../services/rosterApi';
 import { buildMissingSubmissions, buildSubmissionPages } from '../../domain/submissionRoster';
 import { resolvedQuestionScore, resolvedUnitScore, resolveRubricScores } from '../../domain/gradingScoreDefaults';
@@ -166,7 +166,7 @@ const getFiles = (files: FileList | null) => {
 };
 
 const getSubmissionStatus = (page: SubmissionPage, asset?: DocumentAsset) => {
-  if (asset?.status === 'failed') return { label: asset.parseErrorCode === 'PADDLEOCR_RATE_LIMITED' ? 'OCR 受限，可重试' : 'OCR 失败，可重试', className: 'bg-rose-100 text-rose-800' };
+  if (asset?.status === 'failed') return { label: asset.parseErrorCode === 'PADDLEOCR_QUEUE_FULL' ? 'OCR 队列已满，可重试' : asset.parseErrorCode === 'PADDLEOCR_RATE_LIMITED' ? 'OCR 受限，可重试' : 'OCR 失败，可重试', className: 'bg-rose-100 text-rose-800' };
   if (asset?.status === 'processing' || asset?.status === 'uploaded') return { label: asset.status === 'processing' ? '正在识别' : '等待识别', className: 'bg-amber-100 text-amber-800' };
   if (page.rosterMatchStatus === 'ambiguous-student-name') return { label: '同名待确认', className: 'bg-rose-100 text-rose-800' };
   if (page.rosterMatchStatus === 'unreadable-student-name') return { label: '姓名待确认', className: 'bg-rose-100 text-rose-800' };
@@ -434,6 +434,20 @@ const analysisStatusLabel: Record<WorkflowState['assignment']['analysisStatus'],
 
 const materialStatusLabel: Record<WorkflowState['assignment']['assets'][number]['status'], string> = {
   uploaded: '等待解析', processing: '解析中', ready: '已解析', 'needs-review': '需检查', failed: '失败'
+};
+
+const materialParseErrorMessage = (code: string | undefined) => {
+  const messages: Record<string, string> = {
+    DOCX_PARSER_NOT_INSTALLED: 'DOCX 解析环境尚未安装。文件已保存。',
+    PADDLEOCR_NOT_CONFIGURED: 'PaddleOCR API 尚未配置。文件已保存。',
+    PADDLEOCR_AUTH_FAILED: 'PaddleOCR Token 无效。文件已保存。',
+    PADDLEOCR_QUEUE_FULL: 'PaddleOCR 当前队列已满。文件已保存，请稍后原地重试。',
+    PADDLEOCR_INVALID_REQUEST: 'PaddleOCR 未接受当前文件。文件已保存，可核对格式后原地重试。',
+    PADDLEOCR_RATE_LIMITED: 'PaddleOCR 当前额度或频率受限。文件已保存，请稍后原地重试。',
+    PADDLEOCR_TIMEOUT: 'PaddleOCR 解析超时。文件已保存，请稍后原地重试。',
+    MATERIAL_PARSE_TIMEOUT: '材料解析等待超时。文件已保存，请稍后原地重试。'
+  };
+  return messages[code ?? ''] ?? '材料解析未完成。文件已保存，可原地重试。';
 };
 
 const analysisErrorMessage = (code: string) => {
@@ -752,6 +766,8 @@ export default function GradingWorkflow({
   const gradingDataReady = selectedQuestions.length > 0 && matchRows.length > 0 && rosterMatchPhase === 'ready' && !issueRows.some(row => row.rosterMatchStatus !== 'matched');
   const normalizedDocuments = workflowState.assignment.documents ?? [];
   const assignmentAssets = workflowState.assignment.assets.filter(asset => asset.kind === 'assignment' || asset.kind === 'reference-answer');
+  const failedAssignmentAssets = assignmentAssets.filter(asset => asset.status === 'failed');
+  const activeMaterialError = materialUploadError ?? failedAssignmentAssets[0]?.parseErrorCode;
   const pendingMaterialCount = pendingMaterialFiles.assignment.length + pendingMaterialFiles.referenceAnswer.length;
   const materialUploadBusy = materialUploadPhase === 'uploading' || materialUploadPhase === 'parsing';
   const assignmentMaterialsReady = assignmentAssets.some(asset => asset.kind === 'assignment' && (asset.status === 'ready' || asset.status === 'needs-review'))
@@ -1087,7 +1103,9 @@ export default function GradingWorkflow({
       }
       setSubmissionUploadPhase('error');
       setSubmissionUploadError(code);
-      const message = code === 'PADDLEOCR_RATE_LIMITED'
+      const message = code === 'PADDLEOCR_QUEUE_FULL'
+        ? 'PaddleOCR 当前队列已满，文件已上传，可稍后直接重试识别'
+        : code === 'PADDLEOCR_RATE_LIMITED'
         ? 'PaddleOCR 请求频率受限，文件已上传，可稍后直接重试识别'
         : code === 'PADDLEOCR_TIMEOUT'
           ? 'PaddleOCR 解析超时，文件已上传，可稍后直接重试识别'
@@ -1127,7 +1145,7 @@ export default function GradingWorkflow({
       }
       setSubmissionUploadPhase('error');
       setSubmissionUploadError(code);
-      onShowToast('部分答卷仍未识别，上传记录已保留且没有新增副本');
+      onShowToast(code === 'PADDLEOCR_QUEUE_FULL' ? 'PaddleOCR 当前队列仍然繁忙，答卷已保留且没有新增副本' : '部分答卷仍未识别，上传记录已保留且没有新增副本');
     }
   };
 
@@ -1165,6 +1183,10 @@ export default function GradingWorkflow({
       const replacedKinds = new Set(pendingGroups.map(group => group.kind));
       const assets = [...workflowState.assignment.assets.filter(asset => !replacedKinds.has(asset.kind as 'assignment' | 'reference-answer')), ...uploaded];
       updateAssignment({ assets, analysisStatus: 'parsing' });
+      setPendingMaterialFiles(current => ({
+        assignment: replacedKinds.has('assignment') ? [] : current.assignment,
+        referenceAnswer: replacedKinds.has('reference-answer') ? [] : current.referenceAnswer
+      }));
       setMaterialUploadPhase('parsing');
       const result = await waitForTaskMaterials(selectedTask.id, uploaded.map(asset => asset.id));
       const nextAssignmentAssets = result.assets.filter(asset => asset.kind === 'assignment' || asset.kind === 'reference-answer');
@@ -1208,16 +1230,47 @@ export default function GradingWorkflow({
           }
         });
       }).catch(() => updateAssignment({ analysisStatus: 'failed' }));
-      const messageByCode: Record<string, string> = {
-        DOCX_PARSER_NOT_INSTALLED: 'DOCX 解析环境尚未安装',
-        PADDLEOCR_NOT_CONFIGURED: 'PaddleOCR API 尚未配置',
-        PADDLEOCR_AUTH_FAILED: 'PaddleOCR Token 无效',
-        PADDLEOCR_INVALID_REQUEST: 'PaddleOCR 无法处理当前文件',
-        PADDLEOCR_RATE_LIMITED: 'PaddleOCR API 当前额度或频率受限',
-        PADDLEOCR_TIMEOUT: 'PaddleOCR 解析超时，请稍后重试',
-        MATERIAL_PARSE_TIMEOUT: '材料解析等待超时，请稍后重试'
-      };
-      onShowToast(messageByCode[code] ?? '材料解析失败，请检查文件后重试');
+      onShowToast(materialParseErrorMessage(code));
+    }
+  };
+
+  const retryFailedMaterialParsing = async () => {
+    const assetIds = failedAssignmentAssets.map(asset => asset.id);
+    if (!assetIds.length) return;
+    setMaterialUploadPhase('parsing');
+    setMaterialUploadError(null);
+    updateAssignment({ analysisStatus: 'parsing' });
+    try {
+      await Promise.all(assetIds.map(assetId => retryTaskMaterialParsing(selectedTask.id, assetId)));
+      const result = await getTaskMaterials(selectedTask.id);
+      const nextAssignmentAssets = result.assets.filter(asset => asset.kind === 'assignment' || asset.kind === 'reference-answer');
+      const failed = nextAssignmentAssets.filter(asset => asset.status === 'failed');
+      const needsReview = nextAssignmentAssets.some(asset => asset.status === 'needs-review');
+      onUpdateState({
+        assignment: {
+          ...workflowState.assignment,
+          questionFileNames: nextAssignmentAssets.filter(asset => asset.kind === 'assignment').map(asset => asset.fileName),
+          answerFileNames: nextAssignmentAssets.filter(asset => asset.kind === 'reference-answer').map(asset => asset.fileName),
+          assets: result.assets,
+          documents: result.documents,
+          analysisStatus: failed.length ? 'failed' : needsReview ? 'needs-review' : 'ready'
+        }
+      });
+      if (failed.length) {
+        const code = failed[0]?.parseErrorCode ?? 'MATERIAL_PARSE_FAILED';
+        setMaterialUploadPhase('error');
+        setMaterialUploadError(code);
+        onShowToast(materialParseErrorMessage(code));
+        return;
+      }
+      setMaterialUploadPhase('idle');
+      onShowToast(`已重新解析 ${assetIds.length} 份材料，没有重复上传`);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : 'MATERIAL_PARSE_FAILED';
+      setMaterialUploadPhase('error');
+      setMaterialUploadError(code);
+      updateAssignment({ analysisStatus: 'failed' });
+      onShowToast(materialParseErrorMessage(code));
     }
   };
 
@@ -1775,10 +1828,10 @@ export default function GradingWorkflow({
               <label className={`flex min-h-36 flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors dark:border-zinc-700 dark:bg-zinc-900/50 ${materialUploadBusy ? 'cursor-wait opacity-60' : 'cursor-pointer hover:border-emerald-500'}`}><Upload className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">作业题目或试卷</strong><span className={`mt-1 max-w-full truncate text-xs ${pendingMaterialFiles.assignment.length ? 'font-bold text-amber-700' : 'text-slate-400'}`}>{pendingMaterialFiles.assignment.length ? `待解析 ${pendingMaterialFiles.assignment.length} 份：${pendingMaterialFiles.assignment.map(file => file.name).join('、')}` : workflowState.assignment.questionFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" disabled={materialUploadBusy} onClick={event => { event.currentTarget.value = ''; }} onChange={event => selectMaterialFiles('assignment', event.currentTarget.files)} /></label>
               <label className={`flex min-h-36 flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors dark:border-zinc-700 dark:bg-zinc-900/50 ${materialUploadBusy ? 'cursor-wait opacity-60' : 'cursor-pointer hover:border-emerald-500'}`}><FileText className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">参考答案</strong><span className={`mt-1 max-w-full truncate text-xs ${pendingMaterialFiles.referenceAnswer.length ? 'font-bold text-amber-700' : 'text-slate-400'}`}>{pendingMaterialFiles.referenceAnswer.length ? `待解析 ${pendingMaterialFiles.referenceAnswer.length} 份：${pendingMaterialFiles.referenceAnswer.map(file => file.name).join('、')}` : workflowState.assignment.answerFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" disabled={materialUploadBusy} onClick={event => { event.currentTarget.value = ''; }} onChange={event => selectMaterialFiles('referenceAnswer', event.currentTarget.files)} /></label>
             </div>
-            {pendingMaterialCount || materialUploadPhase === 'error' ? <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900 dark:bg-amber-950/20">
+            {pendingMaterialCount || materialUploadPhase === 'error' || failedAssignmentAssets.length ? <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900 dark:bg-amber-950/20">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0"><strong className="text-sm text-amber-950 dark:text-amber-100">{materialUploadBusy ? materialUploadPhase === 'uploading' ? '正在上传材料' : '正在并行解析材料' : `已选择 ${pendingMaterialCount} 份待解析材料`}</strong><p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-200">选择文件不会自动解析。开始后，新文件会替换对应的旧材料，并使已有拆题结果失效。</p>{materialUploadError ? <p className="mt-2 text-xs font-bold text-rose-700">处理失败（{materialUploadError}）。已成功上传的材料会保留，可检查后重试。</p> : null}</div>
-                <button type="button" disabled={!pendingMaterialCount || materialUploadBusy} onClick={() => void startMaterialParsing()} className="flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"><Play className="h-4 w-4" />{materialUploadPhase === 'uploading' ? '正在上传...' : materialUploadPhase === 'parsing' ? '正在解析...' : '上传并开始解析'}</button>
+                <div className="min-w-0"><strong className="text-sm text-amber-950 dark:text-amber-100">{materialUploadBusy ? materialUploadPhase === 'uploading' ? '正在上传材料' : '正在并行解析材料' : pendingMaterialCount ? `已选择 ${pendingMaterialCount} 份待解析材料` : `${failedAssignmentAssets.length} 份已上传材料解析未完成`}</strong><p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-200">{pendingMaterialCount ? '选择文件不会自动解析。开始后，新文件会替换对应的旧材料，并使已有拆题结果失效。' : '原文件仍保存在系统中；重新解析会复用现有文件，不会再次上传或产生副本。'}</p>{activeMaterialError ? <p className="mt-2 text-xs font-bold leading-5 text-rose-700">{materialParseErrorMessage(activeMaterialError)}</p> : null}</div>
+                <button type="button" disabled={materialUploadBusy || (!pendingMaterialCount && !failedAssignmentAssets.length)} onClick={() => void (pendingMaterialCount ? startMaterialParsing() : retryFailedMaterialParsing())} className="flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">{pendingMaterialCount ? <Play className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}{materialUploadPhase === 'uploading' ? '正在上传...' : materialUploadPhase === 'parsing' ? '正在解析...' : pendingMaterialCount ? '上传并开始解析' : '重试已上传材料'}</button>
               </div>
               {pendingMaterialCount && !materialUploadBusy ? <div className="mt-3 flex flex-col gap-2 border-t border-amber-200 pt-3 sm:flex-row dark:border-amber-900">{pendingMaterialFiles.assignment.length ? <button type="button" onClick={() => clearPendingMaterialFiles('assignment')} className="min-h-11 rounded-xl border border-amber-300 px-3 text-xs font-bold text-amber-900 dark:border-amber-800 dark:text-amber-100">清除待解析题目</button> : null}{pendingMaterialFiles.referenceAnswer.length ? <button type="button" onClick={() => clearPendingMaterialFiles('referenceAnswer')} className="min-h-11 rounded-xl border border-amber-300 px-3 text-xs font-bold text-amber-900 dark:border-amber-800 dark:text-amber-100">清除待解析答案</button> : null}</div> : null}
             </section> : null}
