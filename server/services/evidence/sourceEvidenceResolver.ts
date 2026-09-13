@@ -37,18 +37,32 @@ const estimateSegmentBox = (block: EvidenceBlock, quote: string) => {
   };
 };
 
-const unionBoxes = (boxes: Array<{ x: number; y: number; width: number; height: number }>) => {
+const unionBoxes = (boxes: Array<{ x: number; y: number; width: number; height: number }>, padding = 0.015) => {
   const left = Math.min(...boxes.map(box => box.x));
   const top = Math.min(...boxes.map(box => box.y));
   const right = Math.max(...boxes.map(box => box.x + box.width));
   const bottom = Math.max(...boxes.map(box => box.y + box.height));
-  const padding = 0.015;
   return {
     x: clamp(left - padding),
     y: clamp(top - padding),
     width: clamp(right + padding) - clamp(left - padding),
     height: clamp(bottom + padding) - clamp(top - padding)
   };
+};
+
+const intersectBoxes = (
+  first: { x: number; y: number; width: number; height: number },
+  second: { x: number; y: number; width: number; height: number }
+) => {
+  const left = Math.max(first.x, second.x);
+  const top = Math.max(first.y, second.y);
+  const right = Math.min(first.x + first.width, second.x + second.width);
+  const bottom = Math.min(first.y + first.height, second.y + second.height);
+  if (right <= left || bottom <= top) return null;
+  const intersection = { x: left, y: top, width: right - left, height: bottom - top };
+  const requestedArea = first.width * first.height;
+  const intersectionArea = intersection.width * intersection.height;
+  return requestedArea > 0 && intersectionArea / requestedArea >= 0.6 ? intersection : null;
 };
 
 const cropUrl = (taskId: string, assetId: string, pageNumber: number, box: { x: number; y: number; width: number; height: number }) => {
@@ -62,7 +76,7 @@ const cropUrl = (taskId: string, assetId: string, pageNumber: number, box: { x: 
   return `/api/grading-tasks/${encodeURIComponent(taskId)}/materials/${encodeURIComponent(assetId)}/evidence-crop?${query}`;
 };
 
-export const resolveSourceEvidence = (taskId: string, reference: AnalysisEvidenceRef, materials: StoredMaterial[]): AnalysisEvidenceRef => {
+export const resolveSourceEvidence = (taskId: string, reference: AnalysisEvidenceRef, materials: StoredMaterial[], useWholeQuestionVisualRegion = false): AnalysisEvidenceRef => {
   const material = materials.find(item => item.id === reference.assetId && item.kind === reference.assetKind);
   const document = material?.normalizedDocument;
   if (!material || !document) {
@@ -108,7 +122,9 @@ export const resolveSourceEvidence = (taskId: string, reference: AnalysisEvidenc
     };
   }
 
-  const blockBoundingBox = unionBoxes(selectedBlocks.map(block => block.boundingBox));
+  const selectedBlockBoxes = selectedBlocks.map(block => block.boundingBox);
+  const blockConstraintBox = unionBoxes(selectedBlockBoxes, 0);
+  const blockBoundingBox = unionBoxes(selectedBlockBoxes);
   const blocksById = new Map(selectedBlocks.map(block => [block.id, block]));
   const segmentBoxes = (reference.segments ?? []).flatMap(segment => {
     const block = blocksById.get(segment.blockId);
@@ -117,16 +133,28 @@ export const resolveSourceEvidence = (taskId: string, reference: AnalysisEvidenc
   const canUseEstimatedSegment = isPartialBlock
     && segmentBoxes.length === (reference.segments?.length ?? 0)
     && segmentBoxes.some(segment => segment.estimated);
-  const boundingBox = canUseEstimatedSegment ? unionBoxes(segmentBoxes.map(segment => segment.box)) : blockBoundingBox;
+  const visualBoundingBox = useWholeQuestionVisualRegion
+    && isPartialBlock
+    && reference.visualRegion?.pageNumber === pageNumber
+    ? intersectBoxes(reference.visualRegion.boundingBox, blockConstraintBox)
+    : null;
+  const boundingBox = canUseEstimatedSegment
+    ? unionBoxes(segmentBoxes.map(segment => segment.box))
+    : visualBoundingBox ?? blockBoundingBox;
+  const cropMode = canUseEstimatedSegment
+    ? 'estimated-segment' as const
+    : visualBoundingBox
+      ? 'model-within-block' as const
+      : 'block' as const;
   return {
     ...reference,
     evidenceMode: 'source-crop',
     isPartialBlock,
     pageNumber,
     boundingBox,
-    cropMode: canUseEstimatedSegment ? 'estimated-segment' : 'block',
+    cropMode,
     imageUrl: cropUrl(taskId, material.id, pageNumber, boundingBox),
-    blockImageUrl: canUseEstimatedSegment ? cropUrl(taskId, material.id, pageNumber, blockBoundingBox) : undefined,
+    blockImageUrl: cropMode !== 'block' ? cropUrl(taskId, material.id, pageNumber, blockBoundingBox) : undefined,
     sourcePageUrl: sourcePage.publicUrl,
     locatorStatus: 'located',
     locatorReasons: []

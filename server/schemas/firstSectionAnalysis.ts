@@ -14,7 +14,16 @@ const evidenceSchema = z.object({
   segments: z.array(z.object({
     blockId: z.string().min(1),
     quote: z.string().min(1)
-  }))
+  })),
+  visualRegion: z.object({
+    pageNumber: z.number().int().positive(),
+    boundingBox: z.object({
+      x: z.number().min(0).max(1),
+      y: z.number().min(0).max(1),
+      width: z.number().positive().max(1),
+      height: z.number().positive().max(1)
+    })
+  }).nullable()
 });
 
 const rubricPointSchema = z.object({
