@@ -31,6 +31,16 @@ export const removeStudentSubmissions = async (taskId: string, assetIds: string[
   return (await response.json() as { removed: DocumentAsset[] }).removed;
 };
 
+export const retryStudentSubmissionParsing = async (taskId: string, assetIds: string[]) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/student-submissions/retry`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetIds })
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { assets: DocumentAsset[] }).assets;
+};
+
 export interface TaskMaterialsResult {
   assets: DocumentAsset[];
   documents: NormalizedDocument[];
@@ -48,9 +58,13 @@ export const waitForTaskMaterials = async (taskId: string, assetIds: string[], t
   while (Date.now() - startedAt < timeoutMs) {
     const result = await getTaskMaterials(taskId);
     const expectedAssets = result.assets.filter(asset => expectedIds.has(asset.id));
-    const failed = expectedAssets.find(asset => asset.status === 'failed');
-    if (failed) throw new Error(failed.parseErrorCode ?? 'MATERIAL_PARSE_FAILED');
-    if (expectedAssets.length === expectedIds.size && expectedAssets.every(asset => asset.status === 'ready' || asset.status === 'needs-review')) return result;
+    const allFinished = expectedAssets.length === expectedIds.size
+      && expectedAssets.every(asset => asset.status === 'ready' || asset.status === 'needs-review' || asset.status === 'failed');
+    if (allFinished) {
+      const failed = expectedAssets.find(asset => asset.status === 'failed');
+      if (failed) throw new Error(failed.parseErrorCode ?? 'MATERIAL_PARSE_FAILED');
+      return result;
+    }
     await new Promise(resolve => window.setTimeout(resolve, 1200));
   }
   throw new Error('MATERIAL_PARSE_TIMEOUT');
@@ -83,6 +97,16 @@ export const saveTaskQuestionCorrection = async (taskId: string, displayNo: stri
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(correction)
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { analysis: FirstSectionAnalysis }).analysis;
+};
+
+export const setTaskQuestionKnowledgeLink = async (taskId: string, displayNo: string, nodeId: string, confirmed: boolean) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/analysis/questions/${encodeURIComponent(displayNo)}/knowledge/${encodeURIComponent(nodeId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirmed })
   });
   if (!response.ok) throw new Error(await readErrorCode(response));
   return (await response.json() as { analysis: FirstSectionAnalysis }).analysis;
