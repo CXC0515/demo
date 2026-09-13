@@ -110,6 +110,21 @@ export const resolveSourceEvidence = (taskId: string, reference: AnalysisEvidenc
       locatorReasons: ['原始页面图像不可用']
     };
   }
+  const manualRegion = reference.manualRegion?.pageNumber === pageNumber ? reference.manualRegion : null;
+  if (manualRegion) {
+    return {
+      ...reference,
+      evidenceMode: 'source-crop',
+      isPartialBlock,
+      pageNumber,
+      boundingBox: manualRegion.boundingBox,
+      cropMode: 'teacher-manual',
+      imageUrl: cropUrl(taskId, material.id, pageNumber, manualRegion.boundingBox),
+      sourcePageUrl: sourcePage.publicUrl,
+      locatorStatus: 'located',
+      locatorReasons: []
+    };
+  }
   if (!selectedBlocks.length || pageNumbers.length !== 1) {
     return {
       ...reference,

@@ -236,6 +236,7 @@ export class OpenAICompatibleQuestionAnalyzer {
       '没有页面原图或无法可靠判断整题区域时 visualRegion 返回 null，不得编造坐标。',
       'stem 和 standardAnswer 面向教师阅读：保持原意和数学表达，保留可渲染的 LaTeX，不要暴露转义错误；questionSource/answerSource 的 quote 与 segments 则必须逐字引用 OCR 原文。展示文本可以与证据原文存在空格、全半角标点和排版标记差异。无法确定答案内容时 standardAnswer 为空、answerSource 为 null，并写入 reviewReasons，禁止猜测。',
       'standardAnswer 与答案材料按题号对应；答案为“略”时原样保留。rubricPoints 只能依据明确答案、分值或可直接推出的得分要求生成。',
+      '未提供明确分值时，rubricPoints 必须按可独立判断对错的最小答案单元拆分：每个填空、选项、词语、句子或独立要点各返回一项，score 返回 null，系统按每项 1 分计算。例如“①窄 ②敞 ③贮 ④澄”必须返回四个 rubricPoints，不能合并为一个。',
       '同一道题的答案若跨多个 block 或包含多个示例，segments 应依原文顺序引用全部相关片段。不得依据固定题号格式切分，需理解中文数字、罗马数字、带圈序号、字母和无编号题目。',
       '不同题目的答案确实相同时，在两题 reviewReasons 中加入“答案确实相同”；否则不得为不同题目返回完全相同的答案来源。',
       'questionSource/answerSource 中 assetId、fileName、blockIds 必须引用输入中真实值；无法定位答案时 answerSource 为 null。',

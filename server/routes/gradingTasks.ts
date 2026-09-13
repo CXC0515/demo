@@ -10,8 +10,9 @@ import { Router } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
 import { z } from 'zod';
-import { FirstSectionAnalysis, GradingMode, TrialGradingResult, VisionValidationResult } from '../../src/domain/types';
+import { AnalysisEvidenceRef, FirstSectionAnalysis, GradingMode, TrialGradingResult, VisionValidationResult } from '../../src/domain/types';
 import { getModelConfig, isModelConfigured } from '../config/modelConfig';
+import { getDocumentParserConfig } from '../config/documentParserConfig';
 import { assertPathInsideWorkspace, uploadFilePath } from '../context/workspaceContext';
 import { uploadRateLimit } from '../middleware/security';
 import { runtimeConfig } from '../config/runtimeConfig';
@@ -29,6 +30,7 @@ import { gradingRubricInputSchema } from '../schemas/gradingRubric';
 import { OpenAICompatibleQuestionAnalyzer } from '../services/analysis/OpenAICompatibleQuestionAnalyzer';
 import { resolveSourceEvidence } from '../services/evidence/sourceEvidenceResolver';
 import { OpenAICompatibleVisionRegionLocator } from '../services/grading/OpenAICompatibleVisionRegionLocator';
+import { FocusedPaddleRecognizer } from '../services/grading/FocusedPaddleRecognizer';
 import { createVisionLocatedRegions } from '../services/grading/questionRegionCropper';
 import { inferAnswerCardOption } from '../services/grading/trialScore';
 import { authenticatedUploadPath, resumeAuthenticatedWorkspace } from '../middleware/authenticated';
@@ -116,6 +118,40 @@ const evidenceCropQuerySchema = z.object({
   width: z.coerce.number().positive().max(1),
   height: z.coerce.number().positive().max(1)
 });
+
+const evidenceRegionSchema = z.object({
+  assetKind: z.enum(['assignment', 'reference-answer']),
+  pageNumber: z.number().int().positive(),
+  boundingBox: z.object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    width: z.number().positive().max(1),
+    height: z.number().positive().max(1)
+  }).refine(box => box.x + box.width <= 1.001 && box.y + box.height <= 1.001),
+  runOcr: z.boolean().optional()
+});
+
+const normalizedComparableText = (value: string) => value.normalize('NFKC').replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase();
+
+const boxesOverlap = (
+  first: { x: number; y: number; width: number; height: number },
+  second: { x: number; y: number; width: number; height: number }
+) => first.x < second.x + second.width && first.x + first.width > second.x
+  && first.y < second.y + second.height && first.y + first.height > second.y;
+
+const extractEvidenceCrop = async (material: StoredMaterial, pageNumber: number, box: { x: number; y: number; width: number; height: number }) => {
+  const sourcePage = material.normalizedDocument?.resources.find(resource => resource.role === 'source-page' && (resource.pageNumber ?? 1) === pageNumber);
+  if (!sourcePage) throw new Error('SOURCE_PAGE_NOT_FOUND');
+  const sourcePath = sourcePageImagePath(material.id, pageNumber, sourcePage.fileName);
+  const image = sharp(sourcePath);
+  const metadata = await image.metadata();
+  if (!metadata.width || !metadata.height) throw new Error('SOURCE_PAGE_DIMENSIONS_MISSING');
+  const left = Math.max(0, Math.floor(box.x * metadata.width));
+  const top = Math.max(0, Math.floor(box.y * metadata.height));
+  const width = Math.max(1, Math.min(metadata.width - left, Math.ceil(box.width * metadata.width)));
+  const height = Math.max(1, Math.min(metadata.height - top, Math.ceil(box.height * metadata.height)));
+  return image.extract({ left, top, width, height }).jpeg({ quality: 94 }).toBuffer();
+};
 
 const classifyQuestionAnalysisError = (message: string) => {
   const status = Number(message.match(/^MODEL_REQUEST_FAILED:(\d{3})$/)?.[1]);
@@ -275,15 +311,7 @@ router.get('/:taskId/materials/:assetId/evidence-crop', async (request, response
     return;
   }
   try {
-    const sourcePath = sourcePageImagePath(material.id, parsed.data.page, sourcePage.fileName);
-    const image = sharp(sourcePath);
-    const metadata = await image.metadata();
-    if (!metadata.width || !metadata.height) throw new Error('SOURCE_PAGE_DIMENSIONS_MISSING');
-    const left = Math.max(0, Math.floor(parsed.data.x * metadata.width));
-    const top = Math.max(0, Math.floor(parsed.data.y * metadata.height));
-    const width = Math.max(1, Math.min(metadata.width - left, Math.ceil(parsed.data.width * metadata.width)));
-    const height = Math.max(1, Math.min(metadata.height - top, Math.ceil(parsed.data.height * metadata.height)));
-    const buffer = await image.extract({ left, top, width, height }).jpeg({ quality: 94 }).toBuffer();
+    const buffer = await extractEvidenceCrop(material, parsed.data.page, parsed.data);
     response.type('image/jpeg').send(buffer);
   } catch {
     response.status(500).json({ code: 'EVIDENCE_CROP_FAILED' });
@@ -486,6 +514,68 @@ router.get('/:taskId/analysis', (request, response) => {
       }))
     }
   });
+});
+
+router.post('/:taskId/analysis/questions/:displayNo/evidence/compare', async (request, response) => {
+  const parsed = evidenceRegionSchema.safeParse(request.body);
+  const analysis = getFirstSectionAnalysis(request.params.taskId);
+  const displayNo = decodeURIComponent(request.params.displayNo);
+  const question = analysis?.questions.find(item => item.displayNo === displayNo);
+  if (!parsed.success) return response.status(400).json({ code: 'INVALID_EVIDENCE_REGION' });
+  if (!analysis || !question) return response.status(404).json({ code: analysis ? 'QUESTION_NOT_FOUND' : 'ANALYSIS_NOT_FOUND' });
+  const source = parsed.data.assetKind === 'assignment' ? question.questionSource : question.answerSource;
+  const material = source ? getMaterials(request.params.taskId).find(item => item.id === source.assetId && item.kind === parsed.data.assetKind) : undefined;
+  if (!source || !material?.normalizedDocument) return response.status(404).json({ code: 'EVIDENCE_SOURCE_NOT_FOUND' });
+
+  const intersectingText = material.normalizedDocument.blocks
+    .filter(block => block.pageNumber === parsed.data.pageNumber && block.boundingBox && boxesOverlap(block.boundingBox, parsed.data.boundingBox))
+    .sort((first, second) => first.order - second.order)
+    .map(block => block.text.trim())
+    .filter(Boolean)
+    .join('\n');
+  const expected = normalizedComparableText(source.quote);
+  const actual = normalizedComparableText(intersectingText);
+  const geometricStatus = !actual ? 'empty' : actual.includes(expected) || expected.includes(actual) ? 'covered' : 'different';
+  let focusedOcrText: string | undefined;
+  let ocrStatus: 'not-run' | 'completed' | 'failed' = 'not-run';
+  if (parsed.data.runOcr) {
+    const temporaryPath = uploadFilePath('validation', request.params.taskId, material.id, `teacher-region-${randomUUID()}.jpg`);
+    try {
+      mkdirSync(path.dirname(temporaryPath), { recursive: true });
+      const buffer = await extractEvidenceCrop(material, parsed.data.pageNumber, parsed.data.boundingBox);
+      await sharp(buffer).toFile(temporaryPath);
+      focusedOcrText = await new FocusedPaddleRecognizer(getDocumentParserConfig()).recognize(temporaryPath);
+      ocrStatus = 'completed';
+    } catch {
+      ocrStatus = 'failed';
+    } finally {
+      if (existsSync(temporaryPath)) rmSync(temporaryPath);
+    }
+  }
+  response.json({ originalQuote: source.quote, intersectingText, geometricStatus, focusedOcrText, ocrStatus });
+});
+
+router.put('/:taskId/analysis/questions/:displayNo/evidence', (request, response) => {
+  const parsed = evidenceRegionSchema.omit({ runOcr: true }).safeParse(request.body);
+  const analysis = getFirstSectionAnalysis(request.params.taskId);
+  const displayNo = decodeURIComponent(request.params.displayNo);
+  const question = analysis?.questions.find(item => item.displayNo === displayNo);
+  if (!parsed.success) return response.status(400).json({ code: 'INVALID_EVIDENCE_REGION' });
+  if (!analysis || !question) return response.status(404).json({ code: analysis ? 'QUESTION_NOT_FOUND' : 'ANALYSIS_NOT_FOUND' });
+  const selectedSource = parsed.data.assetKind === 'assignment' ? question.questionSource : question.answerSource;
+  if (!selectedSource || selectedSource.assetId !== getMaterials(request.params.taskId).find(item => item.id === selectedSource.assetId)?.id) {
+    return response.status(404).json({ code: 'EVIDENCE_SOURCE_NOT_FOUND' });
+  }
+  const manualRegion = { pageNumber: parsed.data.pageNumber, boundingBox: parsed.data.boundingBox, selectedAt: new Date().toISOString() };
+  const updated = saveFirstSectionAnalysis({
+    ...analysis,
+    questions: analysis.questions.map(item => item.displayNo !== displayNo ? item : {
+      ...item,
+      questionSource: parsed.data.assetKind === 'assignment' ? { ...item.questionSource, manualRegion } : item.questionSource,
+      answerSource: parsed.data.assetKind === 'reference-answer' && item.answerSource ? { ...item.answerSource, manualRegion } : item.answerSource
+    })
+  });
+  response.json({ analysis: updated });
 });
 
 router.put('/:taskId/analysis/questions/:displayNo', (request, response) => {
@@ -795,6 +885,7 @@ router.post('/:taskId/analysis', async (request, response) => {
     return;
   }
   try {
+    const previousAnalysis = getFirstSectionAnalysis(request.params.taskId);
     const analyzer = new OpenAICompatibleQuestionAnalyzer(config);
     const rawAnalysis = await analyzer.analyzeAssignment(analysisMaterials, parsedCatalog.data);
     const catalogById = new Map(parsedCatalog.data.map(node => [node.id, node]));
@@ -809,10 +900,19 @@ router.post('/:taskId/analysis', async (request, response) => {
         .map(point => ({ point: point.point?.trim() || point.description?.trim() || '', score: point.score ?? null, description: point.description ?? '' }));
     const questions = rawAnalysis.questions.map(rawQuestion => {
       const question = rawQuestion;
+      const previousQuestion = previousAnalysis?.questions.find(item => item.displayNo === question.displayNo);
+      const preserveManualRegion = <T extends AnalysisEvidenceRef>(source: T, previousSource: AnalysisEvidenceRef | null | undefined): T =>
+        previousSource?.assetId === source.assetId && previousSource.manualRegion
+          ? { ...source, manualRegion: previousSource.manualRegion } as T
+          : source;
+      const questionSource = preserveManualRegion(question.questionSource, previousQuestion?.questionSource);
+      const answerSource = question.answerSource
+        ? preserveManualRegion(question.answerSource, previousQuestion?.answerSource)
+        : null;
       return {
         ...question,
-        questionSource: resolveSourceEvidence(request.params.taskId, question.questionSource, analysisMaterials, true),
-        answerSource: question.answerSource ? resolveSourceEvidence(request.params.taskId, question.answerSource, analysisMaterials, true) : null,
+        questionSource: resolveSourceEvidence(request.params.taskId, questionSource, analysisMaterials, true),
+        answerSource: answerSource ? resolveSourceEvidence(request.params.taskId, answerSource, analysisMaterials, true) : null,
         rubricPoints: normalizeRubricPoints(question.rubricPoints),
         knowledgeCandidates: normalizeKnowledgeCandidates(question.knowledgeCandidates),
         subquestions: question.subquestions.map(subquestion => ({

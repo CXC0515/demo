@@ -12,6 +12,17 @@ test('defaults each scoreless leaf question to one point', () => {
   assert.equal(resolvedQuestionScore({ score: null, subquestions: [] }), 1);
 });
 
+test('defaults each independently judgeable rubric point to one point', () => {
+  const rubricPoints = [
+    { point: '第一空', score: null, description: '' },
+    { point: '第二空', score: null, description: '' },
+    { point: '第三空', score: null, description: '' },
+    { point: '第四空', score: null, description: '' }
+  ];
+  assert.equal(resolvedUnitScore({ score: null, rubricPoints }), 4);
+  assert.equal(resolvedQuestionScore({ score: null, subquestions: [], rubricPoints }), 4);
+});
+
 test('uses the sum of minimum units when the containing question has no score', () => {
   assert.equal(resolvedQuestionScore({ score: null, subquestions: [{ score: null }, { score: 2 }] as never }), 3);
 });
@@ -27,6 +38,6 @@ test('distributes unresolved rubric scores within the unit total', () => {
   ], 1, '作答正确').map(point => point.score), [0.5, 0.5]);
 });
 
-test('creates one fallback rubric when a minimum unit has none', () => {
-  assert.deepEqual(resolveRubricScores([], 1, '小题 1 作答符合参考答案'), [{ point: '小题 1 作答符合参考答案', score: 1, description: '' }]);
+test('creates one neutral fallback rubric when a minimum unit has none', () => {
+  assert.deepEqual(resolveRubricScores([], 1, '参考答案要点'), [{ point: '参考答案要点', score: 1, description: '' }]);
 });

@@ -66,8 +66,9 @@ import {
 } from '../../domain/types';
 import { orderCalibrationSamplesForTrial } from '../../domain/calibrationSamples';
 import SourceEvidenceViewer from './SourceEvidenceViewer';
+import ScoreKeypad from './ScoreKeypad';
 import RichOcrText from './RichOcrText';
-import { analyzeTaskMaterials, confirmBatchStudents, correctTrialOcr, getBatchGrading, getGradingDiagnosis, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, regradeTrialQuestion, removeStudentSubmissions, retryStudentSubmissionParsing, retryTaskMaterialParsing, runVisionValidation, saveTaskQuestionCorrection, saveTaskRubric, saveTeacherReview, setBatchGradingAction, setTaskQuestionKnowledgeLink, startBatchGrading, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
+import { analyzeTaskMaterials, compareTaskEvidenceRegion, confirmBatchStudents, correctTrialOcr, EvidenceRegionComparison, getBatchGrading, getGradingDiagnosis, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, regradeTrialQuestion, removeStudentSubmissions, retryStudentSubmissionParsing, retryTaskMaterialParsing, runVisionValidation, saveTaskEvidenceRegion, saveTaskQuestionCorrection, saveTaskRubric, saveTeacherReview, setBatchGradingAction, setTaskQuestionKnowledgeLink, startBatchGrading, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
 import { listRosterClasses, listRosterStudents } from '../../services/rosterApi';
 import { buildMissingSubmissions, buildSubmissionPages } from '../../domain/submissionRoster';
 import { resolvedQuestionScore, resolvedUnitScore, resolveRubricScores } from '../../domain/gradingScoreDefaults';
@@ -235,6 +236,8 @@ function VisionItemCard({ item }: { item: VisionValidationItem; key?: string }) 
   );
 }
 
+const prefixRubricPoint = (displayNo: string, point: string) => point.trim().startsWith(displayNo) ? point : `${displayNo} ${point}`;
+
 const buildWorkflowFromAnalysis = (taskId: string, analysis: FirstSectionAnalysis, savedRubrics: TaskQuestionRubric[] = []) => {
   const sourceEvidence = analysis.questions.flatMap(question => {
     const questionEvidenceId = `${taskId}-question-${question.displayNo}`;
@@ -290,7 +293,7 @@ const buildWorkflowFromAnalysis = (taskId: string, analysis: FirstSectionAnalysi
       answerRequirement: unit.answerRequirement,
       standardAnswer: unit.standardAnswer,
       explanation: unit.explanation,
-      rubricPoints: resolveRubricScores(unit.rubricPoints, resolvedUnitScore(unit), `小题 ${unit.displayNo} 作答符合参考答案`)
+      rubricPoints: resolveRubricScores(unit.rubricPoints, resolvedUnitScore(unit), '参考答案要点')
     }));
     return {
     id: `${taskId}-q-${question.displayNo}`,
@@ -319,10 +322,10 @@ const buildWorkflowFromAnalysis = (taskId: string, analysis: FirstSectionAnalysi
       : question.standardAnswer || question.subquestions.map(unit => `${unit.displayNo} ${unit.standardAnswer}`).join('\n'),
     standardAnswerSourceIds: question.answerSource ? [`${taskId}-answer-${question.displayNo}`] : [],
     gradingRubric: savedRubric?.gradingRubric.length ? savedRubric.gradingRubric : (question.rubricPoints.length
-      ? resolveRubricScores(question.rubricPoints, resolvedQuestionScore(question), `第 ${question.displayNo} 题作答符合参考答案`)
+      ? resolveRubricScores(question.rubricPoints, resolvedQuestionScore(question), '参考答案要点')
       : question.subquestions.length
-        ? question.subquestions.flatMap(unit => resolveRubricScores(unit.rubricPoints, resolvedUnitScore(unit), `小题 ${unit.displayNo} 作答符合参考答案`).map(point => ({ ...point, point: `${unit.displayNo} ${point.point}` })))
-        : resolveRubricScores([], resolvedQuestionScore(question), `第 ${question.displayNo} 题作答符合参考答案`)),
+        ? question.subquestions.flatMap(unit => resolveRubricScores(unit.rubricPoints, resolvedUnitScore(unit), '参考答案要点').map(point => ({ ...point, point: prefixRubricPoint(unit.displayNo, point.point) })))
+        : resolveRubricScores([], resolvedQuestionScore(question), '参考答案要点')),
     teacherRules: savedRubric?.teacherRules ?? [],
     rubricVersion: savedRubric?.rubricVersion ?? 1,
     sampleTarget: 3,
@@ -346,7 +349,11 @@ const applyTrialSamples = (states: QuestionGradingState[], result: TrialGradingR
   }));
 };
 
-function AnalysisEvidenceDetails({ unit, scopeLabel }: { unit: AnalyzedQuestionUnit; scopeLabel: '本题' | '本小题' }) {
+type EvidenceBox = SourceEvidence['boundingBox'];
+type CompareEvidenceRegion = (assetKind: 'assignment' | 'reference-answer', pageNumber: number, boundingBox: EvidenceBox, runOcr: boolean) => Promise<EvidenceRegionComparison>;
+type SaveEvidenceRegion = (assetKind: 'assignment' | 'reference-answer', pageNumber: number, boundingBox: EvidenceBox) => Promise<void>;
+
+function AnalysisEvidenceDetails({ unit, scopeLabel, onCompareEvidence, onSaveEvidence }: { unit: AnalyzedQuestionUnit; scopeLabel: '本题' | '本小题'; onCompareEvidence?: CompareEvidenceRegion; onSaveEvidence?: SaveEvidenceRegion }) {
   const toEvidence = (reference: AnalyzedQuestionUnit['questionSource'], id: string): SourceEvidence => ({
     id,
     assetId: reference.assetId,
@@ -371,14 +378,14 @@ function AnalysisEvidenceDetails({ unit, scopeLabel }: { unit: AnalyzedQuestionU
     <details className="mt-3">
       <summary className="cursor-pointer text-xs font-bold text-slate-500">查看{scopeLabel}题目与参考答案原文</summary>
       <div className="mt-2 grid gap-3 lg:grid-cols-2">
-        <SourceEvidenceViewer evidence={toEvidence(unit.questionSource, `${unit.displayNo}-question-source`)} label="题目原文" />
-        {unit.answerSource ? <SourceEvidenceViewer evidence={toEvidence(unit.answerSource, `${unit.displayNo}-answer-source`)} label="参考答案原文" /> : <section className="border-l-2 border-sky-600 bg-slate-50 p-3 text-xs text-slate-500 dark:bg-zinc-950">参考答案中没有匹配到可引用内容。</section>}
+        <SourceEvidenceViewer evidence={toEvidence(unit.questionSource, `${unit.displayNo}-question-source`)} label="题目原文" onCompareRegion={onCompareEvidence ? (box, runOcr) => onCompareEvidence('assignment', unit.questionSource.pageNumber ?? 1, box, runOcr) : undefined} onSaveRegion={onSaveEvidence ? box => onSaveEvidence('assignment', unit.questionSource.pageNumber ?? 1, box) : undefined} />
+        {unit.answerSource ? <SourceEvidenceViewer evidence={toEvidence(unit.answerSource, `${unit.displayNo}-answer-source`)} label="参考答案原文" onCompareRegion={onCompareEvidence ? (box, runOcr) => onCompareEvidence('reference-answer', unit.answerSource?.pageNumber ?? 1, box, runOcr) : undefined} onSaveRegion={onSaveEvidence ? box => onSaveEvidence('reference-answer', unit.answerSource?.pageNumber ?? 1, box) : undefined} /> : <section className="border-l-2 border-sky-600 bg-slate-50 p-3 text-xs text-slate-500 dark:bg-zinc-950">参考答案中没有匹配到可引用内容。</section>}
       </div>
     </details>
   );
 }
 
-function AnalysisQuestionCard({ question, standardAnswer, onSave }: { question: FirstSectionAnalysis['questions'][number]; standardAnswer: string; onSave: (correction: { title: string; stem: string; answerRequirement: string; standardAnswer: string }) => Promise<void> }) {
+function AnalysisQuestionCard({ question, standardAnswer, onSave, onCompareEvidence, onSaveEvidence }: { question: FirstSectionAnalysis['questions'][number]; standardAnswer: string; onSave: (correction: { title: string; stem: string; answerRequirement: string; standardAnswer: string }) => Promise<void>; onCompareEvidence: CompareEvidenceRegion; onSaveEvidence: SaveEvidenceRegion }) {
   const authoritativeStem = buildQuestionDisplayStem(question);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -410,7 +417,7 @@ function AnalysisQuestionCard({ question, standardAnswer, onSave }: { question: 
         </div>
         {!editing ? <button type="button" title="编辑本题" aria-label={`编辑第 ${question.displayNo} 题`} onClick={() => setEditing(true)} className="rounded-xl border border-slate-200 p-2 text-slate-500 hover:border-emerald-600 hover:text-emerald-700 dark:border-zinc-700"><Pencil className="h-4 w-4" /></button> : null}
       </div>
-      {!editing ? <>{!question.subquestions.length ? <div className="mt-4 grid gap-3 lg:grid-cols-2"><div><span className="text-xs font-bold text-slate-400">标准答案</span><p className="mt-1 whitespace-pre-wrap text-sm leading-6"><RichQuestionText text={standardAnswer || '待教师补充'} /></p></div><div><span className="text-xs font-bold text-slate-400">解析</span><p className="mt-1 whitespace-pre-wrap text-sm leading-6">{question.explanation || '暂无'}</p></div></div> : null}{question.subquestions.length ? <div className="mt-4 divide-y divide-slate-200 border-y border-slate-200 dark:divide-zinc-800 dark:border-zinc-800">{question.subquestions.map(subquestion => <div key={subquestion.displayNo} className="py-4"><div className="flex flex-wrap items-center gap-2"><strong className="text-sm">小题 {subquestion.displayNo}</strong><span className="text-xs text-slate-500">{subquestion.questionType} · {subquestion.score === null ? '暂定 1 分' : `${subquestion.score} 分`}</span></div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300"><RichQuestionText text={subquestion.stem} /></p><p className="mt-2 text-sm leading-6"><span className="mr-2 text-xs font-bold text-slate-400">答案</span><RichQuestionText text={subquestion.standardAnswer || '待教师补充'} /></p>{subquestion.rubricPoints.length ? <p className="mt-2 text-xs leading-5 text-emerald-800">采分点：{subquestion.rubricPoints.map(point => `${point.point}（${point.score ?? '待确认'}分）`).join('；')}</p> : null}{subquestion.reviewReasons.length ? <p className="mt-2 text-xs leading-5 text-amber-800"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />{subquestion.reviewReasons.join('；')}</p> : null}</div>)}</div> : null}{!question.subquestions.length && question.rubricPoints.length ? <p className="mt-3 text-xs leading-5 text-emerald-800">采分点：{question.rubricPoints.map(point => `${point.point}（${point.score ?? '待确认'}分）`).join('；')}</p> : null}{question.reviewReasons.length ? <p className="mt-3 text-xs leading-5 text-amber-800"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />{question.reviewReasons.join('；')}</p> : null}<AnalysisEvidenceDetails unit={question} scopeLabel="本题" /></> : null}
+      {!editing ? <>{!question.subquestions.length ? <div className="mt-4 grid gap-3 lg:grid-cols-2"><div><span className="text-xs font-bold text-slate-400">标准答案</span><p className="mt-1 whitespace-pre-wrap text-sm leading-6"><RichQuestionText text={standardAnswer || '待教师补充'} /></p></div><div><span className="text-xs font-bold text-slate-400">解析</span><p className="mt-1 whitespace-pre-wrap text-sm leading-6">{question.explanation || '暂无'}</p></div></div> : null}{question.subquestions.length ? <div className="mt-4 divide-y divide-slate-200 border-y border-slate-200 dark:divide-zinc-800 dark:border-zinc-800">{question.subquestions.map(subquestion => <div key={subquestion.displayNo} className="py-4"><div className="flex flex-wrap items-center gap-2"><strong className="text-sm">小题 {subquestion.displayNo}</strong><span className="text-xs text-slate-500">{subquestion.questionType} · {resolvedUnitScore(subquestion)} 分{subquestion.score === null ? '（暂定）' : ''}</span></div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300"><RichQuestionText text={subquestion.stem} /></p><p className="mt-2 text-sm leading-6"><span className="mr-2 text-xs font-bold text-slate-400">答案</span><RichQuestionText text={subquestion.standardAnswer || '待教师补充'} /></p>{subquestion.rubricPoints.length ? <p className="mt-2 text-xs leading-5 text-emerald-800">采分点：{subquestion.rubricPoints.map(point => `${point.point}（${point.score ?? '待确认'}分）`).join('；')}</p> : null}{subquestion.reviewReasons.length ? <p className="mt-2 text-xs leading-5 text-amber-800"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />{subquestion.reviewReasons.join('；')}</p> : null}</div>)}</div> : null}{!question.subquestions.length && question.rubricPoints.length ? <p className="mt-3 text-xs leading-5 text-emerald-800">采分点：{question.rubricPoints.map(point => `${point.point}（${point.score ?? '待确认'}分）`).join('；')}</p> : null}{question.reviewReasons.length ? <p className="mt-3 text-xs leading-5 text-amber-800"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />{question.reviewReasons.join('；')}</p> : null}<AnalysisEvidenceDetails unit={question} scopeLabel="本题" onCompareEvidence={onCompareEvidence} onSaveEvidence={onSaveEvidence} /></> : null}
     </article>
   );
 }
@@ -1415,6 +1422,22 @@ export default function GradingWorkflow({
     }
   };
 
+  const compareEvidenceRegion = (displayNo: string, assetKind: 'assignment' | 'reference-answer', pageNumber: number, boundingBox: EvidenceBox, runOcr: boolean) =>
+    compareTaskEvidenceRegion(selectedTask.id, displayNo, assetKind, pageNumber, boundingBox, runOcr);
+
+  const saveEvidenceRegion = async (displayNo: string, assetKind: 'assignment' | 'reference-answer', pageNumber: number, boundingBox: EvidenceBox) => {
+    try {
+      await saveTaskEvidenceRegion(selectedTask.id, displayNo, assetKind, pageNumber, boundingBox);
+      const analysis = await getTaskAnalysis(selectedTask.id);
+      if (!analysis) throw new Error('ANALYSIS_NOT_FOUND');
+      onUpdateState({ assignment: { ...workflowState.assignment, firstSectionAnalysis: analysis } });
+      onShowToast(`第 ${displayNo} 题${assetKind === 'assignment' ? '题目' : '参考答案'}截图范围已保存`);
+    } catch (error) {
+      onShowToast(`截图范围保存失败（${error instanceof Error ? error.message : '未知错误'}）`);
+      throw error;
+    }
+  };
+
   const saveQuestionCorrection = async (correction: { title: string; stem: string; answerRequirement: string }) => {
     if (!currentQuestion) return;
     try {
@@ -1846,7 +1869,7 @@ export default function GradingWorkflow({
               {analysisErrorCode && !isAnalyzing ? <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-rose-900 dark:bg-rose-950/20"><div><strong className="text-sm text-rose-900 dark:text-rose-100">{analysisErrorMessage(analysisErrorCode).title}</strong><p className="mt-1 text-xs leading-5 text-rose-700 dark:text-rose-200">{analysisErrorMessage(analysisErrorCode).detail}</p></div><button type="button" disabled={!assignmentMaterialsReady} onClick={() => void analyzeAssignment()} className="min-h-11 w-full shrink-0 rounded-xl border border-rose-300 px-4 text-sm font-bold text-rose-800 disabled:opacity-50 sm:w-auto dark:border-rose-800 dark:text-rose-100">重新拆题</button></div> : null}
               {assignmentAnalysis && selectedAnalysisQuestion ? <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 lg:grid-cols-[220px_minmax(0,1fr)] dark:border-zinc-800">
                 <aside className="space-y-2"><div className="flex items-center justify-between gap-2 text-xs">{questionSelectionEditing && !questionSelectionLocked ? <label className="flex items-center gap-2 font-bold"><input type="checkbox" checked={allQuestionsSelected} onChange={toggleAllQuestions} aria-label="全选本次批改题目" className="h-4 w-4 accent-emerald-700" />全选</label> : <strong className="text-slate-700 dark:text-slate-200">本次批改题目</strong>}<span className="font-medium text-slate-600 dark:text-slate-300">已选 {questionSelectionDraft.length} / {assignmentAnalysis.questions.length}</span></div>{assignmentAnalysis.questions.map(question => { const questionId = `${selectedTask.id}-q-${question.displayNo}`; const included = questionSelectionDraft.includes(questionId); const active = selectedAnalysisQuestion.displayNo === question.displayNo; return <div key={question.displayNo} className={`flex items-center gap-2 rounded-lg border p-2 ${active ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/20' : 'border-slate-200 dark:border-zinc-800'}`}>{questionSelectionEditing && !questionSelectionLocked ? <input type="checkbox" checked={included} onChange={() => toggleQuestionSelection(question.displayNo)} aria-label={`选择第 ${question.displayNo} 题`} className="h-4 w-4 accent-emerald-700" /> : <span aria-hidden="true" className={`h-2 w-2 rounded-full ${included ? 'bg-emerald-600' : 'bg-slate-200 dark:bg-zinc-700'}`} />}<button type="button" onClick={() => setAnalysisQuestionNo(question.displayNo)} className="min-w-0 flex-1 text-left"><strong className="block text-xs">第 {question.displayNo} 题</strong><span className="mt-0.5 block truncate text-[11px] text-slate-500">{question.title || question.stem}</span></button></div>; })}{questionSelectionLocked ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-bold text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">{submissionAssets.length ? '已上传答卷，题目范围已锁定' : '已确认布置，题目范围已锁定'}</div> : questionSelectionEditing ? <div className="grid grid-cols-2 gap-2"><button type="button" disabled={questionSelectionSaving} onClick={() => { setQuestionSelectionDraft(selectedQuestionIds); setQuestionSelectionEditing(false); }} className="rounded-lg border border-slate-300 px-3 py-2.5 text-xs font-bold text-slate-700 dark:border-zinc-700 dark:text-slate-200">取消</button><button type="button" disabled={!questionSelectionDirty || questionSelectionSaving} onClick={() => void saveQuestionSelection()} className="rounded-lg bg-emerald-700 px-3 py-2.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600">{questionSelectionSaving ? '正在保存...' : '保存题目范围'}</button></div> : <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-900 dark:bg-emerald-950/30"><strong className="text-xs text-emerald-900 dark:text-emerald-100">题目范围已保存</strong><button type="button" onClick={() => setQuestionSelectionEditing(true)} className="text-xs font-bold text-emerald-800 underline underline-offset-2 dark:text-emerald-200">修改</button></div>}</aside>
-                <AnalysisQuestionCard question={selectedAnalysisQuestion} standardAnswer={questionStates.find(state => state.questionId === `${selectedTask.id}-q-${selectedAnalysisQuestion.displayNo}`)?.standardAnswer ?? selectedAnalysisQuestion.standardAnswer} onSave={correction => saveAnalysisQuestion(selectedAnalysisQuestion.displayNo, correction)} />
+                <AnalysisQuestionCard question={selectedAnalysisQuestion} standardAnswer={questionStates.find(state => state.questionId === `${selectedTask.id}-q-${selectedAnalysisQuestion.displayNo}`)?.standardAnswer ?? selectedAnalysisQuestion.standardAnswer} onSave={correction => saveAnalysisQuestion(selectedAnalysisQuestion.displayNo, correction)} onCompareEvidence={(assetKind, pageNumber, boundingBox, runOcr) => compareEvidenceRegion(selectedAnalysisQuestion.displayNo, assetKind, pageNumber, boundingBox, runOcr)} onSaveEvidence={(assetKind, pageNumber, boundingBox) => saveEvidenceRegion(selectedAnalysisQuestion.displayNo, assetKind, pageNumber, boundingBox)} />
                 <label className="space-y-2 border-t border-slate-200 pt-4 lg:col-span-2 dark:border-zinc-800"><span className="text-xs font-bold text-slate-500">本次批改补充要求 <span className="font-normal text-slate-400">（应用于所有已选题目）</span></span><textarea value={workflowState.assignment.note} onChange={event => updateAssignment({ note: event.target.value })} rows={3} placeholder="例如：开放题允许意思相近；明显划掉的内容不计入答案" className={`${inputClass} resize-none leading-6`} /></label>
               </div> : !isAnalyzing ? <p className="mt-4 text-sm text-slate-500">材料解析完成后，点击“开始拆题”识别作业结构。</p> : null}
             </section> : null}
@@ -1957,6 +1980,8 @@ export default function GradingWorkflow({
 
       {activeStage === 'diagnosis' && diagnosis ? <section className="space-y-4"><div className="grid gap-3 sm:grid-cols-3"><div className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">完成批改</span><strong className="mt-2 block text-2xl">{diagnosis.gradedStudentCount} 人</strong></div><div className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">班级平均分</span><strong className="mt-2 block text-2xl">{diagnosis.averageScore?.toFixed(1) ?? '-'} / {diagnosis.averageFullScore}</strong></div><div className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">待复核证据</span><strong className="mt-2 block text-2xl">{pendingReviews} 项</strong></div></div><div className="grid gap-4 lg:grid-cols-2"><section className={`${panelClass} p-5`}><h2 className="font-black">各题表现</h2><div className="mt-4 space-y-3">{diagnosis.questionPerformance.map(item => <div key={item.questionId}><div className="flex justify-between text-xs"><strong>第 {item.displayNo} 题</strong><span>{Math.round(item.scoreRate * 100)}%</span></div><div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-emerald-600" style={{width:`${Math.round(item.scoreRate * 100)}%`}} /></div></div>)}</div></section><section className={`${panelClass} p-5`}><h2 className="font-black">主要失分点</h2><div className="mt-4 space-y-2">{diagnosis.commonIssues.length ? diagnosis.commonIssues.map(item => <div key={item.label} className="flex items-start justify-between gap-4 rounded-2xl bg-amber-50 p-3 text-xs text-amber-900"><span>{item.label}</span><strong>{item.count} 人次</strong></div>) : <p className="text-sm text-slate-500">暂无明确共性失分点。</p>}</div></section></div><section className={`${panelClass} p-5`}><h2 className="font-black">典型学生</h2><div className="mt-4 grid gap-3 sm:grid-cols-2">{diagnosis.typicalStudents.map(item => <div key={`${item.role}-${item.studentId}`} className="rounded-2xl border border-slate-200 p-4"><span className="text-xs font-bold text-emerald-700">{item.role}</span><strong className="mt-1 block">{item.studentName}</strong><span className="mt-1 block text-xs text-slate-500">总分 {item.totalScore} / {diagnosis.averageFullScore}</span></div>)}</div></section></section> : null}
       {activeStage === 'diagnosis' && !diagnosis ? <section className={`${panelClass} flex min-h-80 flex-col items-center justify-center p-8 text-center`}><BookOpenCheck className="h-10 w-10 text-emerald-700" /><h2 className="mt-4 font-black">正在汇总真实批改结果</h2></section> : null}
+
+      {selectedReviewSample ? createPortal(<div className="fixed bottom-24 right-3 z-[110] w-[min(270px,calc(100vw-1.5rem))] shadow-2xl sm:bottom-28 sm:right-6"><ScoreKeypad value={reviewScore} max={selectedReviewSample.fullScore} disabled={reviewSaving !== 'idle'} onChange={setReviewScore} /></div>, document.body) : null}
 
       {showSubmissionDeleteConfirm ? createPortal(
         <div className="fixed inset-0 z-[110] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="delete-submissions-title">

@@ -56,6 +56,12 @@ export const gradeTrialSubmissions = async (
       ...(gradingConfidence < 0.65 ? ['low-confidence' as const] : []),
       ...(score === null ? ['rubric-insufficient' as const] : [])
     ];
+    const modelReasonClaimsMissingAnswer = Boolean(observedText.trim()) && /PaddleOCR.*(?:为空|缺少)|主证据为空|缺少可用于评分的学生作答/u.test(modelSample.reason);
+    const gradingReason = choiceIsCorrect === undefined
+      ? modelReasonClaimsMissingAnswer
+        ? score === null ? '已取得评分采用文本，但 AI 未完成暂定评分，需要教师复核。' : '已依据当前评分采用文本给出暂定分数。'
+        : modelSample.reason
+      : choiceIsCorrect ? '识别选项与标准答案一致。' : '识别选项与标准答案不一致。';
     return {
       id: `${modelSample.questionId}-${modelSample.assetId}`,
       questionId: modelSample.questionId,
@@ -79,7 +85,7 @@ export const gradeTrialSubmissions = async (
       reviewStatus: reviewTriggers.length ? 'pending' as const : undefined,
       matchedPoints,
       missedPoints,
-      gradingReason: choiceIsCorrect === undefined ? modelSample.reason : choiceIsCorrect ? '识别选项与标准答案一致。' : '识别选项与标准答案不一致。',
+      gradingReason,
       sourceAssetId: material.id,
       sourceFileName: `${material.fileName} · 第 ${question.displayNo} 题`,
       sourcePreviewUrl: `${visionItem.cropUrl}?v=${NON_CHOICE_RECOGNITION_VERSION}`,
