@@ -168,6 +168,8 @@ export interface SubmissionPage {
   studentId?: string;
   expectedStudentName: string;
   detectedStudentNo: string;
+  detectedStudentName?: string;
+  matchedStudentNo?: string;
   pageCount: number;
   ocrConfidence: number;
   studentNoConfidence?: number;
@@ -176,7 +178,7 @@ export interface SubmissionPage {
   pageContinuity?: number;
   reviewSource?: 'automatic' | 'multimodal' | 'teacher';
   issueReason?: string;
-  rosterMatchStatus?: 'pending' | 'matched' | 'unknown-student-no' | 'duplicate-student-no' | 'unreadable-student-no' | 'ambiguous-student-name';
+  rosterMatchStatus?: 'pending' | 'matched' | 'unknown-student-no' | 'duplicate-student-no' | 'unreadable-student-no' | 'unreadable-student-name' | 'ambiguous-student-name';
   rosterIssueReason?: string;
   status: 'matched' | 'needs-review' | 'missing-page';
 }
@@ -226,6 +228,7 @@ export interface TrialGradingQuestionInput {
   stem: string;
   fullScore: number;
   standardAnswer: string;
+  subquestions?: GradingQuestionPart[];
   rubricPoints: GradingRubricPoint[];
   teacherRules: string[];
   rubricVersion: number;
@@ -555,6 +558,19 @@ export interface GradingQuestion {
   answerRequirement?: string;
   parseConfidence: number;
   sourceEvidenceIds: string[];
+  subquestions?: GradingQuestionPart[];
+}
+
+export interface GradingQuestionPart {
+  displayNo: string;
+  title: string;
+  stem: string;
+  score: number;
+  questionType: string;
+  answerRequirement: string;
+  standardAnswer: string;
+  explanation: string;
+  rubricPoints: GradingRubricPoint[];
 }
 
 export interface WorkflowState {

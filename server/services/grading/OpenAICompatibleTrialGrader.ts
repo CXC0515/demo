@@ -38,6 +38,7 @@ export const buildTrialGradingPrompt = (request: TrialGradingRequest, submission
   'recognizedAnswers 标记 needsReview 时，评分结果也必须 needsTeacherReview=true，但 needsReview 本身不能成为拒绝给暂定分数的理由。',
   'score 必须在 0 到 fullScore 之间。标准答案或采分依据不足以可靠评分时，score 返回 null、needsTeacherReview=true，并说明缺少什么依据。',
   'matchedPoints 和 missedPoints 必须对应输入采分点；没有明确采分点时保持空数组。confidence 取 0 到 1。',
+  '每个顶层 questionId 是一个评分单元，只返回一个总分；subquestions 是该评分单元内部的小题依据，必须结合其题干、答案和解析完整评分，不要另行输出小题记录。',
   '必须为每个 questionId 与 assetId 组合返回一条结果，不得遗漏。',
   '你只负责评分，不得转写、纠正或输出学生答案。',
   '严格返回 JSON：{"samples":[{"questionId":"","assetId":"","score":0,"confidence":0,"matchedPoints":[],"missedPoints":[],"reason":"","needsTeacherReview":false}]}。',
