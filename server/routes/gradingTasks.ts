@@ -476,8 +476,8 @@ router.get('/:taskId/analysis', (request, response) => {
       ...analysis,
       questions: analysis.questions.map(question => ({
         ...question,
-        questionSource: resolveSourceEvidence(request.params.taskId, question.questionSource, analysisMaterials),
-        answerSource: question.answerSource ? resolveSourceEvidence(request.params.taskId, question.answerSource, analysisMaterials) : null,
+        questionSource: resolveSourceEvidence(request.params.taskId, question.questionSource, analysisMaterials, true),
+        answerSource: question.answerSource ? resolveSourceEvidence(request.params.taskId, question.answerSource, analysisMaterials, true) : null,
         subquestions: question.subquestions.map(subquestion => ({
           ...subquestion,
           questionSource: resolveSourceEvidence(request.params.taskId, subquestion.questionSource, analysisMaterials),
@@ -811,8 +811,8 @@ router.post('/:taskId/analysis', async (request, response) => {
       const question = rawQuestion;
       return {
         ...question,
-        questionSource: resolveSourceEvidence(request.params.taskId, question.questionSource, analysisMaterials),
-        answerSource: question.answerSource ? resolveSourceEvidence(request.params.taskId, question.answerSource, analysisMaterials) : null,
+        questionSource: resolveSourceEvidence(request.params.taskId, question.questionSource, analysisMaterials, true),
+        answerSource: question.answerSource ? resolveSourceEvidence(request.params.taskId, question.answerSource, analysisMaterials, true) : null,
         rubricPoints: normalizeRubricPoints(question.rubricPoints),
         knowledgeCandidates: normalizeKnowledgeCandidates(question.knowledgeCandidates),
         subquestions: question.subquestions.map(subquestion => ({

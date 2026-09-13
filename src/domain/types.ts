@@ -469,6 +469,10 @@ export interface AnalysisEvidenceRef {
   blockIds: string[];
   quote: string;
   segments?: { blockId: string; quote: string }[];
+  visualRegion?: {
+    pageNumber: number;
+    boundingBox: { x: number; y: number; width: number; height: number };
+  } | null;
   matchStatus?: 'exact' | 'normalized' | 'block-level';
   isPartialBlock?: boolean;
   evidenceMode?: 'native-text' | 'source-crop';
@@ -478,7 +482,7 @@ export interface AnalysisEvidenceRef {
   sourcePageUrl?: string;
   locatorStatus?: 'located' | 'needs-visual' | 'needs-teacher';
   locatorReasons?: string[];
-  cropMode?: 'block' | 'estimated-segment';
+  cropMode?: 'block' | 'estimated-segment' | 'model-within-block';
   blockImageUrl?: string;
 }
 
@@ -537,7 +541,7 @@ export interface SourceEvidence {
   evidenceMode?: 'native-text' | 'source-crop';
   locatorStatus?: 'located' | 'needs-visual' | 'needs-teacher';
   locatorReasons?: string[];
-  cropMode?: 'block' | 'estimated-segment';
+  cropMode?: 'block' | 'estimated-segment' | 'model-within-block';
   blockImageUrl?: string;
   isMock?: boolean;
 }
