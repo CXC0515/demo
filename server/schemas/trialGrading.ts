@@ -12,6 +12,21 @@ export const trialGradingRequestSchema = z.object({
     stem: z.string(),
     fullScore: z.number().nonnegative(),
     standardAnswer: z.string(),
+    subquestions: z.array(z.object({
+      displayNo: z.string(),
+      title: z.string(),
+      stem: z.string(),
+      score: z.number().nonnegative(),
+      questionType: z.string(),
+      answerRequirement: z.string(),
+      standardAnswer: z.string(),
+      explanation: z.string(),
+      rubricPoints: z.array(z.object({
+        point: z.string(),
+        score: z.number().nonnegative(),
+        description: z.string()
+      }))
+    })).optional(),
     rubricPoints: z.array(z.object({
       point: z.string(),
       score: z.number().nonnegative(),
