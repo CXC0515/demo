@@ -480,6 +480,7 @@ export interface AnalyzedQuestionUnit {
   displayNo: string;
   title: string;
   stem: string;
+  teacherCorrectedStem?: boolean;
   score: number | null;
   questionType: string;
   answerRequirement: string;
@@ -487,6 +488,7 @@ export interface AnalyzedQuestionUnit {
   explanation: string;
   rubricPoints: { point: string; score: number | null; description: string }[];
   knowledgeCandidates: { nodeId: string; nodeName: string; confidence: number }[];
+  confirmedKnowledgeNodeIds?: string[];
   questionSource: AnalysisEvidenceRef;
   answerSource: AnalysisEvidenceRef | null;
   confidence: number;

@@ -103,6 +103,8 @@ const batchRequestSchema = trialGradingRequestSchema.extend({
 });
 
 const removeSubmissionSchema = z.object({ assetIds: z.array(z.string().uuid()).min(1).max(100) });
+const retrySubmissionSchema = z.object({ assetIds: z.array(z.string().uuid()).min(1).max(20) });
+const knowledgeLinkSelectionSchema = z.object({ confirmed: z.boolean() });
 
 const analysisQuestionCorrectionSchema = z.object({
   title: z.string().trim().min(1).max(500),
@@ -182,6 +184,21 @@ router.delete('/:taskId/student-submissions', (request, response) => {
   deleteTrialGradingForAssets(request.params.taskId, parsed.data.assetIds);
   deleteGradingBatch(request.params.taskId);
   response.json({ removed: removed.map(toPublicAsset) });
+});
+
+router.post('/:taskId/student-submissions/retry', (request, response) => {
+  const parsed = retrySubmissionSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ code: 'INVALID_SUBMISSION_SELECTION' });
+  const materials = getMaterials(request.params.taskId);
+  const selected = materials.filter(material => parsed.data.assetIds.includes(material.id));
+  if (selected.some(material => material.kind !== 'student-submission') || selected.length !== parsed.data.assetIds.length) {
+    return response.status(404).json({ code: 'SUBMISSION_NOT_FOUND' });
+  }
+  if (selected.some(material => material.status !== 'failed')) {
+    return response.status(409).json({ code: 'SUBMISSION_NOT_RETRYABLE' });
+  }
+  selected.forEach(material => { void parseUploadedMaterial(material); });
+  response.status(202).json({ assets: selected.map(material => toPublicAsset({ ...material, status: 'processing', parseErrorCode: undefined })) });
 });
 
 router.get('/:taskId/rubrics', (request, response) => {
@@ -591,11 +608,45 @@ router.put('/:taskId/analysis/questions/:displayNo', (request, response) => {
   }
   const updated = saveFirstSectionAnalysis({
     ...analysis,
-    questions: analysis.questions.map(question => question.displayNo === displayNo ? { ...question, ...parsed.data } : question)
+    questions: analysis.questions.map(question => question.displayNo === displayNo ? { ...question, ...parsed.data, teacherCorrectedStem: true } : question)
   });
   deleteTrialGradingResult(request.params.taskId);
   deleteGradingBatch(request.params.taskId);
   deleteVisionValidationForTask(request.params.taskId);
+  response.json({ analysis: updated });
+});
+
+router.put('/:taskId/analysis/questions/:displayNo/knowledge/:nodeId', (request, response) => {
+  const parsed = knowledgeLinkSelectionSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ code: 'INVALID_KNOWLEDGE_LINK_SELECTION' });
+    return;
+  }
+  const analysis = getFirstSectionAnalysis(request.params.taskId);
+  if (!analysis) {
+    response.status(404).json({ code: 'ANALYSIS_NOT_FOUND' });
+    return;
+  }
+  const displayNo = decodeURIComponent(request.params.displayNo);
+  const nodeId = decodeURIComponent(request.params.nodeId);
+  const question = analysis.questions.find(item => item.displayNo === displayNo);
+  if (!question) {
+    response.status(404).json({ code: 'QUESTION_NOT_FOUND' });
+    return;
+  }
+  if (!question.knowledgeCandidates.some(candidate => candidate.nodeId === nodeId)) {
+    response.status(404).json({ code: 'KNOWLEDGE_LINK_NOT_FOUND' });
+    return;
+  }
+  const selectedIds = new Set(question.confirmedKnowledgeNodeIds ?? []);
+  if (parsed.data.confirmed) selectedIds.add(nodeId);
+  else selectedIds.delete(nodeId);
+  const updated = saveFirstSectionAnalysis({
+    ...analysis,
+    questions: analysis.questions.map(item => item.displayNo === displayNo
+      ? { ...item, confirmedKnowledgeNodeIds: [...selectedIds] }
+      : item)
+  });
   response.json({ analysis: updated });
 });
 
