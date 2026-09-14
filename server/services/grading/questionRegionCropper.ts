@@ -21,6 +21,7 @@ export interface VisionLocatedEvidence {
   kind: VisionEvidenceKind;
   boundingBox: { x: number; y: number; width: number; height: number };
   provisionalText: string;
+  blockIds?: string[];
   confidence: number;
   needsReview: boolean;
   reason: string;
@@ -31,10 +32,25 @@ export interface VisionLocatedRegion {
   pageNumber: number;
   boundingBox: { x: number; y: number; width: number; height: number };
   evidenceUnits: VisionLocatedEvidence[];
+  recognizedAnswer?: string;
+  selectedOption?: string | null;
   confidence: number;
   needsReview: boolean;
   reason: string;
 }
+
+const hasUsableVisionEvidence = (region: VisionLocatedRegion | undefined, expectedIds: string[]) => {
+  if (!region) return false;
+  const expected = new Set(expectedIds);
+  const matchingUnits = region.evidenceUnits.filter(unit => !expected.size || expected.has(unit.evidenceId));
+  const hasGroundedContent = Boolean(
+    region.recognizedAnswer?.trim()
+    || region.selectedOption?.trim()
+    || matchingUnits.some(unit => unit.provisionalText.trim() || unit.blockIds?.length)
+  );
+  const hasUsableBox = region.boundingBox.width >= 0.01 && region.boundingBox.height >= 0.01;
+  return matchingUnits.length > 0 && hasGroundedContent && hasUsableBox;
+};
 
 export interface LocatedEvidence {
   evidenceId: string;
@@ -520,17 +536,18 @@ export const createVisionLocatedRegions = async (
 
   return Promise.all(requestedQuestionNos.map(async displayNo => {
     const rawVision = bestRegionByNo.get(displayNo);
+    const expectedIds = expectedEvidenceIds.get(displayNo) ?? [];
     const expectedKind = expectedQuestionKinds.get(displayNo);
-    const vision = rawVision ? {
+    const vision = hasUsableVisionEvidence(rawVision, expectedIds) ? {
       ...rawVision,
       evidenceUnits: rawVision.evidenceUnits.map(unit => expectedKind === 'choice' ? { ...unit, kind: 'choice' as const } : unit)
     } : undefined;
     const visionIsChoice = Boolean(vision?.evidenceUnits.length && vision.evidenceUnits.every(unit => unit.kind === 'choice'));
     const firstExpectedId = (expectedEvidenceIds.get(displayNo) ?? [`${displayNo}-answer`])[0];
-    const paddleQuestion = !preferVisionGeometry && !vision && artifact && expectedKind !== 'choice'
+    const paddleQuestion = !vision && artifact && expectedKind !== 'choice'
       ? questionPageFromPaddle(artifact, displayNo, firstExpectedId, expectedKind ?? 'text')
       : undefined;
-    const paddleChoice = !preferVisionGeometry && (expectedKind === 'choice' || visionIsChoice) && artifact ? choiceRowAcrossPages(artifact, displayNo) : undefined;
+    const paddleChoice = (!preferVisionGeometry || !vision) && (expectedKind === 'choice' || visionIsChoice) && artifact ? choiceRowAcrossPages(artifact, displayNo) : undefined;
     const page = paddleChoice ? pageByNumber.get(paddleChoice.pageNumber)
       : paddleQuestion ? pageByNumber.get(paddleQuestion.pageNumber)
       : vision ? pageByNumber.get(vision.pageNumber)
@@ -540,7 +557,6 @@ export const createVisionLocatedRegions = async (
     if (!metadata.width || !metadata.height) throw new Error('SOURCE_PAGE_INVALID');
     const fullPage = { x: 0, y: 0, width: metadata.width, height: metadata.height };
     const visualQuestion = vision ? toPixels(vision.boundingBox, metadata.width, metadata.height) : fullPage;
-    const expectedIds = expectedEvidenceIds.get(displayNo) ?? [];
     const fallbackChoiceRow = paddleChoice?.row ?? (!vision && artifact && expectedKind === 'choice' && expectedIds.length === 1
       ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, expectedIds[0], 'choice', visualQuestion)
       : undefined);
@@ -562,7 +578,7 @@ export const createVisionLocatedRegions = async (
     })) : []);
     const evidencePlans = await Promise.all(sourceEvidence.map(async evidence => {
       const visualRegion = toPixels(evidence.boundingBox, metadata.width!, metadata.height!);
-      const locatedRow = fallbackChoiceRow ?? (!preferVisionGeometry && artifact ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, evidence.evidenceId, evidence.kind, visualQuestion) : undefined);
+      const locatedRow = fallbackChoiceRow ?? (artifact && (!preferVisionGeometry || !vision) ? answerRowFromPaddle(artifact, page.pageNumber, displayNo, evidence.evidenceId, evidence.kind, visualQuestion) : undefined);
       const usePaddleGeometry = Boolean(locatedRow);
       const paddleRow = usePaddleGeometry ? await alignBlockLineToInk(page.sourceImagePath, locatedRow) : undefined;
       return {

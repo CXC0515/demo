@@ -428,7 +428,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
           locationReasons: region.locationReasons,
           cropUrl: region.cropUrl,
           evidenceUnits,
-          paddleText: region.locationStatus === 'located' ? region.paddleText : '',
+          paddleText: region.paddleText,
           lunaText: structuredText,
           answerFields: [],
           crossedOutText: item?.crossedOutText ?? [],
