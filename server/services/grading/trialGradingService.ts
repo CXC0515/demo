@@ -9,7 +9,7 @@ import { StoredMaterial } from '../../repositories/materialRepository';
 import { getVisionValidationResult, NON_CHOICE_RECOGNITION_VERSION } from '../../repositories/visionValidationRepository';
 import { TrialGradingRequest } from '../../schemas/trialGrading';
 import { OpenAICompatibleTrialGrader } from './OpenAICompatibleTrialGrader';
-import { getObservedAnswer, recognitionTextsConflict, resolveTrialConfidence, resolveTrialScore, trialNeedsTeacherReview } from './trialScore';
+import { getObservedAnswer, recognitionTextsConflict, resolveTrialConfidence, resolveTrialScore } from './trialScore';
 import { scoreObjectiveChoice } from './objectiveChoiceScore';
 
 export const gradeTrialSubmissions = async (
@@ -46,16 +46,14 @@ export const gradeTrialSubmissions = async (
       ? resolveTrialScore(question.fullScore, question.rubricPoints, matchedPoints, missedPoints, modelSample.score)
       : objectiveScore;
     const gradingConfidence = correctedText === undefined ? resolveTrialConfidence(modelSample.confidence, visionItem) : modelSample.confidence;
-    const needsTeacherReview = correctedText === undefined ? trialNeedsTeacherReview(modelSample.needsTeacherReview, visionItem) : modelSample.needsTeacherReview;
+    const bothRecognizersEmpty = !visionItem.selectedOption && !visionItem.paddleText.trim() && !visionItem.lunaText.trim();
     const scoreRatio = question.fullScore > 0 && score !== null ? score / question.fullScore : 0;
-    const sampleType: CalibrationSample['sampleType'] = needsTeacherReview || gradingConfidence < 0.65 ? 'ocr-risk' : scoreRatio >= 0.8 ? 'high' : scoreRatio <= 0.4 ? 'low' : 'middle';
+    const sampleType: CalibrationSample['sampleType'] = bothRecognizersEmpty ? 'ocr-risk' : scoreRatio >= 0.8 ? 'high' : scoreRatio <= 0.4 ? 'low' : 'middle';
     const reviewTriggers: NonNullable<CalibrationSample['reviewTriggers']> = [
-      ...(visionItem.locationStatus !== 'located' || visionItem.locationReasons.length ? ['answer-region' as const] : []),
-      ...(recognitionConflict ? ['recognition-conflict' as const] : []),
-      ...(visionItem.needsReview && visionItem.crossedOutText.length ? ['crossed-out' as const] : []),
-      ...(gradingConfidence < 0.65 ? ['low-confidence' as const] : []),
+      ...(bothRecognizersEmpty ? ['answer-missing' as const] : []),
       ...(score === null ? ['rubric-insufficient' as const] : [])
     ];
+    const needsTeacherReview = reviewTriggers.length > 0;
     const modelReasonClaimsMissingAnswer = Boolean(observedText.trim()) && /PaddleOCR.*(?:为空|缺少)|主证据为空|缺少可用于评分的学生作答/u.test(modelSample.reason);
     const gradingReason = choiceIsCorrect === undefined
       ? modelReasonClaimsMissingAnswer

@@ -22,6 +22,8 @@ interface GradingWorkspaceProps {
   onEnterWorkflow: (task: WorkbenchTask) => void;
   onSelectTask: (task: WorkbenchTask) => void;
   onUpdateTask: (task: WorkbenchTask) => Promise<void>;
+  onArchiveTask: (task: WorkbenchTask, archived: boolean) => Promise<void>;
+  onDeleteTask: (task: WorkbenchTask) => Promise<void>;
   onUpdateState: (taskId: string, updated: Partial<WorkflowState>) => void;
   onSyncToProfiles: (aiResults: WorkflowState['aiResults']) => void;
   onConfirmReview: (reviewId: string, finalScore: number, changeReason: string) => void;
@@ -44,6 +46,8 @@ export default function GradingWorkspace({
   onEnterWorkflow,
   onSelectTask,
   onUpdateTask,
+  onArchiveTask,
+  onDeleteTask,
   onUpdateState,
   onSyncToProfiles,
   onConfirmReview,
@@ -74,6 +78,8 @@ export default function GradingWorkspace({
           reviewQueue={reviewQueue}
           onCreateTask={onCreateTask}
           onEnterWorkflow={enterTask}
+          onArchiveTask={onArchiveTask}
+          onDeleteTask={onDeleteTask}
         />
       </section>
     );

@@ -18,7 +18,8 @@ import { uploadRateLimit } from '../middleware/security';
 import { runtimeConfig } from '../config/runtimeConfig';
 import { deleteFirstSectionAnalysis, getFirstSectionAnalysis, saveFirstSectionAnalysis } from '../repositories/analysisRepository';
 import { appendMaterials, getMaterials, removeMaterialsById, replaceMaterialsForKind, StoredMaterial, updateMaterial } from '../repositories/materialRepository';
-import { getTaskRubrics, saveTaskRubric } from '../repositories/gradingRubricRepository';
+import { deleteTaskRubrics, getTaskRubrics, saveTaskRubric } from '../repositories/gradingRubricRepository';
+import { listGradingTasks } from '../repositories/gradingTaskRepository';
 import { deleteGradingBatch, getGradingBatch, saveGradingBatch } from '../repositories/gradingBatchRepository';
 import { deleteParserArtifact, getParserArtifact } from '../repositories/parserArtifactRepository';
 import { recordGradingError } from '../repositories/gradingErrorRepository';
@@ -102,6 +103,8 @@ const batchRequestSchema = trialGradingRequestSchema.extend({
 
 const removeSubmissionSchema = z.object({ assetIds: z.array(z.string().uuid()).min(1).max(100) });
 const retrySubmissionSchema = z.object({ assetIds: z.array(z.string().uuid()).min(1).max(20) });
+const materialSelectionSchema = z.object({ assetIds: z.array(z.string().uuid()).min(1).max(40) });
+const materialRegionSchema = z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), width: z.number().positive().max(1), height: z.number().positive().max(1) }).refine(box => box.x + box.width <= 1.001 && box.y + box.height <= 1.001);
 const knowledgeLinkSelectionSchema = z.object({ confirmed: z.boolean() });
 
 const analysisQuestionCorrectionSchema = z.object({
@@ -166,12 +169,24 @@ const toPublicAsset = ({ diskPath: _diskPath, normalizedDocument: _normalizedDoc
 
 const parseUploadedMaterial = async (material: StoredMaterial) => {
   updateMaterial(material.taskId, material.id, { status: 'processing', parseErrorCode: undefined });
+  let parsePath = material.diskPath;
+  let temporaryCrop: string | undefined;
   try {
+    if (material.preParseRegion && material.mimeType.startsWith('image/')) {
+      const metadata = await sharp(material.diskPath).metadata();
+      if (metadata.width && metadata.height) {
+        const box = material.preParseRegion;
+        temporaryCrop = uploadFilePath('parsed-input', `${material.id}.jpg`);
+        mkdirSync(path.dirname(temporaryCrop), { recursive: true });
+        await sharp(material.diskPath).extract({ left: Math.floor(box.x * metadata.width), top: Math.floor(box.y * metadata.height), width: Math.max(1, Math.min(metadata.width - Math.floor(box.x * metadata.width), Math.ceil(box.width * metadata.width))), height: Math.max(1, Math.min(metadata.height - Math.floor(box.y * metadata.height), Math.ceil(box.height * metadata.height))) }).jpeg({ quality: 96 }).toFile(temporaryCrop);
+        parsePath = temporaryCrop;
+      }
+    }
     const normalizedDocument = await parseMaterial({
       assetId: material.id,
       fileName: material.fileName,
       mimeType: material.mimeType,
-      filePath: material.diskPath,
+      filePath: parsePath,
       publicAssetBaseUrl: `/api/grading-tasks/${encodeURIComponent(material.taskId)}/materials/${encodeURIComponent(material.id)}`,
     });
     updateMaterial(material.taskId, material.id, {
@@ -183,6 +198,8 @@ const parseUploadedMaterial = async (material: StoredMaterial) => {
     const code = error instanceof MaterialParserError ? error.code : 'MATERIAL_PARSE_FAILED';
     console.error(JSON.stringify({ event: 'material_parse_failed', taskId: material.taskId, materialId: material.id, code }));
     updateMaterial(material.taskId, material.id, { status: 'failed', parseErrorCode: code });
+  } finally {
+    if (temporaryCrop) rmSync(temporaryCrop, { force: true });
   }
 };
 
@@ -329,6 +346,47 @@ router.post('/:taskId/materials/:assetId/reparse', async (request, response) => 
   response.json({ asset: updated ? toPublicAsset(updated) : toPublicAsset(material) });
 });
 
+router.post('/:taskId/materials/parse', async (request, response) => {
+  const parsed = materialSelectionSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ code: 'INVALID_MATERIAL_SELECTION' });
+  const selected = getMaterials(request.params.taskId).filter(item => parsed.data.assetIds.includes(item.id) && item.kind !== 'student-submission');
+  if (selected.length !== parsed.data.assetIds.length) return response.status(404).json({ code: 'MATERIAL_NOT_FOUND' });
+  await Promise.all(selected.map(parseUploadedMaterial));
+  response.json({ assets: selected.map(item => toPublicAsset(getMaterials(request.params.taskId).find(next => next.id === item.id) ?? item)) });
+});
+
+router.put('/:taskId/materials/:assetId/region', (request, response) => {
+  const parsed = materialRegionSchema.safeParse(request.body?.boundingBox);
+  const task = listGradingTasks().find(item => item.id === request.params.taskId);
+  const material = getMaterials(request.params.taskId).find(item => item.id === request.params.assetId && item.kind !== 'student-submission');
+  if (!parsed.success) return response.status(400).json({ code: 'INVALID_EVIDENCE_REGION' });
+  if (task?.questionScopeConfirmedAt) return response.status(409).json({ code: 'MATERIALS_LOCKED_AFTER_ASSIGNMENT' });
+  if (!material) return response.status(404).json({ code: 'MATERIAL_NOT_FOUND' });
+  if (!material.mimeType.startsWith('image/')) return response.status(409).json({ code: 'MATERIAL_CROP_REQUIRES_IMAGE' });
+  const updated = updateMaterial(request.params.taskId, material.id, { preParseRegion: parsed.data });
+  response.json({ asset: updated ? toPublicAsset(updated) : toPublicAsset(material) });
+});
+
+router.delete('/:taskId/materials', (request, response) => {
+  const parsed = materialSelectionSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ code: 'INVALID_MATERIAL_SELECTION' });
+  const task = listGradingTasks().find(item => item.id === request.params.taskId);
+  if (task?.questionScopeConfirmedAt) return response.status(409).json({ code: 'MATERIALS_LOCKED_AFTER_ASSIGNMENT' });
+  const selected = getMaterials(request.params.taskId).filter(item => parsed.data.assetIds.includes(item.id) && item.kind !== 'student-submission');
+  if (selected.length !== parsed.data.assetIds.length) return response.status(404).json({ code: 'MATERIAL_NOT_FOUND' });
+  for (const kind of ['assignment', 'reference-answer'] as const) {
+    const ids = selected.filter(item => item.kind === kind).map(item => item.id);
+    if (!ids.length) continue;
+    for (const material of removeMaterialsById(request.params.taskId, kind, ids)) {
+      rmSync(assertPathInsideWorkspace(material.diskPath), { force: true });
+      rmSync(assertPathInsideWorkspace(uploadFilePath('parsed', material.id)), { recursive: true, force: true });
+      deleteParserArtifact(material.id);
+    }
+  }
+  deleteFirstSectionAnalysis(request.params.taskId); deleteTaskRubrics(request.params.taskId); deleteVisionValidationForTask(request.params.taskId); deleteTrialGradingResult(request.params.taskId); deleteGradingBatch(request.params.taskId);
+  response.json({ removed: selected.map(toPublicAsset) });
+});
+
 router.get('/:taskId/vision-validation/:assetId', (request, response) => {
   const result = getVisionValidationResult(request.params.taskId, request.params.assetId);
   if (!result) {
@@ -336,6 +394,35 @@ router.get('/:taskId/vision-validation/:assetId', (request, response) => {
     return;
   }
   response.json({ result });
+});
+
+router.put('/:taskId/vision-validation/:assetId/questions/:displayNo/region', async (request, response) => {
+  const parsed = evidenceRegionSchema.shape.boundingBox.safeParse(request.body?.boundingBox);
+  const material = getMaterials(request.params.taskId).find(item => item.id === request.params.assetId && item.kind === 'student-submission');
+  const current = getVisionValidationResult(request.params.taskId, request.params.assetId);
+  const displayNo = decodeURIComponent(request.params.displayNo);
+  if (!parsed.success) return response.status(400).json({ code: 'INVALID_EVIDENCE_REGION' });
+  if (!material?.normalizedDocument || !current) return response.status(404).json({ code: 'VISION_VALIDATION_NOT_FOUND' });
+  const existing = current.items.find(item => item.displayNo === displayNo);
+  if (!existing) return response.status(404).json({ code: 'QUESTION_NOT_FOUND' });
+  try {
+    const pageNumber = existing.region.pageNumber;
+    const source = material.normalizedDocument.resources.find(resource => resource.role === 'source-page' && (resource.pageNumber ?? 1) === pageNumber);
+    if (!source) return response.status(404).json({ code: 'SOURCE_PAGE_NOT_FOUND' });
+    const sourcePath = sourcePageImagePath(material.id, pageNumber, source.fileName);
+    const metadata = await sharp(sourcePath).metadata();
+    if (!metadata.width || !metadata.height) throw new Error('SOURCE_PAGE_DIMENSIONS_MISSING');
+    const region = { x: Math.floor(parsed.data.x * metadata.width), y: Math.floor(parsed.data.y * metadata.height), width: Math.max(1, Math.ceil(parsed.data.width * metadata.width)), height: Math.max(1, Math.ceil(parsed.data.height * metadata.height)), pageNumber };
+    const fileName = `question-${displayNo.replace(/[^\p{L}\p{N}._-]/gu, '_')}-teacher.jpg`;
+    const target = uploadFilePath('validation', request.params.taskId, material.id, fileName);
+    mkdirSync(path.dirname(target), { recursive: true });
+    await sharp(sourcePath).extract({ left: region.x, top: region.y, width: Math.min(region.width, metadata.width - region.x), height: Math.min(region.height, metadata.height - region.y) }).jpeg({ quality: 95 }).toFile(target);
+    const paddleText = material.normalizedDocument.blocks.filter(block => block.pageNumber === pageNumber && block.boundingBox && boxesOverlap(block.boundingBox, parsed.data)).sort((a, b) => a.order - b.order).map(block => block.text.trim()).filter(Boolean).join('\n');
+    const cropUrl = `/api/grading-tasks/${encodeURIComponent(request.params.taskId)}/materials/${encodeURIComponent(material.id)}/validation/${encodeURIComponent(fileName)}?v=${Date.now()}`;
+    const result: VisionValidationResult = { ...current, items: current.items.map(item => item.displayNo === displayNo ? { ...item, region, pageWidth: metadata.width, pageHeight: metadata.height, cropUrl, paddleText, locatorSource: 'teacher-manual', locationStatus: 'located', locationReasons: ['教师手动确认范围'], needsReview: !paddleText.trim(), evidenceUnits: [] } : item), createdAt: new Date().toISOString() };
+    saveVisionValidationResult(result); invalidateAiGradingForAsset(request.params.taskId, material.id);
+    response.json({ result });
+  } catch { response.status(500).json({ code: 'EVIDENCE_CROP_FAILED' }); }
 });
 
 router.post('/:taskId/vision-validation', async (request, response) => {
@@ -423,6 +510,8 @@ router.post('/:taskId/vision-validation', async (request, response) => {
           pipelineVersion: NON_CHOICE_RECOGNITION_VERSION,
           displayNo: region.displayNo,
           region: region.region,
+          pageWidth: parsedArtifact.data.pages.find(page => page.pageNumber === region.region.pageNumber)?.prunedResult.width,
+          pageHeight: parsedArtifact.data.pages.find(page => page.pageNumber === region.region.pageNumber)?.prunedResult.height,
           locatorSource: region.locatorSource,
           locationStatus: region.locationStatus,
           locationReasons: region.locationReasons,
@@ -483,12 +572,20 @@ router.post('/:taskId/materials', uploadRateLimit, upload.array('files'), resume
   });
   });
   if (kind === 'student-submission') appendMaterials(taskId, assets);
-  else replaceMaterialsForKind(taskId, kind, assets);
+  else {
+    const replaced = getMaterials(taskId).filter(material => material.kind === kind);
+    replaceMaterialsForKind(taskId, kind, assets);
+    for (const material of replaced) {
+      rmSync(assertPathInsideWorkspace(material.diskPath), { force: true });
+      rmSync(assertPathInsideWorkspace(uploadFilePath('parsed', material.id)), { recursive: true, force: true });
+      deleteParserArtifact(material.id);
+    }
+  }
   if (kind !== 'student-submission') {
     deleteTrialGradingResult(taskId);
     deleteFirstSectionAnalysis(taskId);
   }
-  assets.forEach(material => { void parseUploadedMaterial(material); });
+  if (kind === 'student-submission') assets.forEach(material => { void parseUploadedMaterial(material); });
   response.status(201).json({ assets: assets.map(toPublicAsset) });
 });
 

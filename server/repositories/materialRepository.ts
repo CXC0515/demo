@@ -37,6 +37,7 @@ export const appendMaterials = (taskId: string, materials: StoredMaterial[]) => 
 };
 
 export const getMaterials = (taskId: string) => store().values.get(taskId) ?? [];
+export const deleteMaterialsForTask = (taskId: string) => { const current = store(); const removed = current.values.get(taskId) ?? []; if (current.values.delete(taskId)) current.persist(); return removed; };
 
 export const updateMaterial = (taskId: string, materialId: string, update: Partial<StoredMaterial>) => {
   const { values: taskMaterials, persist: persistMaterials } = store();
