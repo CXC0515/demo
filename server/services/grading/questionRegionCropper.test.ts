@@ -364,6 +364,24 @@ test('uses geometric Paddle blocks even when block_order is reversed', async () 
   }
 });
 
+test('ignores numbered document titles when locating a question answer', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = { model: 'PaddleOCR-VL-1.6', pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [
+    { block_label: 'paragraph_title', block_content: '2 济南的冬天', block_bbox: [60, 80, 320, 120], block_id: 1 },
+    { block_label: 'text', block_content: '2. 比喻；拟人', block_bbox: [70, 430, 360, 470], block_id: 2 },
+    { block_label: 'text', block_content: '3. 下一题答案', block_bbox: [70, 510, 360, 550], block_id: 3 }
+  ] } }] };
+  try {
+    const [region] = await createVisionLocatedRegions(taskId, assetId, [page], ['2'], new Map([['2', ['2-answer']]]), [], artifact, new Map([['2', 'text']]));
+    assert.ok(region.region.y >= 420, JSON.stringify(region.region));
+    assert.match(region.paddleText, /比喻/);
+    assert.doesNotMatch(region.paddleText, /济南的冬天/);
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
 test('keeps continuation blocks in the same column when other columns interleave', async () => {
   const page = await makePage(1);
   const artifact: PaddleParserArtifact = {

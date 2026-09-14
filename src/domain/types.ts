@@ -154,11 +154,12 @@ export interface WorkbenchTask {
   progress?: number;
   selectedQuestionIds?: string[];
   questionScopeConfirmedAt?: string;
+  archivedAt?: string;
 }
 
 export type GradingMode = 'per-submission' | 'batch-checkpoint' | 'auto-continue';
 export type CalibrationResultSource = 'ai-confirmed' | 'teacher-adjusted' | 'teacher-manual';
-export type GradingReviewTrigger = 'answer-region' | 'recognition-conflict' | 'crossed-out' | 'low-confidence' | 'rubric-insufficient';
+export type GradingReviewTrigger = 'answer-missing' | 'rubric-insufficient' | 'answer-region' | 'recognition-conflict' | 'crossed-out' | 'low-confidence';
 export type GradingReviewDecision = 'confirmed-score' | 'corrected-recognition' | 'adjusted-score' | 'deferred';
 export type GradingFeedbackReason = 'answer-region-incomplete' | 'recognition-error' | 'crossed-out-error' | 'rubric-missing' | 'rubric-judgment-error' | 'score-too-high' | 'score-too-low' | 'other';
 
@@ -253,7 +254,9 @@ export interface VisionValidationItem {
   pipelineVersion?: number;
   displayNo: string;
   region: { x: number; y: number; width: number; height: number; pageNumber: number };
-  locatorSource: 'paddle-layout' | 'inferred-gap' | 'vision-layout';
+  locatorSource: 'paddle-layout' | 'inferred-gap' | 'vision-layout' | 'teacher-manual';
+  pageWidth?: number;
+  pageHeight?: number;
   locationStatus: 'located' | 'needs-visual' | 'needs-teacher';
   locationReasons: string[];
   cropUrl: string;
@@ -414,6 +417,7 @@ export interface DocumentAsset {
   publicUrl?: string;
   status: 'uploaded' | 'processing' | 'ready' | 'needs-review' | 'failed';
   parseErrorCode?: string;
+  preParseRegion?: { x: number; y: number; width: number; height: number };
 }
 
 export type MaterialSourceFormat = 'docx' | 'pdf' | 'image' | 'text';

@@ -13,7 +13,7 @@ import {
   TimerReminder, ReviewItem, WorkflowState, TeacherObservation, RosterStudent, KnowledgeNode, CommitteeRole, CommitteeAssignment, TeacherProfile, ClassroomLayout, KnowledgeGraphSnapshot
 } from './domain/types';
 import { createEmptyWorkflowState } from './domain/gradingTask';
-import { listGradingTasks, saveGradingTask } from './services/gradingTaskApi';
+import { deleteGradingTask, listGradingTasks, saveGradingTask } from './services/gradingTaskApi';
 import {
   createRosterClass,
   createRosterCommitteeRole,
@@ -527,7 +527,7 @@ export default function App() {
     ?? classes.find(c => c.status === 'active')
     ?? classes[0];
   const pendingReviewCount = reviewQueue.filter(r => r.status === 'pending').length
-    + Object.keys(workflowStates).flatMap(taskId => workflowStates[taskId].questionGradingStates ?? []).flatMap(state => state.calibrationSamples).filter(sample => sample.status !== 'confirmed' && (sample.needsTeacherReview || sample.recognitionConflict || sample.gradingConfidence < lowConfidenceThreshold)).length;
+    + Object.keys(workflowStates).flatMap(taskId => workflowStates[taskId].questionGradingStates ?? []).flatMap(state => state.calibrationSamples).filter(sample => sample.status !== 'confirmed' && ((sample.reviewTriggers ?? []).some(trigger => trigger === 'answer-missing' || trigger === 'rubric-insufficient') || sample.aiScore === null || (!sample.ocrText.trim() && !sample.lunaReviewText?.trim()))).length;
   const activeGradingTaskCount = tasks.filter(task => task.status !== 'completed').length;
   const navGroups = createNavGroups(activeGradingTaskCount);
 
@@ -696,6 +696,17 @@ export default function App() {
               onUpdateTask={async (updatedTask) => {
                 const saved = await saveGradingTask(updatedTask);
                 setTasks(current => current.map(task => task.id === saved.id ? saved : task));
+              }}
+              onArchiveTask={async (task, archived) => {
+                const saved = await saveGradingTask({ ...task, archivedAt: archived ? new Date().toISOString() : undefined });
+                setTasks(current => current.map(item => item.id === saved.id ? saved : item));
+                triggerToast(archived ? '任务已归档' : '任务已恢复');
+              }}
+              onDeleteTask={async task => {
+                await deleteGradingTask(task.id);
+                setTasks(current => current.filter(item => item.id !== task.id));
+                setWorkflowStates(current => { const next = { ...current }; delete next[task.id]; return next; });
+                triggerToast('任务已永久删除');
               }}
               onUpdateState={(taskId, updated) => setWorkflowStates(current => ({
                 ...current,

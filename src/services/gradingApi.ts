@@ -20,6 +20,21 @@ export const uploadTaskMaterials = async (taskId: string, kind: 'assignment' | '
   const body = await response.json() as { assets: DocumentAsset[] };
   return body.assets;
 };
+export const parseTaskMaterials = async (taskId: string, assetIds: string[]) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/materials/parse`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetIds }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { assets: DocumentAsset[] }).assets;
+};
+export const removeTaskMaterials = async (taskId: string, assetIds: string[]) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/materials`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetIds }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { removed: DocumentAsset[] }).removed;
+};
+export const saveTaskMaterialRegion = async (taskId: string, assetId: string, boundingBox: { x: number; y: number; width: number; height: number }) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/materials/${encodeURIComponent(assetId)}/region`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ boundingBox }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { asset: DocumentAsset }).asset;
+};
 
 export const removeStudentSubmissions = async (taskId: string, assetIds: string[]) => {
   const response = await apiFetch(`/api/grading-tasks/${taskId}/student-submissions`, {
@@ -124,6 +139,11 @@ export const saveTaskEvidenceRegion = async (taskId: string, displayNo: string, 
   });
   if (!response.ok) throw new Error(await readErrorCode(response));
   return (await response.json() as { analysis: FirstSectionAnalysis }).analysis;
+};
+export const saveSubmissionQuestionRegion = async (taskId: string, assetId: string, displayNo: string, boundingBox: { x: number; y: number; width: number; height: number }) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/vision-validation/${encodeURIComponent(assetId)}/questions/${encodeURIComponent(displayNo)}/region`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ boundingBox }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { result: VisionValidationResult }).result;
 };
 
 export const saveTaskQuestionCorrection = async (taskId: string, displayNo: string, correction: { title: string; stem: string; answerRequirement: string; standardAnswer?: string }) => {

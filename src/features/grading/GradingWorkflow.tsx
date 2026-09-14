@@ -68,7 +68,8 @@ import { orderCalibrationSamplesForTrial } from '../../domain/calibrationSamples
 import SourceEvidenceViewer from './SourceEvidenceViewer';
 import ScoreKeypad from './ScoreKeypad';
 import RichOcrText from './RichOcrText';
-import { analyzeTaskMaterials, compareTaskEvidenceRegion, confirmBatchStudents, correctTrialOcr, EvidenceRegionComparison, getBatchGrading, getGradingDiagnosis, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, regradeTrialQuestion, removeStudentSubmissions, retryStudentSubmissionParsing, retryTaskMaterialParsing, runVisionValidation, saveTaskEvidenceRegion, saveTaskQuestionCorrection, saveTaskRubric, saveTeacherReview, setBatchGradingAction, setTaskQuestionKnowledgeLink, startBatchGrading, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
+import AnnotatedSubmissionView from './AnnotatedSubmissionView';
+import { analyzeTaskMaterials, compareTaskEvidenceRegion, confirmBatchStudents, correctTrialOcr, EvidenceRegionComparison, getBatchGrading, getGradingDiagnosis, getTaskAnalysis, getTaskMaterials, getTaskRubrics, getTaskTrialGrading, getVisionValidation, gradeTaskTrial, parseTaskMaterials, regradeTrialQuestion, removeStudentSubmissions, removeTaskMaterials, retryStudentSubmissionParsing, retryTaskMaterialParsing, runVisionValidation, saveSubmissionQuestionRegion, saveTaskEvidenceRegion, saveTaskMaterialRegion, saveTaskQuestionCorrection, saveTaskRubric, saveTeacherReview, setBatchGradingAction, setTaskQuestionKnowledgeLink, startBatchGrading, uploadTaskMaterials, waitForTaskMaterials } from '../../services/gradingApi';
 import { listRosterClasses, listRosterStudents } from '../../services/rosterApi';
 import { buildMissingSubmissions, buildSubmissionPages } from '../../domain/submissionRoster';
 import { resolvedQuestionScore, resolvedUnitScore, resolveRubricScores } from '../../domain/gradingScoreDefaults';
@@ -125,6 +126,7 @@ const modeOptions: { id: GradingMode; label: string; description: string }[] = [
 ];
 
 const reviewTriggerLabels = {
+  'answer-missing': 'OCR 与 Luna 均未识别到答案',
   'answer-region': '答卷范围需确认',
   'recognition-conflict': '两次识别不一致',
   'crossed-out': '划掉内容需确认',
@@ -143,13 +145,12 @@ const feedbackReasonOptions: Array<{ id: GradingFeedbackReason; label: string }>
   { id: 'other', label: '其他' }
 ];
 
-const getSampleReviewTriggers = (sample: CalibrationSample, lowConfidenceThreshold: number): NonNullable<CalibrationSample['reviewTriggers']> => {
-  if (sample.reviewTriggers?.length) return sample.reviewTriggers;
+const getSampleReviewTriggers = (sample: CalibrationSample, _lowConfidenceThreshold: number): NonNullable<CalibrationSample['reviewTriggers']> => {
+  const allowed = sample.reviewTriggers?.filter(trigger => trigger === 'answer-missing' || trigger === 'rubric-insufficient') ?? [];
+  if (allowed.length) return allowed;
   return [
-    ...(sample.recognitionConflict ? ['recognition-conflict' as const] : []),
-    ...(sample.gradingConfidence < lowConfidenceThreshold ? ['low-confidence' as const] : []),
-    ...(sample.aiScore === null ? ['rubric-insufficient' as const] : []),
-    ...(sample.needsTeacherReview && !sample.recognitionConflict && sample.gradingConfidence >= lowConfidenceThreshold && sample.aiScore !== null ? ['answer-region' as const] : [])
+    ...(!sample.ocrText.trim() && !sample.lunaReviewText?.trim() ? ['answer-missing' as const] : []),
+    ...(sample.aiScore === null ? ['rubric-insufficient' as const] : [])
   ];
 };
 
@@ -202,9 +203,12 @@ const buildQuestionDisplayStem = (question: FirstSectionAnalysis['questions'][nu
   return withoutChildren || question.stem.trim() || source;
 };
 
-function VisionItemCard({ item }: { item: VisionValidationItem; key?: string }) {
-  const choiceEvidenceUnits = item.evidenceUnits?.filter(unit => unit.kind === 'choice') ?? [];
+function VisionItemCard({ item: initialItem, asset, document }: { item: VisionValidationItem; asset?: DocumentAsset; document?: NonNullable<WorkflowState['assignment']['documents']>[number]; key?: string }) {
+  const [item, setItem] = useState(initialItem);
+  const choiceEvidenceUnits = item.evidenceUnits?.filter(unit => unit.kind === 'choice' && (unit.region.x !== item.region.x || unit.region.y !== item.region.y || unit.region.width !== item.region.width || unit.region.height !== item.region.height)) ?? [];
   const effectiveAnswer = item.selectedOption || item.paddleText || item.lunaText;
+  const sourcePage = document?.resources.find(resource => resource.role === 'source-page' && (resource.pageNumber ?? 1) === item.region.pageNumber);
+  const sourceEvidence: SourceEvidence | undefined = asset && sourcePage && item.pageWidth && item.pageHeight ? { id: `${asset.id}-${item.displayNo}-manual`, assetId: asset.id, assetKind: 'student-submission', fileName: asset.fileName, pageNumber: item.region.pageNumber, boundingBox: { x: item.region.x / item.pageWidth, y: item.region.y / item.pageHeight, width: item.region.width / item.pageWidth, height: item.region.height / item.pageHeight }, ocrText: item.paddleText || item.lunaText, confidence: item.confidence, imageUrl: item.cropUrl, sourcePageUrl: sourcePage.publicUrl } : undefined;
   return (
     <article className="grid gap-3 border border-slate-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-wrap items-center gap-2">
@@ -213,7 +217,7 @@ function VisionItemCard({ item }: { item: VisionValidationItem; key?: string }) 
           {item.needsReview ? '需核验' : `置信度 ${Math.round(item.confidence * 100)}%`}
         </span>
       </div>
-      <img src={item.cropUrl} alt={`第 ${item.displayNo} 题完整区域`} className="max-h-48 w-full border border-slate-200 object-contain" />
+      {sourceEvidence ? <SourceEvidenceViewer evidence={sourceEvidence} label={`第 ${item.displayNo} 题答卷截图`} onSaveRegion={async boundingBox => { const result = await saveSubmissionQuestionRegion(asset!.taskId, asset!.id, item.displayNo, boundingBox); const updated = result.items.find(candidate => candidate.displayNo === item.displayNo); if (updated) setItem(updated); }} /> : <img src={item.cropUrl} alt={`第 ${item.displayNo} 题完整区域`} className="max-h-48 w-full border border-slate-200 object-contain" />}
       {choiceEvidenceUnits.length ? (
         <div className="grid grid-cols-2 gap-2">
           {choiceEvidenceUnits.map(unit => (
@@ -643,7 +647,7 @@ function SubmissionPreview({ page, roster, asset, document, validation, validati
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h4 className="text-sm font-black">逐题答案识别</h4><p className="mt-1 text-xs text-slate-500">复用已保存的 PaddleOCR 文字与坐标，由 Luna 重新定位和转写逐题答案；不会重复上传文件。</p></div><button type="button" disabled={!visionReady || validationPhase === 'loading'} onClick={onRunVision} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{validationPhase === 'loading' ? '正在重新提取逐题答案...' : validation ? '重新提取逐题答案' : '开始提取逐题答案'}</button></div>
         {!visionReady ? <p className="mt-3 text-xs font-bold text-amber-700">这份答卷尚未保留 Paddle 原始坐标，需要重新解析后才能裁图。</p> : null}
         {validationPhase === 'error' ? <p className="mt-3 text-xs font-bold text-rose-700">逐题识别失败（{validationError}）</p> : null}
-        {validation ? <div className="mt-4 grid gap-3 lg:grid-cols-2">{validation.items.map(item => <VisionItemCard key={item.displayNo} item={item} />)}</div> : null}
+        {validation ? <div className="mt-4 grid gap-3 lg:grid-cols-2">{validation.items.map(item => <VisionItemCard key={item.displayNo} item={item} asset={asset} document={document} />)}</div> : null}
       </section>
     </div>
   );
@@ -729,8 +733,9 @@ export default function GradingWorkflow({
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchQuestionId, setBatchQuestionId] = useState('');
   const [batchStudentId, setBatchStudentId] = useState('');
+  const [batchViewMode, setBatchViewMode] = useState<'question' | 'submission'>('question');
   const [diagnosis, setDiagnosis] = useState<GradingDiagnosis | null>(null);
-  const [reviewStage, setReviewStage] = useState<'all' | 'answer-region' | 'recognition-conflict' | 'crossed-out' | 'low-confidence' | 'rubric-insufficient' | 'resolved'>('all');
+  const [reviewStage, setReviewStage] = useState<'all' | 'answer-missing' | 'rubric-insufficient' | 'resolved'>('all');
   const [reviewSampleId, setReviewSampleId] = useState<string | null>(null);
   const [ocrCorrectionSampleIds, setOcrCorrectionSampleIds] = useState<Set<string>>(() => new Set());
   const [reviewEditedOcr, setReviewEditedOcr] = useState('');
@@ -757,7 +762,7 @@ export default function GradingWorkflow({
   const missingRows = workflowState.missingSubmissions ?? [];
   const trialSamples = selectedQuestionStates.flatMap(state => state.calibrationSamples);
   const reviewSamples = trialSamples
-    .map(sample => sample.reviewTriggers?.length ? sample : { ...sample, reviewTriggers: getSampleReviewTriggers(sample, lowConfidenceThreshold) })
+    .map(sample => ({ ...sample, reviewTriggers: getSampleReviewTriggers(sample, lowConfidenceThreshold) }))
     .filter(sample => sample.reviewTriggers.length);
   const pendingReviewSamples = reviewSamples.filter(sample => sample.status !== 'confirmed' && sample.reviewStatus !== 'resolved');
   const resolvedReviewSamples = reviewSamples.filter(sample => sample.reviewStatus === 'resolved');
@@ -771,9 +776,10 @@ export default function GradingWorkflow({
   const selectedReviewAnswerEvidence = selectedReviewQuestionState?.standardAnswerSourceIds?.map(id => workflowState.sourceEvidence.find(item => item.id === id)).find(Boolean);
   const pendingReviews = pendingReviewSamples.length;
   const allCalibrationComplete = selectedQuestionStates.length > 0 && selectedQuestionStates.every(state => state.calibrationSamples.slice(0, state.sampleTarget).every(sample => sample.status === 'confirmed'));
-  const batchSamples = selectedQuestionStates.flatMap(state => state.calibrationSamples);
+  const allBatchSamples = selectedQuestionStates.flatMap(state => state.calibrationSamples);
+  const batchSamples = batchViewMode === 'question' ? allBatchSamples : [];
   const activeBatchQuestionId = batchQuestionId || selectedQuestionStates[0]?.questionId || '';
-  const batchStudents = [...batchSamples.reduce((students, sample) => students.set(sample.studentId, sample), new Map<string, CalibrationSample>()).values()];
+  const batchStudents = [...allBatchSamples.reduce((students, sample) => students.set(sample.studentId, sample), new Map<string, CalibrationSample>()).values()];
   const activeBatchStudentId = batchStudentId || batchStudents[0]?.studentId || '';
   const selectedBatchSample = batchSamples.find(sample => sample.questionId === activeBatchQuestionId && sample.studentId === activeBatchStudentId);
   const unconfirmedBatchStudents = batchStudents.filter(sample => !(batch?.confirmedStudentIds ?? []).includes(sample.studentId));
@@ -783,8 +789,12 @@ export default function GradingWorkflow({
   const assignmentReady = workflowState.assignment.status === 'assigned';
   const gradingDataReady = selectedQuestions.length > 0 && matchRows.length > 0 && rosterMatchPhase === 'ready' && !issueRows.some(row => row.rosterMatchStatus !== 'matched');
   const normalizedDocuments = workflowState.assignment.documents ?? [];
+  const activeBatchStudentSamples = allBatchSamples.filter(sample => sample.studentId === activeBatchStudentId);
+  const activeBatchAssetId = activeBatchStudentSamples.find(sample => sample.sourceAssetId)?.sourceAssetId;
+  const activeBatchDocument = normalizedDocuments.find(document => document.assetId === activeBatchAssetId);
   const assignmentAssets = workflowState.assignment.assets.filter(asset => asset.kind === 'assignment' || asset.kind === 'reference-answer');
   const failedAssignmentAssets = assignmentAssets.filter(asset => asset.status === 'failed');
+  const stagedAssignmentAssets = assignmentAssets.filter(asset => asset.status === 'uploaded');
   const activeMaterialError = materialUploadError ?? failedAssignmentAssets[0]?.parseErrorCode;
   const pendingMaterialCount = pendingMaterialFiles.assignment.length + pendingMaterialFiles.referenceAnswer.length;
   const materialUploadBusy = materialUploadPhase === 'uploading' || materialUploadPhase === 'parsing';
@@ -806,6 +816,11 @@ export default function GradingWorkflow({
   const rubricDirty = Boolean(currentQuestionState && persistedCurrentQuestionState && JSON.stringify({ standardAnswer: currentQuestionState.standardAnswer, gradingRubric: currentQuestionState.gradingRubric, teacherRules: currentQuestionState.teacherRules }) !== JSON.stringify({ standardAnswer: persistedCurrentQuestionState.standardAnswer, gradingRubric: persistedCurrentQuestionState.gradingRubric, teacherRules: persistedCurrentQuestionState.teacherRules }));
 
   useEffect(() => { questionStatesRef.current = questionStates; }, [questionStates]);
+
+  useEffect(() => {
+    if (batchViewMode !== 'submission' || !activeBatchAssetId || visionValidationByAsset[activeBatchAssetId]) return;
+    void getVisionValidation(selectedTask.id, activeBatchAssetId).then(result => setVisionValidationByAsset(current => ({ ...current, [activeBatchAssetId]: result }))).catch(() => undefined);
+  }, [activeBatchAssetId, batchViewMode, selectedTask.id, visionValidationByAsset]);
 
   useEffect(() => {
     setPendingMaterialFiles({ assignment: [], referenceAnswer: [] });
@@ -1190,23 +1205,29 @@ export default function GradingWorkflow({
       { kind: 'assignment' as const, files: pendingMaterialFiles.assignment },
       { kind: 'reference-answer' as const, files: pendingMaterialFiles.referenceAnswer }
     ].filter(group => group.files.length);
-    if (!pendingGroups.length) return;
+    if (!pendingGroups.length && !stagedAssignmentAssets.length) return;
     setMaterialUploadPhase('uploading');
     setMaterialUploadError(null);
     setAnalysisErrorCode(null);
     updateAssignment({ analysisStatus: 'uploading' });
     try {
-      const uploadedGroups = await Promise.all(pendingGroups.map(group => uploadTaskMaterials(selectedTask.id, group.kind, group.files)));
+      const uploadedGroups = pendingGroups.length ? await Promise.all(pendingGroups.map(group => uploadTaskMaterials(selectedTask.id, group.kind, group.files))) : [];
       const uploaded = uploadedGroups.flat();
       const replacedKinds = new Set(pendingGroups.map(group => group.kind));
       const assets = [...workflowState.assignment.assets.filter(asset => !replacedKinds.has(asset.kind as 'assignment' | 'reference-answer')), ...uploaded];
-      updateAssignment({ assets, analysisStatus: 'parsing' });
+      updateAssignment({ assets, analysisStatus: 'uploading' });
       setPendingMaterialFiles(current => ({
         assignment: replacedKinds.has('assignment') ? [] : current.assignment,
         referenceAnswer: replacedKinds.has('reference-answer') ? [] : current.referenceAnswer
       }));
+      if (pendingGroups.length) {
+        setMaterialUploadPhase('idle');
+        onShowToast('材料已上传，可先预览或删除；确认后再开始解析');
+        return;
+      }
       setMaterialUploadPhase('parsing');
-      const result = await waitForTaskMaterials(selectedTask.id, uploaded.map(asset => asset.id));
+      await parseTaskMaterials(selectedTask.id, stagedAssignmentAssets.map(asset => asset.id));
+      const result = await getTaskMaterials(selectedTask.id);
       const nextAssignmentAssets = result.assets.filter(asset => asset.kind === 'assignment' || asset.kind === 'reference-answer');
       const needsReview = nextAssignmentAssets.some(asset => asset.status === 'needs-review');
       onUpdateState({
@@ -1250,6 +1271,14 @@ export default function GradingWorkflow({
       }).catch(() => updateAssignment({ analysisStatus: 'failed' }));
       onShowToast(materialParseErrorMessage(code));
     }
+  };
+
+  const deleteAssignmentMaterial = async (asset: DocumentAsset) => {
+    if (!window.confirm(`删除“${asset.fileName}”？相关拆题与评分草稿会失效。`)) return;
+    await removeTaskMaterials(selectedTask.id, [asset.id]);
+    const result = await getTaskMaterials(selectedTask.id);
+    onUpdateState({ assignment: { ...workflowState.assignment, assets: result.assets, documents: result.documents, firstSectionAnalysis: undefined, analysisStatus: 'idle' } });
+    onShowToast('材料已删除');
   };
 
   const retryFailedMaterialParsing = async () => {
@@ -1880,14 +1909,15 @@ export default function GradingWorkflow({
               <label className={`flex min-h-36 flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors dark:border-zinc-700 dark:bg-zinc-900/50 ${materialUploadBusy ? 'cursor-wait opacity-60' : 'cursor-pointer hover:border-emerald-500'}`}><Upload className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">作业题目或试卷</strong><span className={`mt-1 max-w-full truncate text-xs ${pendingMaterialFiles.assignment.length ? 'font-bold text-amber-700' : 'text-slate-400'}`}>{pendingMaterialFiles.assignment.length ? `待解析 ${pendingMaterialFiles.assignment.length} 份：${pendingMaterialFiles.assignment.map(file => file.name).join('、')}` : workflowState.assignment.questionFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" disabled={materialUploadBusy} onClick={event => { event.currentTarget.value = ''; }} onChange={event => selectMaterialFiles('assignment', event.currentTarget.files)} /></label>
               <label className={`flex min-h-36 flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors dark:border-zinc-700 dark:bg-zinc-900/50 ${materialUploadBusy ? 'cursor-wait opacity-60' : 'cursor-pointer hover:border-emerald-500'}`}><FileText className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">参考答案</strong><span className={`mt-1 max-w-full truncate text-xs ${pendingMaterialFiles.referenceAnswer.length ? 'font-bold text-amber-700' : 'text-slate-400'}`}>{pendingMaterialFiles.referenceAnswer.length ? `待解析 ${pendingMaterialFiles.referenceAnswer.length} 份：${pendingMaterialFiles.referenceAnswer.map(file => file.name).join('、')}` : workflowState.assignment.answerFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" disabled={materialUploadBusy} onClick={event => { event.currentTarget.value = ''; }} onChange={event => selectMaterialFiles('referenceAnswer', event.currentTarget.files)} /></label>
             </div>
-            {pendingMaterialCount || materialUploadPhase === 'error' || failedAssignmentAssets.length ? <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900 dark:bg-amber-950/20">
+            {pendingMaterialCount || stagedAssignmentAssets.length || materialUploadPhase === 'error' || failedAssignmentAssets.length ? <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900 dark:bg-amber-950/20">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0"><strong className="text-sm text-amber-950 dark:text-amber-100">{materialUploadBusy ? materialUploadPhase === 'uploading' ? '正在上传材料' : '正在并行解析材料' : pendingMaterialCount ? `已选择 ${pendingMaterialCount} 份待解析材料` : `${failedAssignmentAssets.length} 份已上传材料解析未完成`}</strong><p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-200">{pendingMaterialCount ? '选择文件不会自动解析。开始后，新文件会替换对应的旧材料，并使已有拆题结果失效。' : '原文件仍保存在系统中；重新解析会复用现有文件，不会再次上传或产生副本。'}</p>{activeMaterialError ? <p className="mt-2 text-xs font-bold leading-5 text-rose-700">{materialParseErrorMessage(activeMaterialError)}</p> : null}</div>
-                <button type="button" disabled={materialUploadBusy || (!pendingMaterialCount && !failedAssignmentAssets.length)} onClick={() => void (pendingMaterialCount ? startMaterialParsing() : retryFailedMaterialParsing())} className="flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">{pendingMaterialCount ? <Play className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}{materialUploadPhase === 'uploading' ? '正在上传...' : materialUploadPhase === 'parsing' ? '正在解析...' : pendingMaterialCount ? '上传并开始解析' : '重试已上传材料'}</button>
+                <div className="min-w-0"><strong className="text-sm text-amber-950 dark:text-amber-100">{materialUploadBusy ? materialUploadPhase === 'uploading' ? '正在上传材料' : '正在并行解析材料' : pendingMaterialCount ? `已选择 ${pendingMaterialCount} 份材料` : stagedAssignmentAssets.length ? `${stagedAssignmentAssets.length} 份材料已上传，等待解析` : `${failedAssignmentAssets.length} 份已上传材料解析未完成`}</strong><p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-200">{pendingMaterialCount ? '先上传，上传后可预览或删除，再由你点击开始解析。' : stagedAssignmentAssets.length ? '请先检查原文件；确认无误后开始 OCR 与 AI 拆题准备。' : '原文件仍保存在系统中；重新解析不会产生副本。'}</p>{activeMaterialError ? <p className="mt-2 text-xs font-bold leading-5 text-rose-700">{materialParseErrorMessage(activeMaterialError)}</p> : null}</div>
+                <button type="button" disabled={materialUploadBusy || (!pendingMaterialCount && !stagedAssignmentAssets.length && !failedAssignmentAssets.length)} onClick={() => void (pendingMaterialCount || stagedAssignmentAssets.length ? startMaterialParsing() : retryFailedMaterialParsing())} className="flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">{pendingMaterialCount || stagedAssignmentAssets.length ? <Play className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}{materialUploadPhase === 'uploading' ? '正在上传...' : materialUploadPhase === 'parsing' ? '正在解析...' : pendingMaterialCount ? '先上传材料' : stagedAssignmentAssets.length ? '开始解析' : '重试已上传材料'}</button>
               </div>
               {pendingMaterialCount && !materialUploadBusy ? <div className="mt-3 flex flex-col gap-2 border-t border-amber-200 pt-3 sm:flex-row dark:border-amber-900">{pendingMaterialFiles.assignment.length ? <button type="button" onClick={() => clearPendingMaterialFiles('assignment')} className="min-h-11 rounded-xl border border-amber-300 px-3 text-xs font-bold text-amber-900 dark:border-amber-800 dark:text-amber-100">清除待解析题目</button> : null}{pendingMaterialFiles.referenceAnswer.length ? <button type="button" onClick={() => clearPendingMaterialFiles('referenceAnswer')} className="min-h-11 rounded-xl border border-amber-300 px-3 text-xs font-bold text-amber-900 dark:border-amber-800 dark:text-amber-100">清除待解析答案</button> : null}</div> : null}
             </section> : null}
-            {assignmentAssets.length ? <section className="mt-5 border-y border-slate-200 dark:border-zinc-800"><div className="flex flex-wrap items-center gap-2 py-3">{assignmentAssets.map(asset => <span key={asset.id} className={`inline-flex max-w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs font-bold ${asset.status === 'failed' ? 'bg-rose-100 text-rose-800' : asset.status === 'needs-review' ? 'bg-amber-100 text-amber-800' : asset.status === 'ready' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-slate-300'}`}><span className="max-w-56 truncate">{asset.fileName}</span><span>{materialStatusLabel[asset.status]}</span></span>)}</div>{assignmentDocuments.map(document => <Fragment key={document.assetId}><MaterialDocumentDetails document={document} asset={assignmentAssets.find(item => item.id === document.assetId)} activeQuestion={selectedAnalysisQuestion} onCompareEvidence={selectedAnalysisQuestion ? (assetKind, pageNumber, boundingBox, runOcr) => compareEvidenceRegion(selectedAnalysisQuestion.displayNo, assetKind, pageNumber, boundingBox, runOcr) : undefined} onSaveEvidence={selectedAnalysisQuestion ? (assetKind, pageNumber, boundingBox) => saveEvidenceRegion(selectedAnalysisQuestion.displayNo, assetKind, pageNumber, boundingBox) : undefined} onPreview={(url, label) => setPreviewImage({ url, label })} /></Fragment>)}</section> : null}
+            {stagedAssignmentAssets.some(asset => asset.mimeType.startsWith('image/') && asset.publicUrl) ? <section className="mt-4"><strong className="text-xs text-slate-500">解析前预览与框选</strong><div className="mt-2 grid gap-3 sm:grid-cols-2">{stagedAssignmentAssets.filter(asset => asset.mimeType.startsWith('image/') && asset.publicUrl).map(asset => <SourceEvidenceViewer key={asset.id} label={asset.kind === 'assignment' ? '题目原图' : '答案原图'} evidence={{ id: `${asset.id}-preparse`, assetId: asset.id, assetKind: asset.kind, fileName: asset.fileName, pageNumber: 1, boundingBox: asset.preParseRegion ?? { x: 0, y: 0, width: 1, height: 1 }, ocrText: '', confidence: 1, imageUrl: asset.publicUrl, sourcePageUrl: asset.publicUrl }} onSaveRegion={async boundingBox => { const updated = await saveTaskMaterialRegion(selectedTask.id, asset.id, boundingBox); updateAssignment({ assets: workflowState.assignment.assets.map(item => item.id === updated.id ? updated : item) }); onShowToast('解析范围已保存'); }} />)}</div></section> : null}
+            {assignmentAssets.length ? <section className="mt-5 border-y border-slate-200 dark:border-zinc-800"><div className="flex flex-wrap items-center gap-2 py-3">{assignmentAssets.map(asset => <span key={asset.id} className={`inline-flex max-w-full items-center gap-1 rounded-xl px-2 py-1 text-xs font-bold ${asset.status === 'failed' ? 'bg-rose-100 text-rose-800' : asset.status === 'needs-review' ? 'bg-amber-100 text-amber-800' : asset.status === 'ready' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-slate-300'}`}><span className="max-w-44 truncate">{asset.fileName}</span><span>{materialStatusLabel[asset.status]}</span>{asset.publicUrl ? <button type="button" title="预览原文件" onClick={() => asset.mimeType.startsWith('image/') ? setPreviewImage({ url: asset.publicUrl!, label: asset.fileName }) : window.open(asset.publicUrl, '_blank', 'noopener,noreferrer')} className="flex h-11 w-11 items-center justify-center rounded-lg"><Eye className="h-4 w-4" /></button> : null}{!questionSelectionLocked ? <button type="button" title="删除材料" onClick={() => void deleteAssignmentMaterial(asset)} className="flex h-11 w-11 items-center justify-center rounded-lg text-rose-700"><Trash2 className="h-4 w-4" /></button> : null}</span>)}</div>{assignmentDocuments.map(document => <Fragment key={document.assetId}><MaterialDocumentDetails document={document} asset={assignmentAssets.find(item => item.id === document.assetId)} activeQuestion={selectedAnalysisQuestion} onCompareEvidence={selectedAnalysisQuestion ? (assetKind, pageNumber, boundingBox, runOcr) => compareEvidenceRegion(selectedAnalysisQuestion.displayNo, assetKind, pageNumber, boundingBox, runOcr) : undefined} onSaveEvidence={selectedAnalysisQuestion ? (assetKind, pageNumber, boundingBox) => saveEvidenceRegion(selectedAnalysisQuestion.displayNo, assetKind, pageNumber, boundingBox) : undefined} onPreview={(url, label) => setPreviewImage({ url, label })} /></Fragment>)}</section> : null}
             {workflowState.assignment.assets.length ? <section className="mt-5 border-y border-slate-200 py-4 dark:border-zinc-800">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div><h3 className="text-sm font-black">AI 拆题</h3><p className="mt-1 text-xs text-slate-500">识别题目后，选择本次需要批改的范围。</p></div>
@@ -1896,7 +1926,7 @@ export default function GradingWorkflow({
               {assignmentAnalysis?.processingMetrics && !isAnalyzing ? <div className="mt-3 flex flex-wrap gap-x-2 gap-y-1 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs font-bold text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-100"><span>拆题完成</span><span>· {assignmentAnalysis.questions.length} 道题</span><span>· {analysisSubquestionCount} 道小题</span><span>· 用时 {formatElapsed(Math.round(assignmentAnalysis.processingMetrics.durationMs / 1000))}</span></div> : null}
               {isAnalyzing ? <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900 dark:bg-emerald-950/20"><div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm text-emerald-900 dark:text-emerald-100">AI 正在识别作业结构</strong><span className="text-xs font-bold text-emerald-700">已用时 {formatElapsed(analysisElapsedSeconds)}</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-emerald-100 dark:bg-emerald-950"><div className="h-full w-1/2 animate-pulse rounded-full bg-emerald-600" /></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-3"><span className="font-bold text-emerald-800">1. 题目与答案材料已就绪</span><span className="font-bold text-emerald-800">2. 正在核对题号、题干和答案</span><span className="text-slate-400">3. 生成评分依据</span></div></div> : null}
               {analysisErrorCode && !isAnalyzing ? <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-rose-900 dark:bg-rose-950/20"><div><strong className="text-sm text-rose-900 dark:text-rose-100">{analysisErrorMessage(analysisErrorCode).title}</strong><p className="mt-1 text-xs leading-5 text-rose-700 dark:text-rose-200">{analysisErrorMessage(analysisErrorCode).detail}</p></div><button type="button" disabled={!assignmentMaterialsReady} onClick={() => void analyzeAssignment()} className="min-h-11 w-full shrink-0 rounded-xl border border-rose-300 px-4 text-sm font-bold text-rose-800 disabled:opacity-50 sm:w-auto dark:border-rose-800 dark:text-rose-100">重新拆题</button></div> : null}
-              {assignmentAnalysis && selectedAnalysisQuestion ? <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 lg:grid-cols-[220px_minmax(0,1fr)] dark:border-zinc-800">
+              {assignmentAnalysis && selectedAnalysisQuestion ? <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 xl:grid-cols-[220px_minmax(0,1fr)] dark:border-zinc-800">
                 <aside className="space-y-2"><div className="flex items-center justify-between gap-2 text-xs">{questionSelectionEditing && !questionSelectionLocked ? <label className="flex items-center gap-2 font-bold"><input type="checkbox" checked={allQuestionsSelected} onChange={toggleAllQuestions} aria-label="全选本次批改题目" className="h-4 w-4 accent-emerald-700" />全选</label> : <strong className="text-slate-700 dark:text-slate-200">本次批改题目</strong>}<span className="font-medium text-slate-600 dark:text-slate-300">已选 {questionSelectionDraft.length} / {assignmentAnalysis.questions.length}</span></div>{assignmentAnalysis.questions.map(question => { const questionId = `${selectedTask.id}-q-${question.displayNo}`; const included = questionSelectionDraft.includes(questionId); const active = selectedAnalysisQuestion.displayNo === question.displayNo; return <div key={question.displayNo} className={`flex items-center gap-2 rounded-lg border p-2 ${active ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/20' : 'border-slate-200 dark:border-zinc-800'}`}>{questionSelectionEditing && !questionSelectionLocked ? <input type="checkbox" checked={included} onChange={() => toggleQuestionSelection(question.displayNo)} aria-label={`选择第 ${question.displayNo} 题`} className="h-4 w-4 accent-emerald-700" /> : <span aria-hidden="true" className={`h-2 w-2 rounded-full ${included ? 'bg-emerald-600' : 'bg-slate-200 dark:bg-zinc-700'}`} />}<button type="button" onClick={() => setAnalysisQuestionNo(question.displayNo)} className="min-w-0 flex-1 text-left"><strong className="block text-xs">第 {question.displayNo} 题</strong><span className="mt-0.5 block truncate text-[11px] text-slate-500">{question.title || question.stem}</span></button></div>; })}{questionSelectionLocked ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-bold text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">{submissionAssets.length ? '已上传答卷，题目范围已锁定' : '已确认布置，题目范围已锁定'}</div> : questionSelectionEditing ? <div className="grid grid-cols-2 gap-2"><button type="button" disabled={questionSelectionSaving} onClick={() => { setQuestionSelectionDraft(selectedQuestionIds); setQuestionSelectionEditing(false); }} className="rounded-lg border border-slate-300 px-3 py-2.5 text-xs font-bold text-slate-700 dark:border-zinc-700 dark:text-slate-200">取消</button><button type="button" disabled={!questionSelectionDirty || questionSelectionSaving} onClick={() => void saveQuestionSelection()} className="rounded-lg bg-emerald-700 px-3 py-2.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600">{questionSelectionSaving ? '正在保存...' : '保存题目范围'}</button></div> : <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-900 dark:bg-emerald-950/30"><strong className="text-xs text-emerald-900 dark:text-emerald-100">题目范围已保存</strong><button type="button" onClick={() => setQuestionSelectionEditing(true)} className="text-xs font-bold text-emerald-800 underline underline-offset-2 dark:text-emerald-200">修改</button></div>}</aside>
                 <AnalysisQuestionCard question={selectedAnalysisQuestion} standardAnswer={questionStates.find(state => state.questionId === `${selectedTask.id}-q-${selectedAnalysisQuestion.displayNo}`)?.standardAnswer ?? selectedAnalysisQuestion.standardAnswer} onSave={correction => saveAnalysisQuestion(selectedAnalysisQuestion.displayNo, correction)} onCompareEvidence={(assetKind, pageNumber, boundingBox, runOcr) => compareEvidenceRegion(selectedAnalysisQuestion.displayNo, assetKind, pageNumber, boundingBox, runOcr)} onSaveEvidence={(assetKind, pageNumber, boundingBox) => saveEvidenceRegion(selectedAnalysisQuestion.displayNo, assetKind, pageNumber, boundingBox)} />
                 <label className="space-y-2 border-t border-slate-200 pt-4 lg:col-span-2 dark:border-zinc-800"><span className="text-xs font-bold text-slate-500">本次批改补充要求 <span className="font-normal text-slate-400">（应用于所有已选题目）</span></span><textarea value={workflowState.assignment.note} onChange={event => updateAssignment({ note: event.target.value })} rows={3} placeholder="例如：开放题允许意思相近；明显划掉的内容不计入答案" className={`${inputClass} resize-none leading-6`} /></label>
@@ -1981,6 +2011,8 @@ export default function GradingWorkflow({
 
       {activeStage === 'grading' ? (
         <section className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex rounded-2xl bg-slate-100 p-1 dark:bg-zinc-900"><button type="button" onClick={() => setBatchViewMode('question')} className={`min-h-11 rounded-xl px-4 text-xs font-bold ${batchViewMode === 'question' ? 'bg-white shadow-sm dark:bg-zinc-800' : 'text-slate-500'}`}>分题查看</button><button type="button" onClick={() => setBatchViewMode('submission')} className={`min-h-11 rounded-xl px-4 text-xs font-bold ${batchViewMode === 'submission' ? 'bg-white shadow-sm dark:bg-zinc-800' : 'text-slate-500'}`}>整份答卷</button></div>{batchViewMode === 'submission' ? <select value={activeBatchStudentId} onChange={event => setBatchStudentId(event.target.value)} className={`${inputClass} min-h-11 w-full text-base sm:w-auto sm:text-sm`}>{batchStudents.map(sample => <option key={sample.studentId} value={sample.studentId}>{sample.studentName}</option>)}</select> : null}</div>
+          {batchViewMode === 'submission' && allBatchSamples.length ? <section className={`${panelClass} p-4`}><AnnotatedSubmissionView document={activeBatchDocument} validation={activeBatchAssetId ? visionValidationByAsset[activeBatchAssetId] : undefined} samples={activeBatchStudentSamples} questions={selectedQuestions} /></section> : null}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
               ['已匹配答卷', `${matchedStudentCount} 份`],
@@ -2010,6 +2042,7 @@ export default function GradingWorkflow({
       {activeStage === 'diagnosis' && diagnosis ? <section className="space-y-4"><div className="grid gap-3 sm:grid-cols-3"><div className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">完成批改</span><strong className="mt-2 block text-2xl">{diagnosis.gradedStudentCount} 人</strong></div><div className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">班级平均分</span><strong className="mt-2 block text-2xl">{diagnosis.averageScore?.toFixed(1) ?? '-'} / {diagnosis.averageFullScore}</strong></div><div className={`${panelClass} p-5`}><span className="text-xs font-bold text-slate-500">待复核证据</span><strong className="mt-2 block text-2xl">{pendingReviews} 项</strong></div></div><div className="grid gap-4 lg:grid-cols-2"><section className={`${panelClass} p-5`}><h2 className="font-black">各题表现</h2><div className="mt-4 space-y-3">{diagnosis.questionPerformance.map(item => <div key={item.questionId}><div className="flex justify-between text-xs"><strong>第 {item.displayNo} 题</strong><span>{Math.round(item.scoreRate * 100)}%</span></div><div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-emerald-600" style={{width:`${Math.round(item.scoreRate * 100)}%`}} /></div></div>)}</div></section><section className={`${panelClass} p-5`}><h2 className="font-black">主要失分点</h2><div className="mt-4 space-y-2">{diagnosis.commonIssues.length ? diagnosis.commonIssues.map(item => <div key={item.label} className="flex items-start justify-between gap-4 rounded-2xl bg-amber-50 p-3 text-xs text-amber-900"><span>{item.label}</span><strong>{item.count} 人次</strong></div>) : <p className="text-sm text-slate-500">暂无明确共性失分点。</p>}</div></section></div><section className={`${panelClass} p-5`}><h2 className="font-black">典型学生</h2><div className="mt-4 grid gap-3 sm:grid-cols-2">{diagnosis.typicalStudents.map(item => <div key={`${item.role}-${item.studentId}`} className="rounded-2xl border border-slate-200 p-4"><span className="text-xs font-bold text-emerald-700">{item.role}</span><strong className="mt-1 block">{item.studentName}</strong><span className="mt-1 block text-xs text-slate-500">总分 {item.totalScore} / {diagnosis.averageFullScore}</span></div>)}</div></section></section> : null}
       {activeStage === 'diagnosis' && !diagnosis ? <section className={`${panelClass} flex min-h-80 flex-col items-center justify-center p-8 text-center`}><BookOpenCheck className="h-10 w-10 text-emerald-700" /><h2 className="mt-4 font-black">正在汇总真实批改结果</h2></section> : null}
 
+      {activeStage === 'calibration' && gradingAction !== 'none' && selectedSample ? createPortal(<div className="fixed bottom-24 right-3 z-[110] w-[min(270px,calc(100vw-1.5rem))] shadow-2xl sm:bottom-28 sm:right-6"><ScoreKeypad value={teacherScore} max={selectedSample.fullScore} onChange={setTeacherScore} /></div>, document.body) : null}
       {selectedReviewSample ? createPortal(<div className="fixed bottom-24 right-3 z-[110] w-[min(270px,calc(100vw-1.5rem))] shadow-2xl sm:bottom-28 sm:right-6"><ScoreKeypad value={reviewScore} max={selectedReviewSample.fullScore} disabled={reviewSaving !== 'idle'} onChange={setReviewScore} /></div>, document.body) : null}
 
       {showSubmissionDeleteConfirm ? createPortal(

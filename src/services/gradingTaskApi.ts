@@ -19,3 +19,7 @@ export const saveGradingTask = async (task: WorkbenchTask) => {
   if (!response.ok) throw new Error(`HTTP_${response.status}`);
   return (await response.json() as { task: WorkbenchTask }).task;
 };
+export const deleteGradingTask = async (taskId: string) => {
+  const response = await apiFetch(`/api/grading-task-list/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+  if (!response.ok) throw new Error(`HTTP_${response.status}`);
+};

@@ -236,6 +236,7 @@ const answerRowFromPaddle = (
   }
   const start = orderedBlocks
     .map((block, index) => ({ block, index }))
+    .filter(({ block }) => !['doc_title', 'paragraph_title', 'header', 'footer'].includes(block.block_label.toLowerCase()))
     .filter(({ block }) => block.block_content.split(/\r?\n/).some(line => {
       const normalized = line.trim();
       return normalized.match(/^(\d+)(?:\s|[.、])/i)?.[1] === displayNo
