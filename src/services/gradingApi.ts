@@ -20,10 +20,46 @@ export const uploadTaskMaterials = async (taskId: string, kind: 'assignment' | '
   const body = await response.json() as { assets: DocumentAsset[] };
   return body.assets;
 };
-
-export const clearStudentSubmissions = async (taskId: string) => {
-  const response = await apiFetch(`/api/grading-tasks/${taskId}/student-submissions`, { method: 'DELETE' });
+export const parseTaskMaterials = async (taskId: string, assetIds: string[]) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/materials/parse`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetIds }) });
   if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { assets: DocumentAsset[] }).assets;
+};
+export const removeTaskMaterials = async (taskId: string, assetIds: string[]) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/materials`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetIds }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { removed: DocumentAsset[] }).removed;
+};
+export const saveTaskMaterialRegion = async (taskId: string, assetId: string, boundingBox: { x: number; y: number; width: number; height: number }) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/materials/${encodeURIComponent(assetId)}/region`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ boundingBox }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { asset: DocumentAsset }).asset;
+};
+
+export const removeStudentSubmissions = async (taskId: string, assetIds: string[]) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/student-submissions`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetIds })
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { removed: DocumentAsset[] }).removed;
+};
+
+export const retryStudentSubmissionParsing = async (taskId: string, assetIds: string[]) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/student-submissions/retry`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetIds })
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { assets: DocumentAsset[] }).assets;
+};
+
+export const retryTaskMaterialParsing = async (taskId: string, assetId: string) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/materials/${encodeURIComponent(assetId)}/reparse`, { method: 'POST' });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { asset: DocumentAsset }).asset;
 };
 
 export interface TaskMaterialsResult {
@@ -43,9 +79,13 @@ export const waitForTaskMaterials = async (taskId: string, assetIds: string[], t
   while (Date.now() - startedAt < timeoutMs) {
     const result = await getTaskMaterials(taskId);
     const expectedAssets = result.assets.filter(asset => expectedIds.has(asset.id));
-    const failed = expectedAssets.find(asset => asset.status === 'failed');
-    if (failed) throw new Error(failed.parseErrorCode ?? 'MATERIAL_PARSE_FAILED');
-    if (expectedAssets.length === expectedIds.size && expectedAssets.every(asset => asset.status === 'ready' || asset.status === 'needs-review')) return result;
+    const allFinished = expectedAssets.length === expectedIds.size
+      && expectedAssets.every(asset => asset.status === 'ready' || asset.status === 'needs-review' || asset.status === 'failed');
+    if (allFinished) {
+      const failed = expectedAssets.find(asset => asset.status === 'failed');
+      if (failed) throw new Error(failed.parseErrorCode ?? 'MATERIAL_PARSE_FAILED');
+      return result;
+    }
     await new Promise(resolve => window.setTimeout(resolve, 1200));
   }
   throw new Error('MATERIAL_PARSE_TIMEOUT');
@@ -73,11 +113,66 @@ export const getTaskAnalysis = async (taskId: string) => {
   return body.analysis;
 };
 
+export interface EvidenceRegionComparison {
+  originalQuote: string;
+  intersectingText: string;
+  geometricStatus: 'covered' | 'different' | 'empty';
+  focusedOcrText?: string;
+  ocrStatus: 'not-run' | 'completed' | 'failed';
+}
+
+export const compareTaskEvidenceRegion = async (taskId: string, displayNo: string, assetKind: 'assignment' | 'reference-answer', pageNumber: number, boundingBox: { x: number; y: number; width: number; height: number }, runOcr = false) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/analysis/questions/${encodeURIComponent(displayNo)}/evidence/compare`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetKind, pageNumber, boundingBox, runOcr })
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return response.json() as Promise<EvidenceRegionComparison>;
+};
+
+export const saveTaskEvidenceRegion = async (taskId: string, displayNo: string, assetKind: 'assignment' | 'reference-answer', pageNumber: number, boundingBox: { x: number; y: number; width: number; height: number }) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/analysis/questions/${encodeURIComponent(displayNo)}/evidence`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetKind, pageNumber, boundingBox })
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { analysis: FirstSectionAnalysis }).analysis;
+};
+export const saveSubmissionQuestionRegion = async (taskId: string, assetId: string, displayNo: string, boundingBox: { x: number; y: number; width: number; height: number }) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/vision-validation/${encodeURIComponent(assetId)}/questions/${encodeURIComponent(displayNo)}/region`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ boundingBox }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { result: VisionValidationResult }).result;
+};
+
+export const compareSubmissionQuestionRegion = async (taskId: string, assetId: string, displayNo: string, boundingBox: { x: number; y: number; width: number; height: number }, runOcr = false) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/vision-validation/${encodeURIComponent(assetId)}/questions/${encodeURIComponent(displayNo)}/region/compare`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ boundingBox, runOcr }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return response.json() as Promise<EvidenceRegionComparison>;
+};
+
+export const setSubmissionRecognitionSource = async (taskId: string, assetId: string, displayNo: string, source: 'paddle' | 'focused-paddle' | 'luna') => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/vision-validation/${encodeURIComponent(assetId)}/questions/${encodeURIComponent(displayNo)}/source`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { result: VisionValidationResult }).result;
+};
+
 export const saveTaskQuestionCorrection = async (taskId: string, displayNo: string, correction: { title: string; stem: string; answerRequirement: string; standardAnswer?: string }) => {
   const response = await apiFetch(`/api/grading-tasks/${taskId}/analysis/questions/${encodeURIComponent(displayNo)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(correction)
+  });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { analysis: FirstSectionAnalysis }).analysis;
+};
+
+export const setTaskQuestionKnowledgeLink = async (taskId: string, displayNo: string, nodeId: string, confirmed: boolean) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/analysis/questions/${encodeURIComponent(displayNo)}/knowledge/${encodeURIComponent(nodeId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirmed })
   });
   if (!response.ok) throw new Error(await readErrorCode(response));
   return (await response.json() as { analysis: FirstSectionAnalysis }).analysis;

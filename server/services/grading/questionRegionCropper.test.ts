@@ -97,6 +97,60 @@ test('does not release a question when an expected answer unit is missing', asyn
   }
 });
 
+test('falls back to saved Paddle blocks when Luna returns an empty placeholder', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = {
+    model: 'PaddleOCR-VL-1.6',
+    pages: [{
+      pageNumber: 1,
+      prunedResult: {
+        width: 800,
+        height: 1000,
+        parsing_res_list: [{ block_label: 'text', block_content: '1. student answer', block_bbox: [140, 270, 520, 335], block_id: 21 }]
+      }
+    }]
+  };
+  try {
+    const emptyVision = located({
+      recognizedAnswer: '',
+      evidenceUnits: [{ ...located().evidenceUnits[0], provisionalText: '', blockIds: [], confidence: 0, needsReview: true }],
+      confidence: 0,
+      needsReview: true,
+      reason: '未定位到作答'
+    });
+    const [region] = await createVisionLocatedRegions(
+      taskId,
+      assetId,
+      [page],
+      ['1'],
+      new Map([['1', ['1-answer']]]),
+      [emptyVision],
+      artifact,
+      new Map([['1', 'text']]),
+      true
+    );
+    assert.equal(region.locatorSource, 'paddle-layout');
+    assert.match(region.paddleText, /student answer/);
+    assert.equal(region.evidenceUnits.length, 1);
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('falls back to Paddle geometry when Luna marks its screenshot unavailable', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = { model: 'PaddleOCR-VL-1.6', pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [{ block_label: 'text', block_content: '1. student answer', block_bbox: [140, 270, 520, 335], block_id: 21 }] } }] };
+  try {
+    const [region] = await createVisionLocatedRegions(taskId, assetId, [page], ['1'], new Map([['1', ['1-answer']]]), [located({ screenshotAvailable: false })], artifact, new Map([['1', 'text']]), true);
+    assert.equal(region.locatorSource, 'paddle-layout');
+    assert.match(region.paddleText, /student answer/);
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
 test('uses the page returned by visual location for multi-page submissions', async () => {
   const firstPage = await makePage(1);
   const secondPage = await makePage(2);
@@ -317,6 +371,24 @@ test('uses geometric Paddle blocks even when block_order is reversed', async () 
     );
     assert.ok(region.region.y >= 335 && region.region.y < 345, JSON.stringify(region.region));
     assert.ok(region.region.y + region.region.height <= 370);
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
+test('ignores numbered document titles when locating a question answer', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = { model: 'PaddleOCR-VL-1.6', pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [
+    { block_label: 'paragraph_title', block_content: '2 济南的冬天', block_bbox: [60, 80, 320, 120], block_id: 1 },
+    { block_label: 'text', block_content: '2. 比喻；拟人', block_bbox: [70, 430, 360, 470], block_id: 2 },
+    { block_label: 'text', block_content: '3. 下一题答案', block_bbox: [70, 510, 360, 550], block_id: 3 }
+  ] } }] };
+  try {
+    const [region] = await createVisionLocatedRegions(taskId, assetId, [page], ['2'], new Map([['2', ['2-answer']]]), [], artifact, new Map([['2', 'text']]));
+    assert.ok(region.region.y >= 420, JSON.stringify(region.region));
+    assert.match(region.paddleText, /比喻/);
+    assert.doesNotMatch(region.paddleText, /济南的冬天/);
   } finally {
     await rm(page.sourceImagePath, { force: true });
     await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });

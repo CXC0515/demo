@@ -300,6 +300,18 @@ body {
   background-color: var(--theme-primary-hover) !important;
 }
 
+button.bg-emerald-700:disabled,
+button.bg-emerald-600:disabled {
+  background-color: #e2e8f0 !important;
+  color: #64748b !important;
+}
+
+.dark button.bg-emerald-700:disabled,
+.dark button.bg-emerald-600:disabled {
+  background-color: #27272a !important;
+  color: #a1a1aa !important;
+}
+
 .text-emerald-700,
 .text-emerald-800,
 .text-emerald-900,

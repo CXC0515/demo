@@ -145,7 +145,7 @@ test('retries a full PaddleOCR queue and preserves the successful document', asy
   const document = { markdown: '课表' };
   const parser = { parse: async () => {
     calls += 1;
-    if (calls === 1) throw new MaterialParserError('PADDLEOCR_INVALID_REQUEST', { cause: new Error('任务提交队列已满，请稍后重试') });
+    if (calls === 1) throw new MaterialParserError('PADDLEOCR_QUEUE_FULL', { cause: new Error('任务提交队列已满，请稍后重试') });
     return document;
   } };
   const result = await parseScheduleWithRetry(parser as never, { assetId: 'asset', fileName: 'a.jpg', mimeType: 'image/jpeg', filePath: '/tmp/a.jpg' }, async () => undefined);

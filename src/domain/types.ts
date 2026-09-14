@@ -154,11 +154,12 @@ export interface WorkbenchTask {
   progress?: number;
   selectedQuestionIds?: string[];
   questionScopeConfirmedAt?: string;
+  archivedAt?: string;
 }
 
 export type GradingMode = 'per-submission' | 'batch-checkpoint' | 'auto-continue';
 export type CalibrationResultSource = 'ai-confirmed' | 'teacher-adjusted' | 'teacher-manual';
-export type GradingReviewTrigger = 'answer-region' | 'recognition-conflict' | 'crossed-out' | 'low-confidence' | 'rubric-insufficient';
+export type GradingReviewTrigger = 'answer-missing' | 'rubric-insufficient' | 'answer-region' | 'recognition-conflict' | 'crossed-out' | 'low-confidence';
 export type GradingReviewDecision = 'confirmed-score' | 'corrected-recognition' | 'adjusted-score' | 'deferred';
 export type GradingFeedbackReason = 'answer-region-incomplete' | 'recognition-error' | 'crossed-out-error' | 'rubric-missing' | 'rubric-judgment-error' | 'score-too-high' | 'score-too-low' | 'other';
 
@@ -168,6 +169,9 @@ export interface SubmissionPage {
   studentId?: string;
   expectedStudentName: string;
   detectedStudentNo: string;
+  detectedStudentName?: string;
+  matchedStudentNo?: string;
+  nameMatchSource?: 'ocr' | 'file-name' | 'teacher';
   pageCount: number;
   ocrConfidence: number;
   studentNoConfidence?: number;
@@ -176,7 +180,7 @@ export interface SubmissionPage {
   pageContinuity?: number;
   reviewSource?: 'automatic' | 'multimodal' | 'teacher';
   issueReason?: string;
-  rosterMatchStatus?: 'pending' | 'matched' | 'unknown-student-no' | 'duplicate-student-no' | 'unreadable-student-no' | 'ambiguous-student-name';
+  rosterMatchStatus?: 'pending' | 'matched' | 'unknown-student-no' | 'duplicate-student-no' | 'unreadable-student-no' | 'unreadable-student-name' | 'ambiguous-student-name';
   rosterIssueReason?: string;
   status: 'matched' | 'needs-review' | 'missing-page';
 }
@@ -193,7 +197,7 @@ export interface CalibrationSample {
   teacherCorrectedText?: string;
   lunaReviewText?: string;
   recognitionConflict?: boolean;
-  ocrSource?: 'paddle' | 'luna' | 'choice-vision';
+  ocrSource?: 'paddle' | 'focused-paddle' | 'luna' | 'choice-vision';
   ocrText: string;
   ocrConfidence: number;
   aiScore: number | null;
@@ -226,6 +230,7 @@ export interface TrialGradingQuestionInput {
   stem: string;
   fullScore: number;
   standardAnswer: string;
+  subquestions?: GradingQuestionPart[];
   rubricPoints: GradingRubricPoint[];
   teacherRules: string[];
   rubricVersion: number;
@@ -247,9 +252,15 @@ export interface TrialGradingResult {
 
 export interface VisionValidationItem {
   pipelineVersion?: number;
+  preferredRecognitionSource?: 'paddle' | 'focused-paddle' | 'luna';
+  focusedPaddleText?: string;
+  focusedOcrStatus?: 'completed' | 'failed';
+  screenshotStatus?: 'available' | 'unavailable';
   displayNo: string;
   region: { x: number; y: number; width: number; height: number; pageNumber: number };
-  locatorSource: 'paddle-layout' | 'inferred-gap' | 'vision-layout';
+  locatorSource: 'paddle-layout' | 'inferred-gap' | 'vision-layout' | 'teacher-manual';
+  pageWidth?: number;
+  pageHeight?: number;
   locationStatus: 'located' | 'needs-visual' | 'needs-teacher';
   locationReasons: string[];
   cropUrl: string;
@@ -408,8 +419,10 @@ export interface DocumentAsset {
   mimeType: string;
   pageCount?: number;
   publicUrl?: string;
+  sourcePageUrl?: string;
   status: 'uploaded' | 'processing' | 'ready' | 'needs-review' | 'failed';
   parseErrorCode?: string;
+  preParseRegion?: { x: number; y: number; width: number; height: number };
 }
 
 export type MaterialSourceFormat = 'docx' | 'pdf' | 'image' | 'text';
@@ -464,6 +477,18 @@ export interface AnalysisEvidenceRef {
   fileName: string;
   blockIds: string[];
   quote: string;
+  segments?: { blockId: string; quote: string }[];
+  visualRegion?: {
+    pageNumber: number;
+    boundingBox: { x: number; y: number; width: number; height: number };
+  } | null;
+  manualRegion?: {
+    pageNumber: number;
+    boundingBox: { x: number; y: number; width: number; height: number };
+    selectedAt: string;
+  } | null;
+  matchStatus?: 'exact' | 'normalized' | 'block-level';
+  isPartialBlock?: boolean;
   evidenceMode?: 'native-text' | 'source-crop';
   pageNumber?: number;
   boundingBox?: { x: number; y: number; width: number; height: number };
@@ -471,12 +496,15 @@ export interface AnalysisEvidenceRef {
   sourcePageUrl?: string;
   locatorStatus?: 'located' | 'needs-visual' | 'needs-teacher';
   locatorReasons?: string[];
+  cropMode?: 'block' | 'estimated-segment' | 'model-within-block' | 'teacher-manual';
+  blockImageUrl?: string;
 }
 
 export interface AnalyzedQuestionUnit {
   displayNo: string;
   title: string;
   stem: string;
+  teacherCorrectedStem?: boolean;
   score: number | null;
   questionType: string;
   answerRequirement: string;
@@ -484,6 +512,7 @@ export interface AnalyzedQuestionUnit {
   explanation: string;
   rubricPoints: { point: string; score: number | null; description: string }[];
   knowledgeCandidates: { nodeId: string; nodeName: string; confidence: number }[];
+  confirmedKnowledgeNodeIds?: string[];
   questionSource: AnalysisEvidenceRef;
   answerSource: AnalysisEvidenceRef | null;
   confidence: number;
@@ -502,6 +531,11 @@ export interface FirstSectionAnalysis {
   materialAssetIds: string[];
   questions: AnalyzedQuestion[];
   createdAt: string;
+  processingMetrics?: {
+    startedAt: string;
+    completedAt: string;
+    durationMs: number;
+  };
 }
 
 export interface SourceEvidence {
@@ -512,12 +546,17 @@ export interface SourceEvidence {
   pageNumber: number;
   boundingBox: { x: number; y: number; width: number; height: number };
   ocrText: string;
+  blockIds?: string[];
+  segments?: { blockId: string; quote: string }[];
+  isPartialBlock?: boolean;
   confidence: number;
   imageUrl?: string;
   sourcePageUrl?: string;
   evidenceMode?: 'native-text' | 'source-crop';
   locatorStatus?: 'located' | 'needs-visual' | 'needs-teacher';
   locatorReasons?: string[];
+  cropMode?: 'block' | 'estimated-segment' | 'model-within-block' | 'teacher-manual';
+  blockImageUrl?: string;
   isMock?: boolean;
 }
 
@@ -542,6 +581,19 @@ export interface GradingQuestion {
   answerRequirement?: string;
   parseConfidence: number;
   sourceEvidenceIds: string[];
+  subquestions?: GradingQuestionPart[];
+}
+
+export interface GradingQuestionPart {
+  displayNo: string;
+  title: string;
+  stem: string;
+  score: number;
+  questionType: string;
+  answerRequirement: string;
+  standardAnswer: string;
+  explanation: string;
+  rubricPoints: GradingRubricPoint[];
 }
 
 export interface WorkflowState {

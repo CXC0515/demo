@@ -25,6 +25,9 @@ export interface PaddleVisionParserOptions {
   profile?: 'full' | 'schedule';
 }
 
+export const classifyPaddleInvalidRequest = (message: string) =>
+  /任务提交队列已满|提交队列.*满/u.test(message) ? 'PADDLEOCR_QUEUE_FULL' : 'PADDLEOCR_INVALID_REQUEST';
+
 export const normalizePaddleBlockType = (sourceType: string) => sourceType.toLowerCase().includes('title')
   ? 'heading' as const
   : sourceType.toLowerCase().includes('formula')
@@ -218,7 +221,7 @@ export class PaddleVisionMaterialParser implements MaterialParser {
       };
     } catch (error) {
       if (error instanceof AuthError) throw new MaterialParserError('PADDLEOCR_AUTH_FAILED', { cause: error });
-      if (error instanceof InvalidRequestError) throw new MaterialParserError('PADDLEOCR_INVALID_REQUEST', { cause: error });
+      if (error instanceof InvalidRequestError) throw new MaterialParserError(classifyPaddleInvalidRequest(error.message), { cause: error });
       if (error instanceof RateLimitError) throw new MaterialParserError('PADDLEOCR_RATE_LIMITED', { cause: error });
       if (error instanceof PollTimeoutError || error instanceof RequestTimeoutError) throw new MaterialParserError('PADDLEOCR_TIMEOUT', { cause: error });
       if (error instanceof MaterialParserError) throw error;

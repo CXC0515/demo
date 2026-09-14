@@ -28,14 +28,24 @@ const item: VisionValidationItem = {
 test('uses Paddle as the grading answer while preserving Luna review evidence', () => {
   const evidence = buildTrialAnswerEvidence(item);
   assert.equal(evidence.answer, 'Paddle 主证据');
+  assert.equal(evidence.answerSource, 'paddle');
   assert.equal(evidence.lunaReview, 'Luna 复核文本');
   assert.equal(evidence.recognitionConflict, true);
   assert.equal(evidence.needsReview, true);
   assert.deepEqual(evidence.crossedOutText, ['划掉内容']);
 });
 
-test('requires a provisional Paddle-based score even when recognition conflicts', () => {
+test('requires a provisional score from the selected answer even when Paddle is empty', () => {
   const prompt = buildTrialGradingPrompt({ questions: [], submissions: [] }, []);
-  assert.match(prompt, /依据 PaddleOCR 主证据给出暂定分数/);
+  assert.match(prompt, /不得因为 paddleAnswer 为空而忽略非空的 answer/);
+  assert.match(prompt, /answerSource=luna-fallback 时仍须依据 answer 给出暂定数字分/);
+  assert.match(prompt, /teacher-corrected/);
   assert.match(prompt, /不能成为拒绝给暂定分数的理由/);
+});
+
+test('uses Luna as an explicit reviewable fallback when Paddle is empty', () => {
+  const evidence = buildTrialAnswerEvidence({ ...item, paddleText: '', lunaText: '学生答案' });
+  assert.equal(evidence.answer, '学生答案');
+  assert.equal(evidence.answerSource, 'luna-fallback');
+  assert.equal(evidence.needsReview, true);
 });

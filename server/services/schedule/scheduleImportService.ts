@@ -91,9 +91,10 @@ export const requestScheduleModel = async (
 };
 
 const isPaddleQueueFull = (error: unknown) => error instanceof MaterialParserError
-  && error.code === 'PADDLEOCR_INVALID_REQUEST'
-  && error.cause instanceof Error
-  && error.cause.message.includes('任务提交队列已满');
+  && (error.code === 'PADDLEOCR_QUEUE_FULL'
+    || (error.code === 'PADDLEOCR_INVALID_REQUEST'
+      && error.cause instanceof Error
+      && error.cause.message.includes('任务提交队列已满')));
 
 export const parseScheduleWithRetry = async (
   parser: Pick<MaterialParser, 'parse'>,

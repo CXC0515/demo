@@ -1,56 +1,47 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import { FileSearch, RotateCw, X, ZoomIn, ZoomOut } from 'lucide-react';
-import { useState } from 'react';
+/** @license SPDX-License-Identifier: Apache-2.0 */
+import { RotateCw, ScanLine, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { SourceEvidence } from '../../domain/types';
+import { EvidenceRegionComparison } from '../../services/gradingApi';
 
-interface SourceEvidenceViewerProps {
-  evidence: SourceEvidence;
-  label: string;
+type Box = SourceEvidence['boundingBox'];
+type DragMode = 'create' | 'move' | 'nw' | 'ne' | 'sw' | 'se';
+interface Props { key?: string; evidence: SourceEvidence; label: string; saveBehavior?: 'region-only' | 'focused-ocr'; onCompareRegion?: (box: Box, runOcr: boolean) => Promise<EvidenceRegionComparison>; onSaveRegion?: (box: Box) => Promise<void>; }
+
+function EvidencePage({ evidence, expanded = false, fullPage = false }: { evidence: SourceEvidence; expanded?: boolean; fullPage?: boolean }) {
+  const imageUrl = fullPage ? evidence.sourcePageUrl : evidence.imageUrl;
+  if (imageUrl) return <img draggable={false} src={imageUrl} alt={`${evidence.fileName} 第 ${evidence.pageNumber} 页`} className={expanded ? 'block max-h-[65dvh] max-w-full select-none object-contain' : 'h-full w-full object-contain'} />;
+  return <div className={`h-full w-full bg-[#fffdf7] text-left text-slate-700 ${expanded ? 'p-8' : 'p-4'}`}><p className={expanded ? 'text-xl leading-8' : 'text-xs leading-8'}>{evidence.ocrText}</p></div>;
 }
 
-function EvidencePage({ evidence, expanded = false }: { evidence: SourceEvidence; expanded?: boolean }) {
-  if (evidence.imageUrl) {
-    return <img src={evidence.imageUrl} alt={`${evidence.fileName} 第 ${evidence.pageNumber} 页来源区域`} className="h-full w-full object-contain" />;
-  }
-
-  return (
-    <div className={`h-full w-full bg-[#fffdf7] text-left text-slate-700 ${expanded ? 'p-10' : 'p-4'}`}>
-      <div className="flex justify-between border-b border-slate-300 pb-2 font-mono text-[10px] text-slate-400"><span>第 {evidence.pageNumber} 页</span><span>{evidence.isMock ? '模拟上传原图' : '原生文本'}</span></div>
-      <p className={`font-serif leading-8 ${expanded ? 'mt-10 text-xl' : 'mt-4 text-xs'}`}>{evidence.ocrText}</p>
-    </div>
-  );
-}
-
-export default function SourceEvidenceViewer({ evidence, label }: SourceEvidenceViewerProps) {
-  const [open, setOpen] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [rotation, setRotation] = useState(0);
-
-  const close = () => {
-    setOpen(false);
-    setZoom(1);
-    setRotation(0);
+export default function SourceEvidenceViewer({ evidence, label, saveBehavior = 'region-only', onCompareRegion, onSaveRegion }: Props) {
+  const [open, setOpen] = useState(false); const [zoom, setZoom] = useState(1); const [rotation, setRotation] = useState(0);
+  const [selecting, setSelecting] = useState(false); const [selection, setSelection] = useState<Box>(evidence.boundingBox);
+  const [drag, setDrag] = useState<{ mode: DragMode; start: { x: number; y: number }; origin: Box } | null>(null);
+  const [comparison, setComparison] = useState<EvidenceRegionComparison | null>(null); const [busy, setBusy] = useState<'compare' | 'ocr' | 'save' | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  useEffect(() => setSelection(evidence.boundingBox), [evidence.boundingBox.x, evidence.boundingBox.y, evidence.boundingBox.width, evidence.boundingBox.height]);
+  const close = () => { setOpen(false); setZoom(1); setRotation(0); setSelecting(false); setComparison(null); };
+  const pointIn = (event: ReactPointerEvent<HTMLElement>) => { const rect = canvasRef.current?.getBoundingClientRect(); return rect ? { x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)), y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)) } : { x: 0, y: 0 }; };
+  const begin = (event: ReactPointerEvent<HTMLElement>, mode: DragMode) => { if (!selecting) return; event.stopPropagation(); canvasRef.current?.setPointerCapture(event.pointerId); const point = pointIn(event); setDrag({ mode, start: point, origin: selection }); if (mode === 'create') setSelection({ ...point, width: .001, height: .001 }); setComparison(null); };
+  const move = (event: ReactPointerEvent<HTMLDivElement>) => { if (!drag) return; const point = pointIn(event); const dx = point.x - drag.start.x; const dy = point.y - drag.start.y; const origin = drag.origin;
+    if (drag.mode === 'create') { setSelection({ x: Math.min(drag.start.x, point.x), y: Math.min(drag.start.y, point.y), width: Math.max(.001, Math.abs(point.x - drag.start.x)), height: Math.max(.001, Math.abs(point.y - drag.start.y)) }); return; }
+    if (drag.mode === 'move') { setSelection({ ...origin, x: Math.max(0, Math.min(1 - origin.width, origin.x + dx)), y: Math.max(0, Math.min(1 - origin.height, origin.y + dy)) }); return; }
+    const left = drag.mode.includes('w') ? Math.min(origin.x + origin.width - .01, Math.max(0, origin.x + dx)) : origin.x;
+    const top = drag.mode.includes('n') ? Math.min(origin.y + origin.height - .01, Math.max(0, origin.y + dy)) : origin.y;
+    const right = drag.mode.includes('e') ? Math.max(origin.x + .01, Math.min(1, origin.x + origin.width + dx)) : origin.x + origin.width;
+    const bottom = drag.mode.includes('s') ? Math.max(origin.y + .01, Math.min(1, origin.y + origin.height + dy)) : origin.y + origin.height;
+    setSelection({ x: left, y: top, width: right - left, height: bottom - top });
   };
+  const compare = async (runOcr: boolean) => { if (!onCompareRegion) return; setBusy(runOcr ? 'ocr' : 'compare'); try { setComparison(await onCompareRegion(selection, runOcr)); } finally { setBusy(null); } };
+  const save = async () => { if (!onSaveRegion) return; setBusy('save'); try { await onSaveRegion(selection); close(); } finally { setBusy(null); } };
+  const handle = (mode: Exclude<DragMode, 'create' | 'move'>, position: string) => <button type="button" aria-label={`拖动${mode}角`} onPointerDown={event => begin(event, mode)} className={`absolute z-10 flex h-11 w-11 items-center justify-center ${position}`}><span className="h-4 w-4 rounded-full border-2 border-white bg-emerald-600 shadow" /></button>;
 
-  return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} className="group w-full overflow-hidden border border-slate-200 bg-white text-left transition-colors hover:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900">
-        <div className="aspect-[4/3] overflow-hidden"><EvidencePage evidence={evidence} /></div>
-        <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 dark:border-zinc-700"><span className="truncate text-[11px] font-bold text-slate-600 dark:text-slate-300">{label} · 第 {evidence.pageNumber} 页</span><ZoomIn className="h-3.5 w-3.5 flex-none text-emerald-700" /></div>
-        {evidence.locatorStatus && evidence.locatorStatus !== 'located' ? <p className="border-t border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">{evidence.locatorReasons?.join('；') || '来源区域需要核验'}</p> : null}
-      </button>
-
-      {open ? (
-        <div className="fixed inset-0 z-[70] flex flex-col bg-slate-950/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`${label}来源原图`}>
-          <header className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 rounded-t-lg bg-white px-4 py-3 dark:bg-zinc-900"><div className="min-w-0"><h2 className="truncate text-sm font-black text-slate-900 dark:text-white">{evidence.fileName}</h2><p className="mt-1 text-xs text-slate-500">第 {evidence.pageNumber} 页 · OCR {Math.round(evidence.confidence * 100)}%{evidence.isMock ? ' · 模拟来源' : ''}</p></div><div className="flex items-center gap-1">{evidence.sourcePageUrl ? <a href={evidence.sourcePageUrl} target="_blank" rel="noreferrer" className="mr-2 text-xs font-bold text-emerald-700">完整原页</a> : null}<button type="button" title="缩小" aria-label="缩小" onClick={() => setZoom(value => Math.max(0.6, value - 0.2))} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"><ZoomOut className="h-4 w-4" /></button><button type="button" title="放大" aria-label="放大" onClick={() => setZoom(value => Math.min(3, value + 0.2))} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"><ZoomIn className="h-4 w-4" /></button><button type="button" title="旋转" aria-label="旋转" onClick={() => setRotation(value => value + 90)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"><RotateCw className="h-4 w-4" /></button><button type="button" title="关闭" aria-label="关闭" onClick={close} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"><X className="h-4 w-4" /></button></div></header>
-          <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 items-center justify-center overflow-auto rounded-b-lg bg-slate-200 p-8 dark:bg-zinc-950"><div className="aspect-[3/4] w-[min(680px,75vw)] flex-none overflow-hidden bg-white shadow-2xl transition-transform" style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }}><EvidencePage evidence={evidence} expanded /></div></div>
-          <span className="pointer-events-none absolute bottom-7 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-lg bg-slate-950/75 px-3 py-1.5 text-xs text-white"><FileSearch className="h-3.5 w-3.5" />来源区域 {Math.round(evidence.boundingBox.x * 100)}%, {Math.round(evidence.boundingBox.y * 100)}%</span>
-        </div>
-      ) : null}
-    </>
-  );
+  const modal = open ? createPortal(<div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 p-2 backdrop-blur-sm" role="dialog" aria-modal="true"><div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-zinc-900">
+    <header className="flex flex-none flex-wrap items-center justify-between gap-3 border-b px-4 py-3"><div><h2 className="text-sm font-black">{evidence.fileName}</h2><p className="text-xs text-slate-500">第 {evidence.pageNumber} 页</p></div><div className="flex items-center gap-1">{evidence.sourcePageUrl && onSaveRegion ? <button type="button" onClick={() => { setSelecting(value => !value); setSelection(evidence.boundingBox); setZoom(1); setRotation(0); }} className={`min-h-11 rounded-xl px-3 text-xs font-bold ${selecting ? 'bg-emerald-700 text-white' : 'border'}`}><ScanLine className="mr-1 inline h-4 w-4" />{selecting ? '正在框选' : '手动框选'}</button> : null}{!selecting ? <><button type="button" aria-label="缩小" onClick={() => setZoom(value => Math.max(.6, value - .2))} className="h-11 w-11"><ZoomOut className="mx-auto h-4 w-4" /></button><button type="button" aria-label="放大" onClick={() => setZoom(value => Math.min(3, value + .2))} className="h-11 w-11"><ZoomIn className="mx-auto h-4 w-4" /></button><button type="button" aria-label="旋转" onClick={() => setRotation(value => value + 90)} className="h-11 w-11"><RotateCw className="mx-auto h-4 w-4" /></button></> : null}<button type="button" aria-label="关闭" onClick={close} className="h-11 w-11"><X className="mx-auto h-4 w-4" /></button></div></header>
+    <div className="min-h-0 flex-1 overflow-auto bg-slate-200 p-3 dark:bg-zinc-950"><div className="flex min-h-full items-center justify-center"><div ref={canvasRef} className="relative inline-block touch-none" style={!selecting ? { transform: `scale(${zoom}) rotate(${rotation}deg)` } : undefined} onPointerDown={event => begin(event, 'create')} onPointerMove={move} onPointerUp={() => setDrag(null)} onPointerCancel={() => setDrag(null)}><EvidencePage evidence={evidence} expanded fullPage={selecting} />{selecting ? <div onPointerDown={event => begin(event, 'move')} className="absolute cursor-move border-2 border-emerald-500 bg-emerald-400/15 shadow-[0_0_0_9999px_rgba(15,23,42,0.42)]" style={{ left: `${selection.x * 100}%`, top: `${selection.y * 100}%`, width: `${selection.width * 100}%`, height: `${selection.height * 100}%` }}>{handle('nw', '-left-5 -top-5')}{handle('ne', '-right-5 -top-5')}{handle('sw', '-bottom-5 -left-5')}{handle('se', '-bottom-5 -right-5')}</div> : null}</div></div></div>
+    {selecting ? <footer className="flex-none border-t bg-white p-3 dark:bg-zinc-900"><p className="text-xs text-slate-500">拖动框内可移动范围，拖动四角可调整大小。{saveBehavior === 'focused-ocr' ? '保存后将自动识别新截图。' : ''}</p>{comparison ? <div className="mt-2 rounded-xl bg-slate-50 p-3 text-xs dark:bg-zinc-950"><strong>{comparison.geometricStatus === 'covered' ? '框内文字覆盖原引用' : comparison.geometricStatus === 'empty' ? '框内没有现成 OCR 文字' : '框内文字与原引用有差异'}</strong>{comparison.intersectingText ? <p className="mt-1 line-clamp-3">{comparison.intersectingText}</p> : null}{comparison.ocrStatus === 'completed' ? <p className="mt-1 line-clamp-3">重新 OCR：{comparison.focusedOcrText || '未识别到文字'}</p> : null}</div> : null}<div className="mt-3 flex flex-wrap justify-end gap-2">{onCompareRegion ? <><button type="button" disabled={Boolean(busy)} onClick={() => void compare(false)} className="min-h-11 rounded-xl border px-4 text-xs font-bold">比对现有 OCR</button>{saveBehavior === 'region-only' ? <button type="button" disabled={Boolean(busy)} onClick={() => void compare(true)} className="min-h-11 rounded-xl border border-emerald-700 px-4 text-xs font-bold text-emerald-700">重新 OCR 校验</button> : null}</> : null}<button type="button" disabled={Boolean(busy) || selection.width < .01 || selection.height < .01} onClick={() => void save()} className="min-h-11 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white disabled:bg-slate-300">{busy === 'save' ? saveBehavior === 'focused-ocr' ? '截图和 OCR 处理中…' : '保存中…' : saveBehavior === 'focused-ocr' ? '保存范围并重新 OCR' : '保存框选范围'}</button></div></footer> : evidence.ocrText ? <footer className="flex-none border-t p-3 text-sm"><strong className="text-xs text-emerald-700">本题引用原文</strong><p className="mt-1 line-clamp-3 whitespace-pre-wrap text-slate-600">{evidence.ocrText}</p></footer> : null}
+  </div></div>, document.body) : null;
+  return <><button type="button" onClick={() => setOpen(true)} className="group w-full overflow-hidden border border-slate-200 bg-white text-left hover:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"><div className="aspect-[4/3] overflow-hidden"><EvidencePage evidence={evidence} /></div><div className="flex items-center justify-between border-t px-3 py-2"><span className="truncate text-[11px] font-bold">{label} · 第 {evidence.pageNumber} 页</span><ZoomIn className="h-4 w-4 text-emerald-700" /></div>{evidence.cropMode === 'teacher-manual' ? <p className="border-t bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-800">教师已手动确认截图范围。</p> : evidence.isPartialBlock ? <p className="border-t bg-sky-50 px-3 py-2 text-[11px] font-bold text-sky-800">原 OCR 块可能包含多题；准确引用见文字。</p> : null}</button>{modal}</>;
 }

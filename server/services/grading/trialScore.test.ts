@@ -40,6 +40,15 @@ test('keeps observed text independent from grading output', () => {
   assert.equal(getObservedAnswer(visionItem), 'Paddle 原始识别');
 });
 
+test('uses the teacher-selected Luna text as grading input', () => {
+  assert.equal(getObservedAnswer({ ...visionItem, preferredRecognitionSource: 'luna' }), '学生实际只写了这几个字');
+});
+
+test('uses focused OCR only after a teacher saves a manual crop', () => {
+  assert.equal(getObservedAnswer({ ...visionItem, preferredRecognitionSource: 'focused-paddle', focusedPaddleText: '手动截图后的识别', focusedOcrStatus: 'completed' }), '手动截图后的识别');
+  assert.equal(getObservedAnswer({ ...visionItem, preferredRecognitionSource: 'focused-paddle', focusedPaddleText: '', focusedOcrStatus: 'failed' }), '');
+});
+
 test('propagates recognition risk into trial grading', () => {
   assert.equal(resolveTrialConfidence(0.95, visionItem), 0.42);
   assert.equal(trialNeedsTeacherReview(false, visionItem), true);

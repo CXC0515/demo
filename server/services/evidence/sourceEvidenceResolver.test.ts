@@ -63,3 +63,89 @@ test('falls back to a full source page when PDF coordinates are unavailable', ()
   assert.equal(result.locatorStatus, 'needs-visual');
   assert.equal(result.imageUrl, '/page-1.png');
 });
+
+test('keeps the original block crop when the quote covers almost the whole block', () => {
+  const result = resolveSourceEvidence('task-1', { ...reference, quote: '题干', segments: [{ blockId: 'block-1', quote: '题干' }] }, [material('pdf')]);
+  assert.equal(result.cropMode, 'block');
+  assert.equal(result.blockImageUrl, undefined);
+});
+
+test('estimates a smaller vertical crop for an exact quote spanning a subset of block lines', () => {
+  const source = material('pdf');
+  source.normalizedDocument!.blocks[0].text = ['4. 第四题答案', '5. 第五题答案', '6. 第六题答案', '7. 第七题答案'].join('\n');
+  source.normalizedDocument!.blocks[0].boundingBox = { x: 0.1, y: 0.2, width: 0.5, height: 0.6 };
+  const result = resolveSourceEvidence('task-1', {
+    ...reference,
+    quote: '4. 第四题答案',
+    segments: [{ blockId: 'block-1', quote: '4. 第四题答案' }]
+  }, [source]);
+  assert.equal(result.cropMode, 'estimated-segment');
+  assert.ok((result.boundingBox?.height ?? 1) < 0.6);
+  assert.match(result.blockImageUrl ?? '', /evidence-crop/);
+});
+
+test('keeps a single-line partial block intact because its visual wrap cannot be inferred', () => {
+  const source = material('pdf');
+  source.normalizedDocument!.blocks[0].text = '4. 第四题答案 5. 第五题答案';
+  const result = resolveSourceEvidence('task-1', {
+    ...reference,
+    quote: '4. 第四题答案',
+    segments: [{ blockId: 'block-1', quote: '4. 第四题答案' }]
+  }, [source]);
+  assert.equal(result.cropMode, 'block');
+});
+
+test('uses a top-level visual region when a single OCR block contains multiple questions', () => {
+  const source = material('pdf');
+  source.normalizedDocument!.blocks[0].text = '4. 第四题答案 5. 第五题答案 6. 第六题答案';
+  source.normalizedDocument!.blocks[0].boundingBox = { x: 0.1, y: 0.2, width: 0.8, height: 0.5 };
+  const result = resolveSourceEvidence('task-1', {
+    ...reference,
+    quote: '4. 第四题答案 5. 第五题答案',
+    segments: [{ blockId: 'block-1', quote: '4. 第四题答案 5. 第五题答案' }],
+    visualRegion: { pageNumber: 1, boundingBox: { x: 0.15, y: 0.24, width: 0.6, height: 0.22 } }
+  }, [source], true);
+  assert.equal(result.cropMode, 'model-within-block');
+  assert.equal(result.boundingBox?.x, 0.15);
+  assert.equal(result.boundingBox?.y, 0.24);
+  assert.ok(Math.abs((result.boundingBox?.width ?? 0) - 0.6) < 0.000_001);
+  assert.ok(Math.abs((result.boundingBox?.height ?? 0) - 0.22) < 0.000_001);
+  assert.match(result.blockImageUrl ?? '', /evidence-crop/);
+});
+
+test('ignores a top-level visual region when it falls outside the selected OCR block', () => {
+  const source = material('pdf');
+  source.normalizedDocument!.blocks[0].text = '4. 第四题答案 5. 第五题答案';
+  const result = resolveSourceEvidence('task-1', {
+    ...reference,
+    quote: '4. 第四题答案',
+    segments: [{ blockId: 'block-1', quote: '4. 第四题答案' }],
+    visualRegion: { pageNumber: 1, boundingBox: { x: 0.8, y: 0.8, width: 0.1, height: 0.1 } }
+  }, [source], true);
+  assert.equal(result.cropMode, 'block');
+});
+
+test('does not create a separate visual crop for a subquestion source', () => {
+  const source = material('pdf');
+  source.normalizedDocument!.blocks[0].text = '（1）答案 （2）答案';
+  const result = resolveSourceEvidence('task-1', {
+    ...reference,
+    quote: '（1）答案',
+    segments: [{ blockId: 'block-1', quote: '（1）答案' }],
+    visualRegion: { pageNumber: 1, boundingBox: { x: 0.12, y: 0.21, width: 0.2, height: 0.04 } }
+  }, [source]);
+  assert.equal(result.cropMode, 'block');
+});
+
+test('uses a teacher-selected region without constraining it to the OCR block', () => {
+  const result = resolveSourceEvidence('task-1', {
+    ...reference,
+    manualRegion: {
+      pageNumber: 1,
+      boundingBox: { x: 0.02, y: 0.12, width: 0.9, height: 0.3 },
+      selectedAt: '2026-09-14T00:00:00.000Z'
+    }
+  }, [material('pdf')], true);
+  assert.equal(result.cropMode, 'teacher-manual');
+  assert.deepEqual(result.boundingBox, { x: 0.02, y: 0.12, width: 0.9, height: 0.3 });
+});
