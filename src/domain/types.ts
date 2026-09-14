@@ -252,6 +252,7 @@ export interface TrialGradingResult {
 
 export interface VisionValidationItem {
   pipelineVersion?: number;
+  preferredRecognitionSource?: 'paddle' | 'luna';
   displayNo: string;
   region: { x: number; y: number; width: number; height: number; pageNumber: number };
   locatorSource: 'paddle-layout' | 'inferred-gap' | 'vision-layout' | 'teacher-manual';
@@ -415,6 +416,7 @@ export interface DocumentAsset {
   mimeType: string;
   pageCount?: number;
   publicUrl?: string;
+  sourcePageUrl?: string;
   status: 'uploaded' | 'processing' | 'ready' | 'needs-review' | 'failed';
   parseErrorCode?: string;
   preParseRegion?: { x: number; y: number; width: number; height: number };

@@ -107,7 +107,7 @@ export default function ReviewQueuePage({ reviewQueue, onConfirmReview, onBounce
               </div>
 
               <div className="mt-4 grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-                <ScoreKeypad value={editedScore} max={6} onChange={setEditedScore} />
+                <ScoreKeypad value={editedScore} max={6} onChange={setEditedScore} onConfirm={confirmReview} />
                 <label className="space-y-1"><span className="text-xs font-bold text-slate-500">终审理由</span><textarea rows={5} value={reasonInput} onChange={event => setReasonInput(event.target.value)} placeholder="说明采用或调整分数的证据" className={`${inputClass} h-auto resize-y py-3`} /></label>
               </div>
 

@@ -35,6 +35,7 @@ export default function GradingTaskManagement({ tasks, classes, defaultClassId, 
   const [name, setName] = useState('');
   const [classId, setClassId] = useState(defaultClassId);
   const [deadline, setDeadline] = useState(() => toDateTimeInputValue(getDefaultCollectionDeadline()));
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set());
 
   const visibleTasks = useMemo(() => tasks.filter(task => {
     if (filter === 'archived') return Boolean(task.archivedAt);
@@ -43,6 +44,11 @@ export default function GradingTaskManagement({ tasks, classes, defaultClassId, 
   }), [filter, tasks]);
 
   const defaultTaskName = getNextDailyTaskName(tasks);
+  const selectedVisibleTasks = visibleTasks.filter(task => selectedTaskIds.has(task.id));
+  const selectableVisibleTasks = visibleTasks.filter(task => filter === 'archived' ? Boolean(task.archivedAt) : !task.archivedAt);
+  const toggleTask = (taskId: string) => setSelectedTaskIds(current => { const next = new Set(current); if (next.has(taskId)) next.delete(taskId); else next.add(taskId); return next; });
+  const toggleAll = () => setSelectedTaskIds(current => selectableVisibleTasks.every(task => current.has(task.id)) ? new Set() : new Set(selectableVisibleTasks.map(task => task.id)));
+  const archiveSelected = async () => { const archived = filter !== 'archived'; await Promise.all(selectedVisibleTasks.map(task => onArchiveTask(task, archived))); setSelectedTaskIds(new Set()); };
 
   const openCreateDialog = () => {
     setName('');
@@ -86,11 +92,13 @@ export default function GradingTaskManagement({ tasks, classes, defaultClassId, 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="glass-panel flex rounded-2xl bg-slate-100/60 p-2 dark:bg-zinc-900/60">
           {([['active', '进行中'], ['completed', '已完成'], ['archived', '已归档']] as const).map(([id, label]) => (
-            <button key={id} type="button" onClick={() => setFilter(id)} className={`rounded-xl px-4 py-2 text-xs font-bold transition-all ${filter === id ? 'bg-white text-slate-900 shadow-sm dark:bg-zinc-800 dark:text-white' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>{label}</button>
+            <button key={id} type="button" onClick={() => { setFilter(id); setSelectedTaskIds(new Set()); }} className={`rounded-xl px-4 py-2 text-xs font-bold transition-all ${filter === id ? 'bg-white text-slate-900 shadow-sm dark:bg-zinc-800 dark:text-white' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>{label}</button>
           ))}
         </div>
         <button type="button" onClick={openCreateDialog} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-emerald-700/10 transition-all hover:bg-emerald-800 active:scale-95"><Plus className="h-4 w-4" />新建批改任务</button>
       </div>
+
+      {visibleTasks.length ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/70"><label className="flex min-h-11 items-center gap-2 text-sm font-bold"><input type="checkbox" checked={selectableVisibleTasks.length > 0 && selectableVisibleTasks.every(task => selectedTaskIds.has(task.id))} onChange={toggleAll} className="h-5 w-5 accent-emerald-700" />全选当前列表</label><div className="flex items-center gap-3"><span className="text-xs text-slate-500">已选 {selectedVisibleTasks.length} 项</span><button type="button" disabled={!selectedVisibleTasks.length} onClick={() => void archiveSelected()} className="min-h-11 rounded-xl bg-emerald-700 px-4 text-sm font-bold text-white disabled:opacity-40">{filter === 'archived' ? '批量恢复' : '批量归档'}</button></div></div> : null}
 
       <section className="glass-panel overflow-hidden rounded-[24px]">
         <div className="hidden grid-cols-[minmax(240px,1.5fr)_140px_130px_100px_200px] border-b border-slate-200/70 px-5 py-3 text-xs font-bold text-slate-400 md:grid dark:border-zinc-800">
@@ -101,7 +109,7 @@ export default function GradingTaskManagement({ tasks, classes, defaultClassId, 
           return (
             <article key={task.id} className="grid gap-3 border-b border-slate-200/60 px-5 py-4 last:border-0 md:grid-cols-[minmax(240px,1.5fr)_140px_130px_100px_200px] md:items-center dark:border-zinc-800/70">
               <div className="min-w-0">
-                <div className="flex items-center gap-2"><FilePlus2 className="h-4 w-4 flex-none text-emerald-700" /><h2 className="truncate text-sm font-black text-slate-900 dark:text-white">{task.name}</h2></div>
+                <div className="flex items-center gap-2"><input type="checkbox" checked={selectedTaskIds.has(task.id)} onChange={() => toggleTask(task.id)} aria-label={`选择任务 ${task.name}`} className="h-5 w-5 flex-none accent-emerald-700" /><FilePlus2 className="h-4 w-4 flex-none text-emerald-700" /><h2 className="truncate text-sm font-black text-slate-900 dark:text-white">{task.name}</h2></div>
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500"><span className="flex items-center gap-1"><CalendarClock className="h-3.5 w-3.5" />收作业：{task.deadline}</span>{typeof task.progress === 'number' ? <span>{task.progress}%</span> : null}</div>
               </div>
               <span className="flex items-center gap-1.5 text-sm font-bold text-slate-600 dark:text-slate-300"><Users className="h-4 w-4 text-slate-400" />{task.className}</span>

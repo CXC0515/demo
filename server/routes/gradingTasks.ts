@@ -105,6 +105,7 @@ const removeSubmissionSchema = z.object({ assetIds: z.array(z.string().uuid()).m
 const retrySubmissionSchema = z.object({ assetIds: z.array(z.string().uuid()).min(1).max(20) });
 const materialSelectionSchema = z.object({ assetIds: z.array(z.string().uuid()).min(1).max(40) });
 const materialRegionSchema = z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), width: z.number().positive().max(1), height: z.number().positive().max(1) }).refine(box => box.x + box.width <= 1.001 && box.y + box.height <= 1.001);
+const materialRegionQuerySchema = z.object({ x: z.coerce.number().min(0).max(1), y: z.coerce.number().min(0).max(1), width: z.coerce.number().positive().max(1), height: z.coerce.number().positive().max(1) }).refine(box => box.x + box.width <= 1.001 && box.y + box.height <= 1.001);
 const knowledgeLinkSelectionSchema = z.object({ confirmed: z.boolean() });
 
 const analysisQuestionCorrectionSchema = z.object({
@@ -133,6 +134,11 @@ const evidenceRegionSchema = z.object({
   }).refine(box => box.x + box.width <= 1.001 && box.y + box.height <= 1.001),
   runOcr: z.boolean().optional()
 });
+const submissionRegionCompareSchema = z.object({
+  boundingBox: evidenceRegionSchema.shape.boundingBox,
+  runOcr: z.boolean().optional()
+});
+const recognitionSourceSchema = z.object({ source: z.enum(['paddle', 'luna']) });
 
 const normalizedComparableText = (value: string) => value.normalize('NFKC').replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase();
 
@@ -165,7 +171,11 @@ const classifyQuestionAnalysisError = (message: string) => {
   return { statusCode: 502, code: 'MODEL_OUTPUT_INVALID' };
 };
 
-const toPublicAsset = ({ diskPath: _diskPath, normalizedDocument: _normalizedDocument, ...asset }: StoredMaterial) => asset;
+const toPublicAsset = ({ diskPath: _diskPath, normalizedDocument: _normalizedDocument, ...asset }: StoredMaterial) => {
+  if (!asset.preParseRegion || !asset.mimeType.startsWith('image/') || asset.kind === 'student-submission') return asset;
+  const query = new URLSearchParams(Object.entries(asset.preParseRegion).map(([key, value]) => [key, String(value)])).toString();
+  return { ...asset, sourcePageUrl: asset.publicUrl, publicUrl: `/api/grading-tasks/${encodeURIComponent(asset.taskId)}/materials/${encodeURIComponent(asset.id)}/preparse-crop?${query}` };
+};
 
 const parseUploadedMaterial = async (material: StoredMaterial) => {
   updateMaterial(material.taskId, material.id, { status: 'processing', parseErrorCode: undefined });
@@ -355,6 +365,20 @@ router.post('/:taskId/materials/parse', async (request, response) => {
   response.json({ assets: selected.map(item => toPublicAsset(getMaterials(request.params.taskId).find(next => next.id === item.id) ?? item)) });
 });
 
+router.get('/:taskId/materials/:assetId/preparse-crop', async (request, response) => {
+  const parsed = materialRegionQuerySchema.safeParse(request.query);
+  const material = getMaterials(request.params.taskId).find(item => item.id === request.params.assetId && item.kind !== 'student-submission');
+  if (!parsed.success) return response.status(400).json({ code: 'INVALID_EVIDENCE_REGION' });
+  if (!material?.mimeType.startsWith('image/')) return response.status(404).json({ code: 'MATERIAL_NOT_FOUND' });
+  try {
+    const metadata = await sharp(material.diskPath).metadata();
+    if (!metadata.width || !metadata.height) throw new Error('SOURCE_PAGE_DIMENSIONS_MISSING');
+    const left = Math.floor(parsed.data.x * metadata.width); const top = Math.floor(parsed.data.y * metadata.height);
+    const width = Math.max(1, Math.min(metadata.width - left, Math.ceil(parsed.data.width * metadata.width))); const height = Math.max(1, Math.min(metadata.height - top, Math.ceil(parsed.data.height * metadata.height)));
+    response.type('image/jpeg').send(await sharp(material.diskPath).extract({ left, top, width, height }).jpeg({ quality: 94 }).toBuffer());
+  } catch { response.status(500).json({ code: 'EVIDENCE_CROP_FAILED' }); }
+});
+
 router.put('/:taskId/materials/:assetId/region', (request, response) => {
   const parsed = materialRegionSchema.safeParse(request.body?.boundingBox);
   const task = listGradingTasks().find(item => item.id === request.params.taskId);
@@ -393,6 +417,57 @@ router.get('/:taskId/vision-validation/:assetId', (request, response) => {
     response.status(404).json({ code: 'VISION_VALIDATION_NOT_FOUND' });
     return;
   }
+  response.json({ result });
+});
+
+router.post('/:taskId/vision-validation/:assetId/questions/:displayNo/region/compare', async (request, response) => {
+  const parsed = submissionRegionCompareSchema.safeParse(request.body);
+  const material = getMaterials(request.params.taskId).find(item => item.id === request.params.assetId && item.kind === 'student-submission');
+  const current = getVisionValidationResult(request.params.taskId, request.params.assetId);
+  const displayNo = decodeURIComponent(request.params.displayNo);
+  const existing = current?.items.find(item => item.displayNo === displayNo);
+  if (!parsed.success) return response.status(400).json({ code: 'INVALID_EVIDENCE_REGION' });
+  if (!material?.normalizedDocument || !existing) return response.status(404).json({ code: 'VISION_VALIDATION_NOT_FOUND' });
+  const pageNumber = existing.region.pageNumber;
+  const intersectingText = material.normalizedDocument.blocks
+    .filter(block => block.pageNumber === pageNumber && block.boundingBox && boxesOverlap(block.boundingBox, parsed.data.boundingBox))
+    .sort((first, second) => first.order - second.order)
+    .map(block => block.text.trim())
+    .filter(Boolean)
+    .join('\n');
+  const expected = normalizedComparableText(existing.paddleText);
+  const actual = normalizedComparableText(intersectingText);
+  const geometricStatus = !actual ? 'empty' : actual.includes(expected) || expected.includes(actual) ? 'covered' : 'different';
+  let focusedOcrText: string | undefined;
+  let ocrStatus: 'not-run' | 'completed' | 'failed' = 'not-run';
+  if (parsed.data.runOcr) {
+    const temporaryPath = uploadFilePath('validation', request.params.taskId, material.id, `submission-region-${randomUUID()}.jpg`);
+    try {
+      mkdirSync(path.dirname(temporaryPath), { recursive: true });
+      const buffer = await extractEvidenceCrop(material, pageNumber, parsed.data.boundingBox);
+      await sharp(buffer).toFile(temporaryPath);
+      focusedOcrText = await new FocusedPaddleRecognizer(getDocumentParserConfig()).recognize(temporaryPath);
+      ocrStatus = 'completed';
+    } catch {
+      ocrStatus = 'failed';
+    } finally {
+      if (existsSync(temporaryPath)) rmSync(temporaryPath);
+    }
+  }
+  response.json({ originalQuote: existing.paddleText, intersectingText, geometricStatus, focusedOcrText, ocrStatus });
+});
+
+router.put('/:taskId/vision-validation/:assetId/questions/:displayNo/source', (request, response) => {
+  const parsed = recognitionSourceSchema.safeParse(request.body);
+  const current = getVisionValidationResult(request.params.taskId, request.params.assetId);
+  const displayNo = decodeURIComponent(request.params.displayNo);
+  if (!parsed.success) return response.status(400).json({ code: 'INVALID_RECOGNITION_SOURCE' });
+  const existing = current?.items.find(item => item.displayNo === displayNo);
+  if (!current || !existing) return response.status(404).json({ code: 'VISION_VALIDATION_NOT_FOUND' });
+  if (!(parsed.data.source === 'luna' ? existing.lunaText : existing.paddleText).trim()) return response.status(409).json({ code: 'RECOGNITION_SOURCE_EMPTY' });
+  const result: VisionValidationResult = { ...current, items: current.items.map(item => item.displayNo === displayNo ? { ...item, preferredRecognitionSource: parsed.data.source } : item), createdAt: new Date().toISOString() };
+  saveVisionValidationResult(result);
+  invalidateAiGradingForAsset(request.params.taskId, request.params.assetId);
   response.json({ result });
 });
 
@@ -490,6 +565,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
       model: config.visionModel,
       items: [...(previousResult?.items.filter(item => !requestedNumbers.has(item.displayNo)) ?? []), ...regions.map(region => {
         const item = extractionByNo.get(region.displayNo);
+        const previousItem = previousResult?.items.find(candidate => candidate.displayNo === region.displayNo);
         const paddleSelectedOption = inferAnswerCardOption(region.paddleText);
         const selectedOption = paddleSelectedOption ?? item?.selectedOption ?? null;
         const structuredText = selectedOption || item?.recognizedAnswer || '';
@@ -508,6 +584,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
         });
         return {
           pipelineVersion: NON_CHOICE_RECOGNITION_VERSION,
+          preferredRecognitionSource: previousItem?.preferredRecognitionSource,
           displayNo: region.displayNo,
           region: region.region,
           pageWidth: parsedArtifact.data.pages.find(page => page.pageNumber === region.region.pageNumber)?.prunedResult.width,
