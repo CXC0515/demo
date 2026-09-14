@@ -36,14 +36,16 @@ export class OpenAICompatibleVisionRegionLocator {
       text: [
         '你负责一次完成整份学生答卷的题目归属、答案区域定位和原样转写，不评分，也不能看到或推测标准答案。',
         '结合所有页面原图、PaddleOCR block 的文字和坐标以及题目结构，为每个待识别题号返回且只返回一项。',
-        'boundingBox 必须覆盖该题全部实际作答但不得包含相邻题；pageNumber 必须是真实页码。',
-        'recognizedAnswer 按图片原有顺序逐字记录学生作答。PaddleOCR 只是候选；禁止按题意、常识或固定搭配补全和纠正。',
-        'blockIds 只填写与该题答案区域相交的真实 OCR blockId。划掉内容只放 crossedOutText，教师勾叉、分数和批注只放 existingMarkings。',
+        'answerRefs 用于绑定 Paddle 原文答案。每项必须填写真实 blockId、该 block 中逐字复制的 quote、答案顺序 order；一个答案可跨多个 block，同一 block 也可被多题引用不同 quote。',
+        '不得把整个相交 block 自动当作答案；只引用属于该题答案的块内片段。相同 quote 在同一 block 重复时用 occurrence 指明第几次。',
+        'recognizedAnswer 是你结合原图理解后整理的独立答案文本，不得冒充 Paddle 原文，也不得根据标准答案或常识补写。',
+        'boundingBox 仅用于大题截图，必须覆盖该大题全部实际作答但不得包含相邻题。无法可靠截图时 screenshotAvailable=false；此时不要为了截图扩大范围。',
+        'blockIds 继续记录与视觉证据相关的真实 OCR blockId。划掉内容只放 crossedOutText，教师勾叉、分数和批注只放 existingMarkings。',
         '选择题确有可见选择时填写 selectedOption；非选择题为 null。看不清写“[看不清]”并 needsReview=true。',
         '每题只返回一个 evidenceUnit，evidenceId 使用“题号-answer”，区域与题目 boundingBox 相同；provisionalText 使用对应 OCR 候选，不得编造。',
-        '缺失或无法定位的题目也必须返回：使用最可能页面的安全区域、recognizedAnswer 为空、confidence 降低并 needsReview=true，reason 说明原因；不得遗漏后让系统自动再次调用。',
+        '缺失或无法定位的题目也必须返回：answerRefs 为空、recognizedAnswer 为空、screenshotAvailable=false、confidence 降低并 needsReview=true，reason 说明原因；不得遗漏后让系统自动再次调用。',
         `待识别题目：${JSON.stringify(questions)}`,
-        '严格返回 JSON：{"items":[{"displayNo":"4","pageNumber":1,"boundingBox":{"x":0,"y":0,"width":0.1,"height":0.1},"evidenceUnits":[{"evidenceId":"4-answer","kind":"text","boundingBox":{"x":0,"y":0,"width":0.1,"height":0.1},"provisionalText":"","blockIds":[],"confidence":0,"needsReview":false,"reason":""}],"recognizedAnswer":"","crossedOutText":[],"selectedOption":null,"visualEvidence":"","existingMarkings":[],"confidence":0,"needsReview":false,"reason":""}]}'
+        '严格返回 JSON：{"items":[{"displayNo":"4","pageNumber":1,"boundingBox":{"x":0,"y":0,"width":0.1,"height":0.1},"screenshotAvailable":true,"answerRefs":[{"order":1,"blockId":"page-1-block-8","quote":"学生答案原文","occurrence":1}],"evidenceUnits":[{"evidenceId":"4-answer","kind":"text","boundingBox":{"x":0,"y":0,"width":0.1,"height":0.1},"provisionalText":"","blockIds":["page-1-block-8"],"confidence":0,"needsReview":false,"reason":""}],"recognizedAnswer":"","crossedOutText":[],"selectedOption":null,"visualEvidence":"","existingMarkings":[],"confidence":0,"needsReview":false,"reason":""}]}'
       ].join('\n')
     }];
     for (const page of pages) {

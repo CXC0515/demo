@@ -66,6 +66,13 @@ export const visionRegionLocatorOutputSchema = z.object({
       width: z.number().positive().max(1),
       height: z.number().positive().max(1)
     }),
+    screenshotAvailable: z.boolean().default(true),
+    answerRefs: z.array(z.object({
+      order: z.number().int().nonnegative(),
+      blockId: z.string().min(1),
+      quote: z.string().min(1),
+      occurrence: z.number().int().positive().default(1)
+    })).default([]),
     evidenceUnits: z.array(z.object({
       evidenceId: z.string().min(1),
       kind: z.enum(['text', 'choice', 'formula', 'diagram', 'table', 'mixed']),

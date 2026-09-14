@@ -207,9 +207,20 @@ const buildQuestionDisplayStem = (question: FirstSectionAnalysis['questions'][nu
 function VisionItemCard({ item: initialItem, asset, document }: { item: VisionValidationItem; asset?: DocumentAsset; document?: NonNullable<WorkflowState['assignment']['documents']>[number]; key?: string }) {
   const [item, setItem] = useState(initialItem);
   const choiceEvidenceUnits = item.evidenceUnits?.filter(unit => unit.kind === 'choice' && (unit.region.x !== item.region.x || unit.region.y !== item.region.y || unit.region.width !== item.region.width || unit.region.height !== item.region.height)) ?? [];
-  const effectiveAnswer = item.selectedOption || (item.preferredRecognitionSource === 'luna' ? item.lunaText || item.paddleText : item.paddleText || item.lunaText);
+  const effectiveAnswer = item.selectedOption || (item.preferredRecognitionSource === 'focused-paddle' ? item.focusedPaddleText ?? '' : item.preferredRecognitionSource === 'luna' ? item.lunaText : item.paddleText);
   const sourcePage = document?.resources.find(resource => resource.role === 'source-page' && (resource.pageNumber ?? 1) === item.region.pageNumber);
-  const sourceEvidence: SourceEvidence | undefined = asset && sourcePage && item.pageWidth && item.pageHeight ? { id: `${asset.id}-${item.displayNo}-manual`, assetId: asset.id, assetKind: 'student-submission', fileName: asset.fileName, pageNumber: item.region.pageNumber, boundingBox: { x: item.region.x / item.pageWidth, y: item.region.y / item.pageHeight, width: item.region.width / item.pageWidth, height: item.region.height / item.pageHeight }, ocrText: item.paddleText || item.lunaText, confidence: item.confidence, imageUrl: item.cropUrl, sourcePageUrl: sourcePage.publicUrl } : undefined;
+  const sourceEvidence: SourceEvidence | undefined = asset && sourcePage && item.pageWidth && item.pageHeight ? { id: `${asset.id}-${item.displayNo}-manual`, assetId: asset.id, assetKind: 'student-submission', fileName: asset.fileName, pageNumber: item.region.pageNumber, boundingBox: { x: item.region.x / item.pageWidth, y: item.region.y / item.pageHeight, width: item.region.width / item.pageWidth, height: item.region.height / item.pageHeight }, ocrText: effectiveAnswer, confidence: item.confidence, imageUrl: item.screenshotStatus === 'unavailable' ? sourcePage.publicUrl : item.cropUrl, sourcePageUrl: sourcePage.publicUrl } : undefined;
+  const recognitionSources = [
+    item.paddleText ? { source: 'paddle' as const, label: 'Paddle 原文片段' } : null,
+    item.focusedPaddleText ? { source: 'focused-paddle' as const, label: '手动截图 OCR' } : null,
+    item.lunaText ? { source: 'luna' as const, label: 'Luna 加工结果' } : null
+  ].filter(Boolean) as Array<{ source: 'paddle' | 'focused-paddle' | 'luna'; label: string }>;
+  const selectSource = async (source: 'paddle' | 'focused-paddle' | 'luna') => {
+    if (!asset) return;
+    const result = await setSubmissionRecognitionSource(asset.taskId, asset.id, item.displayNo, source);
+    const updated = result.items.find(candidate => candidate.displayNo === item.displayNo);
+    if (updated) setItem(updated);
+  };
   return (
     <article className="grid gap-3 border border-slate-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-wrap items-center gap-2">
@@ -218,7 +229,7 @@ function VisionItemCard({ item: initialItem, asset, document }: { item: VisionVa
           {item.needsReview ? '需核验' : `置信度 ${Math.round(item.confidence * 100)}%`}
         </span>
       </div>
-      {sourceEvidence ? <SourceEvidenceViewer evidence={sourceEvidence} label={`第 ${item.displayNo} 题答卷截图`} onCompareRegion={(boundingBox, runOcr) => compareSubmissionQuestionRegion(asset!.taskId, asset!.id, item.displayNo, boundingBox, runOcr)} onSaveRegion={async boundingBox => { const result = await saveSubmissionQuestionRegion(asset!.taskId, asset!.id, item.displayNo, boundingBox); const updated = result.items.find(candidate => candidate.displayNo === item.displayNo); if (updated) setItem(updated); }} /> : <img src={item.cropUrl} alt={`第 ${item.displayNo} 题完整区域`} className="max-h-48 w-full border border-slate-200 object-contain" />}
+      {sourceEvidence ? <SourceEvidenceViewer evidence={sourceEvidence} label={item.screenshotStatus === 'unavailable' ? `第 ${item.displayNo} 题原页（暂无可靠截图）` : `第 ${item.displayNo} 题答卷截图`} saveBehavior="focused-ocr" onCompareRegion={(boundingBox, runOcr) => compareSubmissionQuestionRegion(asset!.taskId, asset!.id, item.displayNo, boundingBox, runOcr)} onSaveRegion={async boundingBox => { const result = await saveSubmissionQuestionRegion(asset!.taskId, asset!.id, item.displayNo, boundingBox); const updated = result.items.find(candidate => candidate.displayNo === item.displayNo); if (updated) setItem(updated); }} /> : item.screenshotStatus !== 'unavailable' ? <img src={item.cropUrl} alt={`第 ${item.displayNo} 题完整区域`} className="max-h-48 w-full border border-slate-200 object-contain" /> : <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">暂无可靠截图，请从答卷原页手动框选。</p>}
       {choiceEvidenceUnits.length ? (
         <div className="grid grid-cols-2 gap-2">
           {choiceEvidenceUnits.map(unit => (
@@ -234,8 +245,8 @@ function VisionItemCard({ item: initialItem, asset, document }: { item: VisionVa
       {item.locationStatus !== 'located' ? <p className="text-[11px] font-bold text-rose-700">题目区域待确认：{item.locationReasons.join('；')}</p> : null}
       {item.answerFields?.length ? (
         <div className="space-y-1">{item.answerFields.map(field => <p key={field.fieldId} className="text-xs leading-5"><strong>{field.label}：</strong>{field.text || '未填写'}{field.needsReview ? <span className="ml-1 text-amber-700">待核验</span> : null}</p>)}</div>
-      ) : <div className="space-y-2 text-xs leading-5"><p><strong>{item.needsReview ? '评分采用文本（待核验）' : '评分采用文本'}：</strong><RichOcrText text={effectiveAnswer || '未识别'} /></p>{item.paddleText ? <p className="text-slate-500"><strong>PaddleOCR 原文：</strong><RichOcrText text={item.paddleText} /></p> : null}{item.lunaText ? <p className="text-slate-500"><strong>Luna 整页提取：</strong><RichOcrText text={item.lunaText} /></p> : null}</div>}
-      {asset && item.paddleText && item.lunaText && item.paddleText !== item.lunaText ? <div className="flex flex-wrap gap-2 text-xs"><button type="button" disabled={item.preferredRecognitionSource === 'luna'} onClick={async () => { const result = await setSubmissionRecognitionSource(asset.taskId, asset.id, item.displayNo, 'luna'); const updated = result.items.find(candidate => candidate.displayNo === item.displayNo); if (updated) setItem(updated); }} className="min-h-11 rounded-xl bg-emerald-700 px-3 font-bold text-white disabled:bg-emerald-100 disabled:text-emerald-800">{item.preferredRecognitionSource === 'luna' ? '已采用 Luna' : '采用 Luna 结果'}</button><button type="button" disabled={item.preferredRecognitionSource === 'paddle'} onClick={async () => { const result = await setSubmissionRecognitionSource(asset.taskId, asset.id, item.displayNo, 'paddle'); const updated = result.items.find(candidate => candidate.displayNo === item.displayNo); if (updated) setItem(updated); }} className="min-h-11 rounded-xl border border-slate-300 px-3 font-bold disabled:bg-slate-100">{item.preferredRecognitionSource === 'paddle' ? '已采用 PaddleOCR' : '采用 PaddleOCR'}</button></div> : null}
+      ) : <div className="space-y-2 text-xs leading-5"><p><strong>{item.needsReview ? '评分采用文本（待核验）' : '评分采用文本'}：</strong><RichOcrText text={effectiveAnswer || '未识别'} /></p>{item.paddleText ? <p className="text-slate-500"><strong>PaddleOCR 原文片段：</strong><RichOcrText text={item.paddleText} /></p> : null}{item.focusedPaddleText ? <p className="text-slate-500"><strong>手动截图 OCR：</strong><RichOcrText text={item.focusedPaddleText} /></p> : null}{item.focusedOcrStatus === 'failed' ? <p className="font-bold text-rose-700">截图已保存，但局部 OCR 失败；原有识别文本未被覆盖。</p> : null}{item.lunaText ? <p className="text-slate-500"><strong>Luna 加工结果：</strong><RichOcrText text={item.lunaText} /></p> : null}</div>}
+      {asset && recognitionSources.length > 1 ? <div className="flex flex-wrap gap-2 text-xs">{recognitionSources.map(option => <button key={option.source} type="button" disabled={item.preferredRecognitionSource === option.source} onClick={() => void selectSource(option.source)} className={`min-h-11 rounded-xl px-3 font-bold disabled:bg-emerald-100 disabled:text-emerald-800 ${option.source === 'luna' ? 'bg-emerald-700 text-white' : 'border border-slate-300'}`}>{item.preferredRecognitionSource === option.source ? `已采用${option.label}` : `采用${option.label}`}</button>)}</div> : null}
       {item.crossedOutText.length ? <p className="text-[11px] leading-5 text-slate-500">已划去：{item.crossedOutText.join('；')}</p> : null}
       {item.existingMarkings.length ? <p className="text-[11px] leading-5 text-amber-700">已有批改痕迹：{item.existingMarkings.join('；')}</p> : null}
     </article>
@@ -356,10 +367,11 @@ const applyTrialSamples = (states: QuestionGradingState[], result: TrialGradingR
 };
 
 const hasUsableVisionItem = (item: VisionValidationItem | undefined) => Boolean(item && (
-  item.selectedOption
+  !(item.preferredRecognitionSource === 'focused-paddle' && item.focusedOcrStatus === 'failed') && (item.selectedOption
   || item.paddleText.trim()
+  || item.focusedPaddleText?.trim()
   || item.lunaText.trim()
-  || item.evidenceUnits?.some(unit => unit.provisionalText.trim() || unit.literalText.trim())
+  || item.evidenceUnits?.some(unit => unit.provisionalText.trim() || unit.literalText.trim()))
 ));
 
 type EvidenceBox = SourceEvidence['boundingBox'];
@@ -731,7 +743,7 @@ export default function GradingWorkflow({
   const [visionValidationByAsset, setVisionValidationByAsset] = useState<Record<string, VisionValidationResult>>({});
   const [visionValidationPhase, setVisionValidationPhase] = useState<Record<string, VisionValidationPhase>>({});
   const [visionValidationError, setVisionValidationError] = useState<Record<string, string>>({});
-  const [submissionExtractionProgress, setSubmissionExtractionProgress] = useState<{ phase: 'idle' | 'checking' | 'extracting' | 'complete'; requested: number; completed: number; failed: number; skipped: number }>({ phase: 'idle', requested: 0, completed: 0, failed: 0, skipped: 0 });
+  const [submissionExtractionProgress, setSubmissionExtractionProgress] = useState<{ phase: 'idle' | 'checking' | 'extracting' | 'complete'; requested: number; completed: number; failed: number; skipped: number; startedAt: number | null; elapsedSeconds: number }>({ phase: 'idle', requested: 0, completed: 0, failed: 0, skipped: 0, startedAt: null, elapsedSeconds: 0 });
   const [batch, setBatch] = useState<GradingBatch | null>(null);
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchQuestionId, setBatchQuestionId] = useState('');
@@ -850,7 +862,7 @@ export default function GradingWorkflow({
     setSubmissionManagement(false);
     setSelectedSubmissionIds(new Set());
     setShowSubmissionDeleteConfirm(false);
-    setSubmissionExtractionProgress({ phase: 'idle', requested: 0, completed: 0, failed: 0, skipped: 0 });
+    setSubmissionExtractionProgress({ phase: 'idle', requested: 0, completed: 0, failed: 0, skipped: 0, startedAt: null, elapsedSeconds: 0 });
   }, [selectedTask.id]);
 
   const updateAssignment = (updated: Partial<WorkflowState['assignment']>) => {
@@ -875,6 +887,12 @@ export default function GradingWorkflow({
     const timer = window.setInterval(() => setTrialProgress(current => current.startedAt ? { ...current, elapsedSeconds: Math.floor((Date.now() - current.startedAt) / 1000) } : current), 1000);
     return () => window.clearInterval(timer);
   }, [trialProgress.phase]);
+
+  useEffect(() => {
+    if (!submissionExtractionBusy) return;
+    const timer = window.setInterval(() => setSubmissionExtractionProgress(current => current.startedAt ? { ...current, elapsedSeconds: Math.floor((Date.now() - current.startedAt) / 1000) } : current), 1000);
+    return () => window.clearInterval(timer);
+  }, [submissionExtractionBusy]);
 
   useEffect(() => {
     let active = true;
@@ -1052,7 +1070,8 @@ export default function GradingWorkflow({
     const selected = [...selectedSubmissionIds].filter(assetId => extractableSubmissionIds.includes(assetId));
     const assetIds = selected.length ? selected : extractableSubmissionIds;
     if (!assetIds.length) return;
-    setSubmissionExtractionProgress({ phase: 'checking', requested: assetIds.length, completed: 0, failed: 0, skipped: 0 });
+    const startedAt = Date.now();
+    setSubmissionExtractionProgress({ phase: 'checking', requested: assetIds.length, completed: 0, failed: 0, skipped: 0, startedAt, elapsedSeconds: 0 });
     const storedResults = await Promise.all(assetIds.map(async assetId => {
       try {
         return { assetId, result: visionValidationByAsset[assetId] ?? await getVisionValidation(selectedTask.id, assetId), lookupFailed: false };
@@ -1068,11 +1087,11 @@ export default function GradingWorkflow({
     }
     const pendingIds = storedResults.filter(item => !item.result && !item.lookupFailed).map(item => item.assetId);
     if (!pendingIds.length) {
-      setSubmissionExtractionProgress({ phase: 'complete', requested: assetIds.length, completed: 0, failed: lookupFailures, skipped: existingResults.length });
+      setSubmissionExtractionProgress({ phase: 'complete', requested: assetIds.length, completed: 0, failed: lookupFailures, skipped: existingResults.length, startedAt, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000) });
       onShowToast(lookupFailures ? `跳过已有结果 ${existingResults.length} 份，另有 ${lookupFailures} 份状态读取失败，未调用 Luna` : `已跳过 ${assetIds.length} 份已有结果，没有重复调用 Luna`);
       return;
     }
-    setSubmissionExtractionProgress({ phase: 'extracting', requested: assetIds.length, completed: 0, failed: lookupFailures, skipped: existingResults.length });
+    setSubmissionExtractionProgress({ phase: 'extracting', requested: assetIds.length, completed: 0, failed: lookupFailures, skipped: existingResults.length, startedAt, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000) });
     const results = await Promise.all(pendingIds.map(async assetId => {
       const succeeded = await validateSubmissionVision(assetId, false);
       setSubmissionExtractionProgress(current => ({ ...current, completed: current.completed + (succeeded ? 1 : 0), failed: current.failed + (succeeded ? 0 : 1) }));
@@ -1080,7 +1099,7 @@ export default function GradingWorkflow({
     }));
     const completed = results.filter(Boolean).length;
     const failed = pendingIds.length - completed + lookupFailures;
-    setSubmissionExtractionProgress({ phase: 'complete', requested: assetIds.length, completed, failed, skipped: existingResults.length });
+    setSubmissionExtractionProgress({ phase: 'complete', requested: assetIds.length, completed, failed, skipped: existingResults.length, startedAt, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000) });
     onShowToast(failed ? `新完成 ${completed} 份，失败 ${failed} 份，跳过已有结果 ${existingResults.length} 份` : `新完成 ${completed} 份，跳过已有结果 ${existingResults.length} 份`);
   };
 
@@ -2003,7 +2022,6 @@ export default function GradingWorkflow({
 
       {activeStage === 'intake' ? matchRows.length ? (
         <section className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/20"><div><p className="text-xs text-emerald-900 dark:text-emerald-100">无需展开答卷；默认跳过已有结果，只处理未提取或失败项。</p>{submissionExtractionProgress.phase !== 'idle' ? <p role="status" className="mt-1 text-xs font-bold text-emerald-800 dark:text-emerald-200">{submissionExtractionProgress.phase === 'checking' ? `正在检查 ${submissionExtractionProgress.requested} 份答卷的已有结果…` : submissionExtractionProgress.phase === 'extracting' ? `正在提取：完成 ${submissionExtractionProgress.completed}，失败 ${submissionExtractionProgress.failed}，跳过 ${submissionExtractionProgress.skipped}` : `本次完成 ${submissionExtractionProgress.completed}，失败 ${submissionExtractionProgress.failed}，跳过 ${submissionExtractionProgress.skipped}`}</p> : null}</div><button type="button" onClick={() => void extractStudentAnswers()} disabled={!extractableSubmissionIds.length || submissionExtractionBusy || extractableSubmissionIds.some(id => visionValidationPhase[id] === 'loading' || visionValidationPhase[id] === 'extracting')} className="min-h-11 rounded-xl bg-emerald-700 px-4 text-sm font-bold text-white disabled:opacity-40"><ScanLine className="mr-2 inline h-4 w-4" />{submissionExtractionBusy ? '正在处理…' : selectedSubmissionIds.size ? '提取选中逐题答案' : '提取全部逐题答案'}</button></div>
           {rosterMatchPhase === 'loading' ? <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-bold text-sky-800">正在读取当前班级名册并核对学号...</div> : null}
           {rosterMatchPhase === 'error' ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"><span>名册核对失败（{rosterMatchError}），当前答卷不能进入自动批改。</span><button type="button" onClick={() => setRosterRefreshKey(value => value + 1)} className="font-bold underline">重新核对</button></div> : null}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -2019,7 +2037,8 @@ export default function GradingWorkflow({
               {submissionManagement ? <div className="sticky bottom-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 shadow-sm md:static md:shadow-none dark:border-zinc-800 dark:bg-zinc-950"><button type="button" onClick={toggleAllDisplayedSubmissions} disabled={!removableDisplayedIds.length} className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-600 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900">{removableDisplayedIds.length > 0 && removableDisplayedIds.every(id => selectedSubmissionIds.has(id)) ? '取消全选当前列表' : '全选当前列表'}</button><span className="text-sm font-bold text-slate-600 dark:text-slate-300">已选 {selectedSubmissionIds.size} 份{displayedRows.length > removableDisplayedIds.length ? ` · ${displayedRows.length - removableDisplayedIds.length} 份正在处理` : ''}</span><button type="button" disabled={!selectedSubmissionIds.size} onClick={() => setShowSubmissionDeleteConfirm(true)} className="min-h-11 rounded-xl bg-rose-600 px-4 text-sm font-bold text-white disabled:opacity-40"><Trash2 className="mr-2 inline h-4 w-4" />删除选中</button></div> : null}
               <div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[760px] text-left text-sm"><thead><tr className="border-b border-slate-200/70 text-xs font-bold text-slate-400 dark:border-zinc-800">{submissionManagement ? <th className="px-4 py-3"><span className="sr-only">选择</span></th> : null}<th className="px-5 py-3">顺序</th><th className="px-3 py-3">名单匹配</th><th className="px-3 py-3">识别姓名</th><th className="px-3 py-3">页数</th><th className="px-3 py-3">文字识别</th><th className="px-3 py-3">处理状态</th><th className="px-3 py-3" /></tr></thead><tbody>{displayedRows.map(row => { const asset = submissionAssets.find(item => item.id === row.id); const status = getSubmissionStatus(row, asset); const document = normalizedDocuments.find(item => item.assetId === row.id); const textConfidence = row.textConfidence ?? row.ocrConfidence; const removable = asset?.status !== 'processing' && asset?.status !== 'uploaded'; return <Fragment key={row.id}><tr className="border-b border-slate-200/50 last:border-0 dark:border-zinc-800/70">{submissionManagement ? <td className="px-4 py-4"><input type="checkbox" checked={selectedSubmissionIds.has(row.id)} disabled={!removable} onChange={() => toggleSubmissionSelection(row.id)} aria-label={`选择 ${row.expectedStudentName} 的答卷`} className="h-5 w-5 accent-emerald-700 disabled:opacity-40" /></td> : null}<td className="px-5 py-4 tabular-nums">{row.sequence}</td><td className="px-3 py-4 font-bold">{row.expectedStudentName}</td><td className="px-3 py-4 font-mono text-xs">{row.detectedStudentName || "待确认"}</td><td className="px-3 py-4">{row.pageCount}</td><td className="px-3 py-4">{textConfidence > 0 ? `${Math.round(textConfidence * 100)}%` : '未提供'}</td><td className="px-3 py-4"><span className={`rounded-xl px-2.5 py-1.5 text-xs font-bold ${status.className}`}>{status.label}</span></td><td className="px-3 py-4"><button type="button" onClick={() => openSubmissionPreview(row.id)} className="flex h-11 w-11 items-center justify-center rounded-xl text-emerald-700 hover:bg-emerald-50" title="查看答卷" aria-label={`查看 ${row.expectedStudentName} 的答卷`}><Eye className="h-4 w-4" /></button></td></tr>{expandedOcrPageId === row.id ? <tr><td colSpan={submissionManagement ? 8 : 7} className="p-0"><SubmissionPreview page={row} roster={classRoster} asset={asset} document={document} validation={visionValidationByAsset[row.id]} validationPhase={visionValidationPhase[row.id] ?? 'idle'} validationError={visionValidationError[row.id]} onClose={() => setExpandedOcrPageId(null)} onConfirm={lookup => confirmSubmissionStudent(row.id, lookup)} onRunVision={() => void validateSubmissionVision(row.id)} /></td></tr> : null}</Fragment>; })}</tbody></table></div>
               <div className="divide-y divide-slate-200 md:hidden dark:divide-zinc-800">{displayedRows.map(row => { const asset = submissionAssets.find(item => item.id === row.id); const status = getSubmissionStatus(row, asset); const document = normalizedDocuments.find(item => item.assetId === row.id); const textConfidence = row.textConfidence ?? row.ocrConfidence; const removable = asset?.status !== 'processing' && asset?.status !== 'uploaded'; return <div key={row.id} className="p-4"><div className="flex items-start gap-3">{submissionManagement ? <input type="checkbox" checked={selectedSubmissionIds.has(row.id)} disabled={!removable} onChange={() => toggleSubmissionSelection(row.id)} aria-label={`选择 ${row.expectedStudentName} 的答卷`} className="mt-3 h-6 w-6 flex-none accent-emerald-700 disabled:opacity-40" /> : null}<button type="button" onClick={() => openSubmissionPreview(row.id)} className="min-h-11 min-w-0 flex-1 text-left"><div className="flex items-center justify-between gap-2"><strong className="truncate text-sm">{row.expectedStudentName}</strong><span className={`flex-none rounded-xl px-2.5 py-1.5 text-xs font-bold ${status.className}`}>{status.label}</span></div><p className="mt-2 text-xs text-slate-500">第 {row.sequence} 份 · 姓名 {row.detectedStudentName || "待确认"} · {row.pageCount} 页</p><p className="mt-1 text-xs text-slate-500">文字识别 {textConfidence > 0 ? `${Math.round(textConfidence * 100)}%` : '未提供'}</p></button></div>{expandedOcrPageId === row.id ? <div className="mt-3"><SubmissionPreview page={row} roster={classRoster} asset={asset} document={document} validation={visionValidationByAsset[row.id]} validationPhase={visionValidationPhase[row.id] ?? 'idle'} validationError={visionValidationError[row.id]} onClose={() => setExpandedOcrPageId(null)} onConfirm={lookup => confirmSubmissionStudent(row.id, lookup)} onRunVision={() => void validateSubmissionVision(row.id)} /></div> : null}</div>; })}</div>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200/70 p-5 dark:border-zinc-800"><span className="text-xs text-slate-500">未匹配或重复绑定的学生身份必须处理后才能进入试批。</span><button type="button" disabled={!gradingDataReady || trialGradingPhase === 'loading'} onClick={() => void prepareTrialCalibration()} className="flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40">{trialGradingPhase === 'loading' ? 'Luna 正在试批...' : '进入试批校准'}<ArrowRight className="h-4 w-4" /></button></div>
+              <div className="border-t border-slate-200/70 bg-emerald-50/60 p-4 sm:p-5 dark:border-zinc-800 dark:bg-emerald-950/10"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><strong className="text-sm text-emerald-900 dark:text-emerald-100">逐题答案提取</strong><p className="mt-1 text-xs text-emerald-800 dark:text-emerald-200">无需展开答卷；已有结果会跳过，旧版本结果需重新提取。</p>{submissionExtractionProgress.phase !== 'idle' ? <p role="status" className="mt-1 text-xs font-bold text-emerald-800 dark:text-emerald-200">{submissionExtractionProgress.phase === 'checking' ? `正在检查 ${submissionExtractionProgress.requested} 份答卷 · 已用时 ${formatElapsed(submissionExtractionProgress.elapsedSeconds)}` : submissionExtractionProgress.phase === 'extracting' ? `完成 ${submissionExtractionProgress.completed}，失败 ${submissionExtractionProgress.failed}，跳过 ${submissionExtractionProgress.skipped} · 已用时 ${formatElapsed(submissionExtractionProgress.elapsedSeconds)}` : `本次完成 ${submissionExtractionProgress.completed}，失败 ${submissionExtractionProgress.failed}，跳过 ${submissionExtractionProgress.skipped} · 用时 ${formatElapsed(submissionExtractionProgress.elapsedSeconds)}`}</p> : null}</div><button type="button" onClick={() => void extractStudentAnswers()} disabled={!extractableSubmissionIds.length || submissionExtractionBusy || extractableSubmissionIds.some(id => visionValidationPhase[id] === 'loading' || visionValidationPhase[id] === 'extracting')} className="min-h-11 w-full rounded-xl bg-emerald-700 px-4 text-sm font-bold text-white disabled:opacity-40 sm:w-auto"><ScanLine className="mr-2 inline h-4 w-4" />{submissionExtractionBusy ? '正在处理…' : selectedSubmissionIds.size ? '提取选中逐题答案' : '提取全部逐题答案'}</button></div></div>
+              <div className="flex flex-col gap-3 border-t border-slate-200/70 p-5 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800"><span className="text-xs text-slate-500">未匹配或重复绑定的学生身份必须处理后才能进入试批。</span><button type="button" disabled={!gradingDataReady || trialGradingPhase === 'loading'} onClick={() => void prepareTrialCalibration()} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto">{trialGradingPhase === 'loading' ? 'Luna 正在试批...' : '进入试批校准'}<ArrowRight className="h-4 w-4" /></button></div>
             </section>
           </div>
         </section>

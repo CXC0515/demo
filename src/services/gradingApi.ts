@@ -152,7 +152,7 @@ export const compareSubmissionQuestionRegion = async (taskId: string, assetId: s
   return response.json() as Promise<EvidenceRegionComparison>;
 };
 
-export const setSubmissionRecognitionSource = async (taskId: string, assetId: string, displayNo: string, source: 'paddle' | 'luna') => {
+export const setSubmissionRecognitionSource = async (taskId: string, assetId: string, displayNo: string, source: 'paddle' | 'focused-paddle' | 'luna') => {
   const response = await apiFetch(`/api/grading-tasks/${taskId}/vision-validation/${encodeURIComponent(assetId)}/questions/${encodeURIComponent(displayNo)}/source`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source }) });
   if (!response.ok) throw new Error(await readErrorCode(response));
   return (await response.json() as { result: VisionValidationResult }).result;

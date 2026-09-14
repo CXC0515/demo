@@ -37,7 +37,8 @@ export const gradeTrialSubmissions = async (
     if (!visionItem) throw new Error('VISION_RESULT_REFERENCE_MISSING');
     const correctedText = answerOverrides.get(`${material.id}:${question.displayNo}`);
     const observedText = correctedText ?? getObservedAnswer(visionItem);
-    const recognitionConflict = correctedText === undefined && !visionItem.selectedOption && recognitionTextsConflict(visionItem.paddleText, visionItem.lunaText);
+    const selectedPaddleText = visionItem.preferredRecognitionSource === 'focused-paddle' ? visionItem.focusedPaddleText ?? '' : visionItem.paddleText;
+    const recognitionConflict = correctedText === undefined && !visionItem.selectedOption && recognitionTextsConflict(selectedPaddleText, visionItem.lunaText);
     const objectiveScore = scoreObjectiveChoice(visionItem.selectedOption, question.standardAnswer, question.fullScore);
     const choiceIsCorrect = objectiveScore === null ? undefined : objectiveScore === question.fullScore;
     const matchedPoints = choiceIsCorrect === undefined ? modelSample.matchedPoints : choiceIsCorrect ? question.rubricPoints.map(point => point.point) : [];
@@ -46,7 +47,7 @@ export const gradeTrialSubmissions = async (
       ? resolveTrialScore(question.fullScore, question.rubricPoints, matchedPoints, missedPoints, modelSample.score)
       : objectiveScore;
     const gradingConfidence = correctedText === undefined ? resolveTrialConfidence(modelSample.confidence, visionItem) : modelSample.confidence;
-    const bothRecognizersEmpty = !visionItem.selectedOption && !visionItem.paddleText.trim() && !visionItem.lunaText.trim();
+    const bothRecognizersEmpty = !visionItem.selectedOption && !getObservedAnswer(visionItem).trim() && !visionItem.lunaText.trim();
     const scoreRatio = question.fullScore > 0 && score !== null ? score / question.fullScore : 0;
     const sampleType: CalibrationSample['sampleType'] = bothRecognizersEmpty ? 'ocr-risk' : scoreRatio >= 0.8 ? 'high' : scoreRatio <= 0.4 ? 'low' : 'middle';
     const reviewTriggers: NonNullable<CalibrationSample['reviewTriggers']> = [
@@ -73,7 +74,7 @@ export const gradeTrialSubmissions = async (
       ocrText: observedText,
       lunaReviewText: visionItem.lunaText,
       recognitionConflict,
-      ocrSource: visionItem.selectedOption ? 'choice-vision' as const : visionItem.paddleText ? 'paddle' as const : 'luna' as const,
+      ocrSource: visionItem.selectedOption ? 'choice-vision' as const : visionItem.preferredRecognitionSource === 'focused-paddle' ? 'focused-paddle' as const : visionItem.preferredRecognitionSource === 'luna' || !visionItem.paddleText ? 'luna' as const : 'paddle' as const,
       ocrConfidence: visionItem.confidence,
       aiScore: score,
       fullScore: question.fullScore,
@@ -86,7 +87,7 @@ export const gradeTrialSubmissions = async (
       gradingReason,
       sourceAssetId: material.id,
       sourceFileName: `${material.fileName} · 第 ${question.displayNo} 题`,
-      sourcePreviewUrl: `${visionItem.cropUrl}?v=${NON_CHOICE_RECOGNITION_VERSION}`,
+      sourcePreviewUrl: visionItem.screenshotStatus === 'unavailable' ? undefined : `${visionItem.cropUrl}?v=${NON_CHOICE_RECOGNITION_VERSION}`,
       sourcePreviewType: 'image' as const,
       status: 'pending' as const,
       rubricVersion: question.rubricVersion

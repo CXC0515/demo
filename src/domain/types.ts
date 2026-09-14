@@ -197,7 +197,7 @@ export interface CalibrationSample {
   teacherCorrectedText?: string;
   lunaReviewText?: string;
   recognitionConflict?: boolean;
-  ocrSource?: 'paddle' | 'luna' | 'choice-vision';
+  ocrSource?: 'paddle' | 'focused-paddle' | 'luna' | 'choice-vision';
   ocrText: string;
   ocrConfidence: number;
   aiScore: number | null;
@@ -252,7 +252,18 @@ export interface TrialGradingResult {
 
 export interface VisionValidationItem {
   pipelineVersion?: number;
-  preferredRecognitionSource?: 'paddle' | 'luna';
+  preferredRecognitionSource?: 'paddle' | 'focused-paddle' | 'luna';
+  answerRefs?: Array<{
+    order: number;
+    blockId: string;
+    quote: string;
+    occurrence: number;
+    resolvedQuote: string;
+    matchStatus: 'exact' | 'normalized' | 'missing';
+  }>;
+  focusedPaddleText?: string;
+  focusedOcrStatus?: 'completed' | 'failed';
+  screenshotStatus?: 'available' | 'unavailable';
   displayNo: string;
   region: { x: number; y: number; width: number; height: number; pageNumber: number };
   locatorSource: 'paddle-layout' | 'inferred-gap' | 'vision-layout' | 'teacher-manual';

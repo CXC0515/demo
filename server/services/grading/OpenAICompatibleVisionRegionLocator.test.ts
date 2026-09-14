@@ -63,6 +63,8 @@ test('extracts all requested answers in one model call with OCR coordinates but 
       displayNo: '1',
       pageNumber: 1,
       boundingBox: { x: 0.1, y: 0.2, width: 0.7, height: 0.2 },
+      screenshotAvailable: true,
+      answerRefs: [{ order: 0, blockId: 'student-block-1', quote: '清澈', occurrence: 1 }],
       evidenceUnits: [{ evidenceId: '1-answer', kind: 'text', boundingBox: { x: 0.1, y: 0.2, width: 0.7, height: 0.2 }, provisionalText: '清澈', blockIds: ['student-block-1'], confidence: 0.9, needsReview: false, reason: '' }],
       recognizedAnswer: '清澈',
       crossedOutText: [],
@@ -81,11 +83,13 @@ test('extracts all requested answers in one model call with OCR coordinates but 
 
     assert.equal(calls, 1);
     assert.equal(result.items[0]?.recognizedAnswer, '清澈');
+    assert.equal(result.items[0]?.answerRefs[0]?.quote, '清澈');
     const parsedRequest = JSON.parse(requestBody) as { messages: Array<{ content: Array<{ type: string; text?: string }> }> };
     const promptText = parsedRequest.messages[0]!.content.filter(item => item.type === 'text').map(item => item.text).join('\n');
     assert.match(promptText, /student-block-1/);
     assert.match(promptText, /"x":0\.1/);
     assert.match(promptText, /填写河水的特点/);
+    assert.match(promptText, /answerRefs/);
     assert.doesNotMatch(promptText, /不能发送给证据提取模型的标准答案|保密解析|保密采分点/);
   } finally {
     await rm(directory, { recursive: true, force: true });

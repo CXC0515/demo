@@ -27,6 +27,7 @@ export const inferAnswerCardOption = (value: string) => {
 export const getObservedAnswer = (item: VisionValidationItem) => {
   if (item.selectedOption) return item.selectedOption;
   const paddleText = formatPaddleTextForDisplay(item.paddleText);
+  if (item.preferredRecognitionSource === 'focused-paddle') return formatPaddleTextForDisplay(item.focusedPaddleText ?? '');
   if (item.preferredRecognitionSource === 'luna') return item.lunaText || paddleText;
   if (item.preferredRecognitionSource === 'paddle') return paddleText || item.lunaText;
   return paddleText || item.lunaText || '';
