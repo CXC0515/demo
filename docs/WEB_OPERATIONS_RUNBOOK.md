@@ -1,9 +1,9 @@
 # DEMO 网页产品本地生产运行手册
 
-> 文档版本：`v1.11`
-> 日期：2026-09-10
+> 文档版本：`v1.12`
+> 日期：2026-09-12
 > 适用范围：网页产品第一阶段第 2、3 切片操作口径
-> 当前边界：代码、`var-product`、公网 HTTPS 和后台自启均已接通；限两名受邀试用者验证，暂不扩大范围
+> 当前边界：首次备案处于管局审核；公网解析与 Tunnel 已停止，`var-product` 继续作为本地开发和未来迁移的唯一权威数据
 
 ## 1. 当前运行边界
 
@@ -264,6 +264,28 @@ node /Users/cxc/Projects/DEMO/scripts/configure-production-env.mjs
 
 应用与 Tunnel LaunchAgent 恢复运行后，回环和公网 ready 均返回 200，存储、AI、PaddleOCR 为 ready；公网与本地加载相同的 `index-UOPK7apf.js` 和 `index-DvH96bqB.css`，登录页为 200/no-store，未登录资料 API 返回 401。本次没有调整 DNS、Tunnel 和 80 MiB 上传上限。
 
+### 9.10 备案审核期间的离线开发
+
+2026-09-12，`td.unreached.cn` 的 Cloudflare Tunnel DNS 记录已删除；权威 DNS、`223.5.5.5` 和 `1.1.1.1` 查询均无 A/CNAME。SSL 验证 TXT `_dnsauth.td.unreached.cn` 保留。MacBook 的应用与 Tunnel LaunchAgent 均已停止，Cloudflare Tunnel 对象和本地配置未删除。
+
+离线开发继续使用唯一权威数据 `/Users/cxc/Projects/DEMO/var-product`。先确认后台生产进程已停止，再分别启动：
+
+```bash
+NODE_ENV=development \
+APP_DATA_ROOT=/Users/cxc/Projects/DEMO/var-product \
+APP_URL=http://localhost:3000 \
+API_HOST=127.0.0.1 \
+API_PORT=4317 \
+node --env-file=.env node_modules/tsx/dist/cli.mjs watch server/index.ts
+```
+
+```bash
+API_PROXY_TARGET=http://127.0.0.1:4317 \
+npx vite --port=3000 --host=127.0.0.1
+```
+
+只使用 `http://localhost:3000` 登录；不要通过公网 IP 或非标端口开放。2026-09-12 实测前端、Vite API 代理和直接 ready 均正常，存储、AI、PaddleOCR 为 ready。两个前台进程停止后数据仍保留在 `var-product`。
+
 ## 10. 修改历史
 
 | 版本 | 日期 | 状态 | 修改概要 |
@@ -279,4 +301,5 @@ node /Users/cxc/Projects/DEMO/scripts/configure-production-env.mjs
 | v1.8 | 2026-09-09 | 已被 v1.9 取代 | 记录 Shadowrocket TUN 与 Cloudflare QUIC 断线证据；HTTP/2 实测因 TCP 7844 被阻断而立即回滚，生产恢复自动协议，并保留校园网问题边界。 |
 | v1.9 | 2026-09-10 | 已被 v1.10 取代 | 记录 PR #15 课表 OCR 班级匹配升级、升级前快照、母文件夹检查、LaunchAgent 重启及公网构建一致性验收。 |
 | v1.10 | 2026-09-10 | 已被 v1.11 取代 | 记录 PR #16 上传隔离与导航稳定性升级、升级前快照、生产构建测试、LaunchAgent 重启及公网缓存边界验收。 |
-| v1.11 | 2026-09-10 | 当前，观察中 | 记录 PR #17 作息、资料缓存、上传错误和 OCR 富内容升级；包含恢复点、正式回填、测试、LaunchAgent 与公网构建一致性验收。 |
+| v1.11 | 2026-09-10 | 已被 v1.12 取代 | 记录 PR #17 作息、资料缓存、上传错误和 OCR 富内容升级；包含恢复点、正式回填、测试、LaunchAgent 与公网构建一致性验收。 |
+| v1.12 | 2026-09-12 | 当前 | 记录首次备案审核期间删除 `td` 公网解析、停止 Tunnel 与后台生产应用，并使用唯一 `var-product` 进行 localhost 离线开发。 |
