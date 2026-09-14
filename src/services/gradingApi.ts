@@ -146,6 +146,18 @@ export const saveSubmissionQuestionRegion = async (taskId: string, assetId: stri
   return (await response.json() as { result: VisionValidationResult }).result;
 };
 
+export const compareSubmissionQuestionRegion = async (taskId: string, assetId: string, displayNo: string, boundingBox: { x: number; y: number; width: number; height: number }, runOcr = false) => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/vision-validation/${encodeURIComponent(assetId)}/questions/${encodeURIComponent(displayNo)}/region/compare`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ boundingBox, runOcr }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return response.json() as Promise<EvidenceRegionComparison>;
+};
+
+export const setSubmissionRecognitionSource = async (taskId: string, assetId: string, displayNo: string, source: 'paddle' | 'luna') => {
+  const response = await apiFetch(`/api/grading-tasks/${taskId}/vision-validation/${encodeURIComponent(assetId)}/questions/${encodeURIComponent(displayNo)}/source`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source }) });
+  if (!response.ok) throw new Error(await readErrorCode(response));
+  return (await response.json() as { result: VisionValidationResult }).result;
+};
+
 export const saveTaskQuestionCorrection = async (taskId: string, displayNo: string, correction: { title: string; stem: string; answerRequirement: string; standardAnswer?: string }) => {
   const response = await apiFetch(`/api/grading-tasks/${taskId}/analysis/questions/${encodeURIComponent(displayNo)}`, {
     method: 'PUT',

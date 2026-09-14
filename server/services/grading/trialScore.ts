@@ -24,8 +24,13 @@ export const inferAnswerCardOption = (value: string) => {
   return candidates.length === 1 ? candidates[0] : null;
 };
 
-export const getObservedAnswer = (item: VisionValidationItem) =>
-  item.selectedOption || formatPaddleTextForDisplay(item.paddleText) || item.lunaText || '';
+export const getObservedAnswer = (item: VisionValidationItem) => {
+  if (item.selectedOption) return item.selectedOption;
+  const paddleText = formatPaddleTextForDisplay(item.paddleText);
+  if (item.preferredRecognitionSource === 'luna') return item.lunaText || paddleText;
+  if (item.preferredRecognitionSource === 'paddle') return paddleText || item.lunaText;
+  return paddleText || item.lunaText || '';
+};
 
 export const recognitionTextsConflict = (paddleText: string, lunaText: string) => {
   const normalize = (value: string) => value.replace(/[\s\[\]（）()。,.，_:：;；、\\$\-]/g, '').toUpperCase();
