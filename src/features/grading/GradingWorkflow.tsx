@@ -96,6 +96,7 @@ interface GradingWorkflowProps {
 }
 
 type StageId = 'assignment' | 'rubric' | 'intake' | 'calibration' | 'grading' | 'review' | 'diagnosis';
+type VisionValidationPhase = 'idle' | 'loading' | 'extracting' | 'ready' | 'error';
 
 const stages: { id: StageId; label: string }[] = [
   { id: 'assignment', label: '作业内容' },
@@ -619,7 +620,7 @@ function RubricEditor({ question, questionState, answerEvidence, dirty, savePhas
   );
 }
 
-function SubmissionPreview({ page, roster, asset, document, validation, validationPhase, validationError, onClose, onConfirm, onRunVision }: { page: SubmissionPage; roster: RosterStudent[]; asset?: DocumentAsset; document?: NonNullable<WorkflowState['assignment']['documents']>[number]; validation?: VisionValidationResult; validationPhase: 'idle' | 'loading' | 'ready' | 'error'; validationError?: string; onClose: () => void; onConfirm: (lookup: { studentId?: string; studentNo?: string }) => string | undefined; onRunVision: () => void }) {
+function SubmissionPreview({ page, roster, asset, document, validation, validationPhase, validationError, onClose, onConfirm, onRunVision }: { page: SubmissionPage; roster: RosterStudent[]; asset?: DocumentAsset; document?: NonNullable<WorkflowState['assignment']['documents']>[number]; validation?: VisionValidationResult; validationPhase: VisionValidationPhase; validationError?: string; onClose: () => void; onConfirm: (lookup: { studentId?: string; studentNo?: string }) => string | undefined; onRunVision: () => void }) {
   const [studentId, setStudentId] = useState(page.studentId ?? '');
   const [studentNo, setStudentNo] = useState('');
   const [identityError, setIdentityError] = useState('');
@@ -645,7 +646,7 @@ function SubmissionPreview({ page, roster, asset, document, validation, validati
       </div>
       <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="min-h-11 rounded-2xl border border-slate-200 bg-white px-4 text-xs font-bold dark:border-zinc-700 dark:bg-zinc-900">收起</button></div>
       <section className="mt-5 border-t border-emerald-200 pt-5 dark:border-emerald-900">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><h4 className="text-sm font-black">逐题答案识别</h4><p className="mt-1 text-xs text-slate-500">复用已保存的 PaddleOCR 文字与坐标，由 Luna 重新定位和转写逐题答案；不会重复上传文件。</p></div><button type="button" disabled={!visionReady || validationPhase === 'loading'} onClick={onRunVision} className="rounded-2xl bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{validationPhase === 'loading' ? '正在重新提取逐题答案...' : validation ? '重新提取逐题答案' : '开始提取逐题答案'}</button></div>
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h4 className="text-sm font-black">逐题答案识别</h4><p className="mt-1 text-xs text-slate-500">复用已保存的 PaddleOCR 文字与坐标，由 Luna 重新定位和转写逐题答案；不会重复上传文件。</p></div><button type="button" disabled={!visionReady || validationPhase === 'loading' || validationPhase === 'extracting'} onClick={onRunVision} className="min-h-11 rounded-2xl bg-emerald-700 px-4 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{validationPhase === 'loading' ? '正在读取已有结果…' : validationPhase === 'extracting' ? validation ? '正在重新提取…' : '正在首次提取…' : validation ? '重新提取逐题答案' : '开始提取逐题答案'}</button></div>
         {!visionReady ? <p className="mt-3 text-xs font-bold text-amber-700">这份答卷尚未保留 Paddle 原始坐标，需要重新解析后才能裁图。</p> : null}
         {validationPhase === 'error' ? <p className="mt-3 text-xs font-bold text-rose-700">逐题识别失败（{validationError}）</p> : null}
         {validation ? <div className="mt-4 grid gap-3 lg:grid-cols-2">{validation.items.map(item => <VisionItemCard key={item.displayNo} item={item} asset={asset} document={document} />)}</div> : null}
@@ -728,8 +729,9 @@ export default function GradingWorkflow({
   const [trialGradingError, setTrialGradingError] = useState<string | null>(null);
   const [trialProgress, setTrialProgress] = useState<{ phase: 'idle' | 'recognition' | 'grading' | 'complete' | 'error'; completed: number; total: number; currentLabel: string; startedAt: number | null; elapsedSeconds: number }>({ phase: 'idle', completed: 0, total: 0, currentLabel: '', startedAt: null, elapsedSeconds: 0 });
   const [visionValidationByAsset, setVisionValidationByAsset] = useState<Record<string, VisionValidationResult>>({});
-  const [visionValidationPhase, setVisionValidationPhase] = useState<Record<string, 'idle' | 'loading' | 'ready' | 'error'>>({});
+  const [visionValidationPhase, setVisionValidationPhase] = useState<Record<string, VisionValidationPhase>>({});
   const [visionValidationError, setVisionValidationError] = useState<Record<string, string>>({});
+  const [submissionExtractionProgress, setSubmissionExtractionProgress] = useState<{ phase: 'idle' | 'checking' | 'extracting' | 'complete'; requested: number; completed: number; failed: number; skipped: number }>({ phase: 'idle', requested: 0, completed: 0, failed: 0, skipped: 0 });
   const [batch, setBatch] = useState<GradingBatch | null>(null);
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchQuestionId, setBatchQuestionId] = useState('');
@@ -813,6 +815,7 @@ export default function GradingWorkflow({
     const asset = submissionAssets.find(item => item.id === row.id);
     return row.rosterMatchStatus === 'matched' && asset && (asset.status === 'ready' || asset.status === 'needs-review') ? [row.id] : [];
   });
+  const submissionExtractionBusy = submissionExtractionProgress.phase === 'checking' || submissionExtractionProgress.phase === 'extracting';
   const failedSubmissionAssets = submissionAssets.filter(asset => asset.status === 'failed');
   const questionSelectionLocked = Boolean(selectedTask.questionScopeConfirmedAt || submissionAssets.length > 0);
   const allQuestionsSelected = workflowState.questions.length > 0 && questionSelectionDraft.length === workflowState.questions.length;
@@ -847,6 +850,7 @@ export default function GradingWorkflow({
     setSubmissionManagement(false);
     setSelectedSubmissionIds(new Set());
     setShowSubmissionDeleteConfirm(false);
+    setSubmissionExtractionProgress({ phase: 'idle', requested: 0, completed: 0, failed: 0, skipped: 0 });
   }, [selectedTask.id]);
 
   const updateAssignment = (updated: Partial<WorkflowState['assignment']>) => {
@@ -996,20 +1000,28 @@ export default function GradingWorkflow({
   const currentQuestionNos = [...new Set(selectedQuestions.map(question => question.displayNo).filter(Boolean))];
 
   const openSubmissionPreview = (assetId: string) => {
-    setExpandedOcrPageId(current => current === assetId ? null : assetId);
+    if (expandedOcrPageId === assetId) {
+      setExpandedOcrPageId(null);
+      return;
+    }
+    setExpandedOcrPageId(assetId);
     if (visionValidationByAsset[assetId]) return;
+    setVisionValidationPhase(current => ({ ...current, [assetId]: 'loading' }));
     void getVisionValidation(selectedTask.id, assetId).then(result => {
       if (result) {
         setVisionValidationByAsset(current => ({ ...current, [assetId]: result }));
         setVisionValidationPhase(current => ({ ...current, [assetId]: 'ready' }));
         return;
       }
-      void validateSubmissionVision(assetId, false);
-    }).catch(() => undefined);
+      setVisionValidationPhase(current => ({ ...current, [assetId]: 'idle' }));
+    }).catch(error => {
+      setVisionValidationPhase(current => ({ ...current, [assetId]: 'error' }));
+      setVisionValidationError(current => ({ ...current, [assetId]: error instanceof Error ? error.message : 'VISION_VALIDATION_LOAD_FAILED' }));
+    });
   };
 
   const validateSubmissionVision = async (assetId: string, notify = true) => {
-    setVisionValidationPhase(current => ({ ...current, [assetId]: 'loading' }));
+    setVisionValidationPhase(current => ({ ...current, [assetId]: 'extracting' }));
     setVisionValidationError(current => ({ ...current, [assetId]: '' }));
     try {
       const result = await runVisionValidation(selectedTask.id, assetId, currentQuestionNos);
@@ -1036,12 +1048,40 @@ export default function GradingWorkflow({
   };
 
   const extractStudentAnswers = async () => {
+    if (submissionExtractionProgress.phase === 'checking' || submissionExtractionProgress.phase === 'extracting') return;
     const selected = [...selectedSubmissionIds].filter(assetId => extractableSubmissionIds.includes(assetId));
     const assetIds = selected.length ? selected : extractableSubmissionIds;
     if (!assetIds.length) return;
-    const results = await Promise.all(assetIds.map(assetId => validateSubmissionVision(assetId, false)));
+    setSubmissionExtractionProgress({ phase: 'checking', requested: assetIds.length, completed: 0, failed: 0, skipped: 0 });
+    const storedResults = await Promise.all(assetIds.map(async assetId => {
+      try {
+        return { assetId, result: visionValidationByAsset[assetId] ?? await getVisionValidation(selectedTask.id, assetId), lookupFailed: false };
+      } catch {
+        return { assetId, result: null, lookupFailed: true };
+      }
+    }));
+    const existingResults = storedResults.filter(item => item.result);
+    const lookupFailures = storedResults.filter(item => item.lookupFailed).length;
+    if (existingResults.length) {
+      setVisionValidationByAsset(current => ({ ...current, ...Object.fromEntries(existingResults.map(item => [item.assetId, item.result!])) }));
+      setVisionValidationPhase(current => ({ ...current, ...Object.fromEntries(existingResults.map(item => [item.assetId, 'ready' as const])) }));
+    }
+    const pendingIds = storedResults.filter(item => !item.result && !item.lookupFailed).map(item => item.assetId);
+    if (!pendingIds.length) {
+      setSubmissionExtractionProgress({ phase: 'complete', requested: assetIds.length, completed: 0, failed: lookupFailures, skipped: existingResults.length });
+      onShowToast(lookupFailures ? `跳过已有结果 ${existingResults.length} 份，另有 ${lookupFailures} 份状态读取失败，未调用 Luna` : `已跳过 ${assetIds.length} 份已有结果，没有重复调用 Luna`);
+      return;
+    }
+    setSubmissionExtractionProgress({ phase: 'extracting', requested: assetIds.length, completed: 0, failed: lookupFailures, skipped: existingResults.length });
+    const results = await Promise.all(pendingIds.map(async assetId => {
+      const succeeded = await validateSubmissionVision(assetId, false);
+      setSubmissionExtractionProgress(current => ({ ...current, completed: current.completed + (succeeded ? 1 : 0), failed: current.failed + (succeeded ? 0 : 1) }));
+      return succeeded;
+    }));
     const completed = results.filter(Boolean).length;
-    onShowToast(completed === assetIds.length ? `已完成 ${completed} 份答卷的逐题答案提取` : `完成 ${completed} 份，另有 ${assetIds.length - completed} 份提取失败，原答卷已保留`);
+    const failed = pendingIds.length - completed + lookupFailures;
+    setSubmissionExtractionProgress({ phase: 'complete', requested: assetIds.length, completed, failed, skipped: existingResults.length });
+    onShowToast(failed ? `新完成 ${completed} 份，失败 ${failed} 份，跳过已有结果 ${existingResults.length} 份` : `新完成 ${completed} 份，跳过已有结果 ${existingResults.length} 份`);
   };
 
   const selectSubmissionFiles = (fileList: FileList | null) => {
@@ -1565,7 +1605,7 @@ export default function GradingWorkflow({
     setRuleAddedNotice(false);
   };
 
-  const prepareTrialCalibration = async (force = false) => {
+  const prepareTrialCalibration = async () => {
     const matchedSubmissions = matchRows.filter(page => page.rosterMatchStatus === 'matched' && page.studentId);
     if (!matchedSubmissions.length || !selectedQuestions.length) {
       onShowToast('缺少已匹配答卷或评分依据，暂时不能开始试批');
@@ -1577,18 +1617,13 @@ export default function GradingWorkflow({
     const startedAt = Date.now();
     setTrialProgress({ phase: 'recognition', completed: 0, total: matchedSubmissions.length, currentLabel: '准备逐份核对答卷', startedAt, elapsedSeconds: 0 });
     try {
-      setTrialProgress(current => ({ ...current, currentLabel: `${matchedSubmissions.length} 份答卷正在并行核对` }));
+      setTrialProgress(current => ({ ...current, currentLabel: `正在并行读取 ${matchedSubmissions.length} 份已有提取结果` }));
       const recognitionResults = await Promise.allSettled(matchedSubmissions.map(async submission => {
         try {
           const stored = visionValidationByAsset[submission.id] ?? await getVisionValidation(selectedTask.id, submission.id);
-          const missingQuestionNos = force ? currentQuestionNos : currentQuestionNos.filter(displayNo => !hasUsableVisionItem(stored?.items.find(item => item.displayNo === displayNo)));
-          if (!missingQuestionNos.length && stored) {
-            setVisionValidationByAsset(current => ({ ...current, [submission.id]: stored }));
-            return submission;
-          }
-          setVisionValidationPhase(current => ({ ...current, [submission.id]: 'loading' }));
-          const result = await runVisionValidation(selectedTask.id, submission.id, missingQuestionNos);
-          setVisionValidationByAsset(current => ({ ...current, [submission.id]: result }));
+          const missingQuestionNos = currentQuestionNos.filter(displayNo => !hasUsableVisionItem(stored?.items.find(item => item.displayNo === displayNo)));
+          if (!stored || missingQuestionNos.length) throw new Error('VISION_RESULTS_NOT_READY');
+          setVisionValidationByAsset(current => ({ ...current, [submission.id]: stored }));
           setVisionValidationPhase(current => ({ ...current, [submission.id]: 'ready' }));
           return submission;
         } catch (error) {
@@ -1602,7 +1637,7 @@ export default function GradingWorkflow({
       }));
       const successfulSubmissions = recognitionResults.flatMap((result, index) => result.status === 'fulfilled' ? [matchedSubmissions[index]] : []);
       const failedNames = recognitionResults.flatMap((result, index) => result.status === 'rejected' ? [matchedSubmissions[index].expectedStudentName] : []);
-      if (!successfulSubmissions.length) throw new Error('VISION_VALIDATION_ALL_FAILED');
+      if (failedNames.length) throw new Error(`VISION_RESULTS_NOT_READY:${failedNames.join('、')}`);
       setTrialProgress(current => ({ ...current, phase: 'grading', completed: matchedSubmissions.length, currentLabel: `AI 正在评分 ${successfulSubmissions.length} 份可用答卷` }));
       const result = await gradeTaskTrial(
         selectedTask.id,
@@ -1650,7 +1685,7 @@ export default function GradingWorkflow({
         VISION_VALIDATION_OUTPUT_INVALID: '当前答卷视觉结果格式异常，可重试该步骤',
         VISION_VALIDATION_ALL_FAILED: '全部答卷识别失败，已保留已有 OCR，请在上传质检中重试失败项'
       };
-      onShowToast(messageByCode[code] ?? '试批没有完成，已保留前序结果，可直接重试');
+      onShowToast(code.startsWith('VISION_RESULTS_NOT_READY:') ? `以下答卷尚未完成逐题提取：${code.slice('VISION_RESULTS_NOT_READY:'.length)}。请返回上传质检主动提取。` : messageByCode[code] ?? '试批没有完成，已保留前序结果，可直接重试');
     }
   };
 
@@ -1968,7 +2003,7 @@ export default function GradingWorkflow({
 
       {activeStage === 'intake' ? matchRows.length ? (
         <section className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/20"><p className="text-xs text-emerald-900 dark:text-emerald-100">无需展开答卷；有选中项时提取选中项，否则提取全部已匹配答卷。</p><button type="button" onClick={() => void extractStudentAnswers()} disabled={!extractableSubmissionIds.length || extractableSubmissionIds.some(id => visionValidationPhase[id] === 'loading')} className="min-h-11 rounded-xl bg-emerald-700 px-4 text-sm font-bold text-white disabled:opacity-40"><ScanLine className="mr-2 inline h-4 w-4" />{selectedSubmissionIds.size ? '提取选中逐题答案' : '提取全部逐题答案'}</button></div>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/20"><div><p className="text-xs text-emerald-900 dark:text-emerald-100">无需展开答卷；默认跳过已有结果，只处理未提取或失败项。</p>{submissionExtractionProgress.phase !== 'idle' ? <p role="status" className="mt-1 text-xs font-bold text-emerald-800 dark:text-emerald-200">{submissionExtractionProgress.phase === 'checking' ? `正在检查 ${submissionExtractionProgress.requested} 份答卷的已有结果…` : submissionExtractionProgress.phase === 'extracting' ? `正在提取：完成 ${submissionExtractionProgress.completed}，失败 ${submissionExtractionProgress.failed}，跳过 ${submissionExtractionProgress.skipped}` : `本次完成 ${submissionExtractionProgress.completed}，失败 ${submissionExtractionProgress.failed}，跳过 ${submissionExtractionProgress.skipped}`}</p> : null}</div><button type="button" onClick={() => void extractStudentAnswers()} disabled={!extractableSubmissionIds.length || submissionExtractionBusy || extractableSubmissionIds.some(id => visionValidationPhase[id] === 'loading' || visionValidationPhase[id] === 'extracting')} className="min-h-11 rounded-xl bg-emerald-700 px-4 text-sm font-bold text-white disabled:opacity-40"><ScanLine className="mr-2 inline h-4 w-4" />{submissionExtractionBusy ? '正在处理…' : selectedSubmissionIds.size ? '提取选中逐题答案' : '提取全部逐题答案'}</button></div>
           {rosterMatchPhase === 'loading' ? <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-bold text-sky-800">正在读取当前班级名册并核对学号...</div> : null}
           {rosterMatchPhase === 'error' ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"><span>名册核对失败（{rosterMatchError}），当前答卷不能进入自动批改。</span><button type="button" onClick={() => setRosterRefreshKey(value => value + 1)} className="font-bold underline">重新核对</button></div> : null}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -2001,7 +2036,7 @@ export default function GradingWorkflow({
       ) : null}
 
       {activeStage === 'rubric' && currentQuestionState ? (
-        <section className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><QuestionSelector questions={selectedQuestions} states={questionStates} selectedId={selectedQuestionId} onSelect={selectQuestion} /><button type="button" onClick={() => { setAnalysisQuestionNo(currentQuestion?.displayNo ?? ''); setActiveStage('assignment'); }} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 dark:border-zinc-700">返回题目确认</button></div><QuestionContext question={currentQuestion} number={questionNumber} evidence={questionEvidence} onToggleKnowledge={nodeId => void toggleKnowledgeLink(nodeId)} knowledgeLinkSavingId={knowledgeLinkSavingId} onSaveCorrection={saveQuestionCorrection} /><div className={`${panelClass} p-4 sm:p-6`}><RubricEditor question={currentQuestion} questionState={currentQuestionState} answerEvidence={answerEvidence} dirty={rubricDirty} savePhase={rubricSavePhase} canEnterTrial={gradingDataReady} canGoPrevious={selectedQuestions.findIndex(question => question.id === currentQuestionState.questionId) > 0} canGoNext={selectedQuestions.findIndex(question => question.id === currentQuestionState.questionId) < selectedQuestions.length - 1} onChange={updateQuestionState} onCancel={cancelRubricChanges} onSaveDraft={saveRubricDraft} onApply={applyRubric} onEnterTrial={() => void prepareTrialCalibration(true)} onCompleteIntake={() => setActiveStage('intake')} onNavigate={offset => void navigateRubric(offset)} /></div></section>
+        <section className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><QuestionSelector questions={selectedQuestions} states={questionStates} selectedId={selectedQuestionId} onSelect={selectQuestion} /><button type="button" onClick={() => { setAnalysisQuestionNo(currentQuestion?.displayNo ?? ''); setActiveStage('assignment'); }} className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 dark:border-zinc-700">返回题目确认</button></div><QuestionContext question={currentQuestion} number={questionNumber} evidence={questionEvidence} onToggleKnowledge={nodeId => void toggleKnowledgeLink(nodeId)} knowledgeLinkSavingId={knowledgeLinkSavingId} onSaveCorrection={saveQuestionCorrection} /><div className={`${panelClass} p-4 sm:p-6`}><RubricEditor question={currentQuestion} questionState={currentQuestionState} answerEvidence={answerEvidence} dirty={rubricDirty} savePhase={rubricSavePhase} canEnterTrial={gradingDataReady} canGoPrevious={selectedQuestions.findIndex(question => question.id === currentQuestionState.questionId) > 0} canGoNext={selectedQuestions.findIndex(question => question.id === currentQuestionState.questionId) < selectedQuestions.length - 1} onChange={updateQuestionState} onCancel={cancelRubricChanges} onSaveDraft={saveRubricDraft} onApply={applyRubric} onEnterTrial={() => void prepareTrialCalibration()} onCompleteIntake={() => setActiveStage('intake')} onNavigate={offset => void navigateRubric(offset)} /></div></section>
       ) : null}
 
       {activeStage === 'rubric' && !currentQuestionState ? (
@@ -2013,7 +2048,7 @@ export default function GradingWorkflow({
           <Sparkles className={`h-8 w-8 text-emerald-700 ${trialGradingPhase === 'loading' ? 'animate-pulse' : ''}`} />
           <h2 className="mt-4 font-black text-slate-900 dark:text-white">{trialGradingPhase === 'loading' ? trialProgress.phase === 'grading' ? 'AI 正在逐份评分' : '正在核对逐题答卷证据' : trialGradingPhase === 'error' ? '试批没有完成' : '尚未生成试批样本'}</h2>
           {trialGradingPhase === 'loading' ? <div className="mt-4 w-full max-w-xl text-left"><div className="flex items-center justify-between text-xs"><strong className="text-emerald-800">{trialProgress.currentLabel}</strong><span className="text-slate-500">已用时 {formatElapsed(trialProgress.elapsedSeconds)}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800"><div className={`h-full rounded-full bg-emerald-600 transition-all ${trialProgress.phase === 'grading' ? 'w-1/2 animate-pulse' : ''}`} style={trialProgress.phase === 'grading' ? undefined : { width: `${trialProgress.total ? Math.max(8, Math.round(trialProgress.completed / trialProgress.total * 100)) : 8}%` }} /></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-3"><span className={trialProgress.completed >= trialProgress.total && trialProgress.total ? 'font-bold text-emerald-800' : 'font-bold text-sky-700'}>1. 逐题区域与 OCR 核对 {trialProgress.completed}/{trialProgress.total}</span><span className={trialProgress.phase === 'grading' ? 'font-bold text-sky-700' : 'text-slate-400'}>2. 依据评分细则逐份评分</span><span className="text-slate-400">3. 校验并保存试批结果</span></div><p className="mt-3 text-[11px] text-slate-500">评分阶段耗时取决于题目和样本数量，因此只显示真实阶段与用时，不伪造百分比或模型内部思维。</p></div> : <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">{trialGradingPhase === 'error' ? `处理失败（${trialGradingError}）。已完成的答卷识别会保留，重试时继续使用。` : '请先完成答卷匹配，再运行真实试批。'}</p>}
-          {trialGradingPhase !== 'loading' ? <button type="button" onClick={() => void prepareTrialCalibration(true)} className="mt-5 rounded-2xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white">重新运行试批</button> : null}
+          {trialGradingPhase !== 'loading' ? <button type="button" onClick={() => void prepareTrialCalibration()} className="mt-5 rounded-2xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white">重新运行试批</button> : null}
         </section>
       ) : null}
 
