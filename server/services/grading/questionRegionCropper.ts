@@ -37,6 +37,7 @@ export interface VisionLocatedRegion {
   confidence: number;
   needsReview: boolean;
   reason: string;
+  screenshotAvailable?: boolean;
 }
 
 const hasUsableVisionEvidence = (region: VisionLocatedRegion | undefined, expectedIds: string[]) => {
@@ -539,10 +540,11 @@ export const createVisionLocatedRegions = async (
     const rawVision = bestRegionByNo.get(displayNo);
     const expectedIds = expectedEvidenceIds.get(displayNo) ?? [];
     const expectedKind = expectedQuestionKinds.get(displayNo);
-    const vision = hasUsableVisionEvidence(rawVision, expectedIds) ? {
+    const usableVision = hasUsableVisionEvidence(rawVision, expectedIds) ? {
       ...rawVision,
       evidenceUnits: rawVision.evidenceUnits.map(unit => expectedKind === 'choice' ? { ...unit, kind: 'choice' as const } : unit)
     } : undefined;
+    const vision = usableVision?.screenshotAvailable === false ? undefined : usableVision;
     const visionIsChoice = Boolean(vision?.evidenceUnits.length && vision.evidenceUnits.every(unit => unit.kind === 'choice'));
     const firstExpectedId = (expectedEvidenceIds.get(displayNo) ?? [`${displayNo}-answer`])[0];
     const paddleQuestion = !vision && artifact && expectedKind !== 'choice'

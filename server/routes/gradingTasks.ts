@@ -32,7 +32,6 @@ import { OpenAICompatibleQuestionAnalyzer } from '../services/analysis/OpenAICom
 import { resolveSourceEvidence } from '../services/evidence/sourceEvidenceResolver';
 import { OpenAICompatibleVisionRegionLocator } from '../services/grading/OpenAICompatibleVisionRegionLocator';
 import { FocusedPaddleRecognizer } from '../services/grading/FocusedPaddleRecognizer';
-import { bindAnswerFragments } from '../services/grading/answerFragmentBinding';
 import { createVisionLocatedRegions } from '../services/grading/questionRegionCropper';
 import { inferAnswerCardOption } from '../services/grading/trialScore';
 import { authenticatedUploadPath, resumeAuthenticatedWorkspace } from '../middleware/authenticated';
@@ -574,8 +573,8 @@ router.post('/:taskId/vision-validation', async (request, response) => {
       model: config.visionModel,
       items: [...(previousResult?.items.filter(item => !requestedNumbers.has(item.displayNo)) ?? []), ...regions.map(region => {
         const item = extractionByNo.get(region.displayNo);
-        const binding = bindAnswerFragments(item?.answerRefs ?? [], material.normalizedDocument!.blocks.map(block => ({ id: block.id, text: block.text })));
-        const paddleSelectedOption = inferAnswerCardOption(binding.paddleText);
+        const previousItem = previousResult?.items.find(candidate => candidate.displayNo === region.displayNo);
+        const paddleSelectedOption = inferAnswerCardOption(region.paddleText);
         const selectedOption = paddleSelectedOption ?? item?.selectedOption ?? null;
         const structuredText = selectedOption || item?.recognizedAnswer || '';
         const evidenceUnits = region.evidenceUnits.map(unit => {
@@ -593,21 +592,20 @@ router.post('/:taskId/vision-validation', async (request, response) => {
         });
         return {
           pipelineVersion: NON_CHOICE_RECOGNITION_VERSION,
-          preferredRecognitionSource: 'paddle' as const,
-          answerRefs: binding.fragments,
+          preferredRecognitionSource: previousItem?.preferredRecognitionSource,
           focusedPaddleText: undefined,
           focusedOcrStatus: undefined,
-          screenshotStatus: item?.screenshotAvailable === false ? 'unavailable' as const : 'available' as const,
+          screenshotStatus: item?.screenshotAvailable === false && region.locatorSource !== 'paddle-layout' ? 'unavailable' as const : 'available' as const,
           displayNo: region.displayNo,
           region: region.region,
           pageWidth: parsedArtifact.data.pages.find(page => page.pageNumber === region.region.pageNumber)?.prunedResult.width,
           pageHeight: parsedArtifact.data.pages.find(page => page.pageNumber === region.region.pageNumber)?.prunedResult.height,
           locatorSource: region.locatorSource,
           locationStatus: region.locationStatus,
-          locationReasons: [...region.locationReasons, ...(item?.screenshotAvailable === false ? ['Luna 未提供可靠截图范围'] : []), ...binding.reasons],
+          locationReasons: [...region.locationReasons, ...(item?.screenshotAvailable === false && region.locatorSource === 'paddle-layout' ? ['Luna 截图不可用，已回退到 Paddle 坐标'] : [])],
           cropUrl: region.cropUrl,
           evidenceUnits,
-          paddleText: binding.paddleText,
+          paddleText: region.paddleText,
           lunaText: structuredText,
           answerFields: [],
           crossedOutText: item?.crossedOutText ?? [],
@@ -615,7 +613,7 @@ router.post('/:taskId/vision-validation', async (request, response) => {
           visualEvidence: item?.visualEvidence ?? '',
           existingMarkings: item?.existingMarkings ?? [],
           confidence: item?.confidence ?? 0,
-          needsReview: region.locationStatus !== 'located' || binding.reasons.length > 0 || (!selectedOption && !binding.paddleText && !structuredText) || evidenceUnits.some(unit => unit.needsReview) || (item?.needsReview ?? true)
+          needsReview: region.locationStatus !== 'located' || (!selectedOption && !region.paddleText && !structuredText) || evidenceUnits.some(unit => unit.needsReview) || (item?.needsReview ?? true)
         };
       })].sort((first, second) => parsedRequest.data.questionNos.indexOf(first.displayNo) - parsedRequest.data.questionNos.indexOf(second.displayNo)),
       createdAt: new Date().toISOString()

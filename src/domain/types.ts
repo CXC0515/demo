@@ -253,14 +253,6 @@ export interface TrialGradingResult {
 export interface VisionValidationItem {
   pipelineVersion?: number;
   preferredRecognitionSource?: 'paddle' | 'focused-paddle' | 'luna';
-  answerRefs?: Array<{
-    order: number;
-    blockId: string;
-    quote: string;
-    occurrence: number;
-    resolvedQuote: string;
-    matchStatus: 'exact' | 'normalized' | 'missing';
-  }>;
   focusedPaddleText?: string;
   focusedOcrStatus?: 'completed' | 'failed';
   screenshotStatus?: 'available' | 'unavailable';

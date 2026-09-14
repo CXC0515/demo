@@ -138,6 +138,19 @@ test('falls back to saved Paddle blocks when Luna returns an empty placeholder',
   }
 });
 
+test('falls back to Paddle geometry when Luna marks its screenshot unavailable', async () => {
+  const page = await makePage(1);
+  const artifact: PaddleParserArtifact = { model: 'PaddleOCR-VL-1.6', pages: [{ pageNumber: 1, prunedResult: { width: 800, height: 1000, parsing_res_list: [{ block_label: 'text', block_content: '1. student answer', block_bbox: [140, 270, 520, 335], block_id: 21 }] } }] };
+  try {
+    const [region] = await createVisionLocatedRegions(taskId, assetId, [page], ['1'], new Map([['1', ['1-answer']]]), [located({ screenshotAvailable: false })], artifact, new Map([['1', 'text']]), true);
+    assert.equal(region.locatorSource, 'paddle-layout');
+    assert.match(region.paddleText, /student answer/);
+  } finally {
+    await rm(page.sourceImagePath, { force: true });
+    await rm(path.resolve('var/uploads/validation', taskId), { recursive: true, force: true });
+  }
+});
+
 test('uses the page returned by visual location for multi-page submissions', async () => {
   const firstPage = await makePage(1);
   const secondPage = await makePage(2);
