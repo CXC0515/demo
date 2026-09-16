@@ -74,14 +74,14 @@ export default function DiagnosisWorkspace({
 
   return (
     <div className="space-y-5 animate-fade-in" id="diagnosis-workspace-page">
-      <div className="glass-panel flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-slate-100/60 p-2 dark:bg-zinc-900/60">
-        <div className="flex flex-wrap gap-1.5">{tabs.map(tab => {
+      <div className="glass-panel grid grid-cols-[minmax(0,1fr)_116px] items-center gap-2 rounded-2xl bg-slate-100/60 p-2 dark:bg-zinc-900/60 sm:flex sm:justify-between">
+        <div className="grid min-w-0 grid-cols-2 gap-1.5 sm:flex">{tabs.map(tab => {
           const Icon = tab.icon;
           return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+              className={`flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-bold transition-all sm:px-4 ${
                 activeTab === tab.id
                   ? 'bg-white text-slate-900 dark:bg-zinc-800 dark:text-slate-50 shadow-sm'
                   : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -92,9 +92,9 @@ export default function DiagnosisWorkspace({
             </button>
           );
         })}</div>
-        <label className="flex items-center gap-2 px-2 text-xs font-bold text-slate-400">
+        <label className="flex min-w-0 items-center gap-2 text-xs font-bold text-slate-400 sm:px-2">
           <span className="hidden sm:inline">当前班级</span>
-          <select value={selectedClassId} onChange={event => onSelectClass(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-emerald-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-slate-100">
+          <select value={selectedClassId} onChange={event => onSelectClass(event.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none focus:border-emerald-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-slate-100 sm:w-auto sm:px-3">
             {classes.filter(item => item.status === 'active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
         </label>

@@ -413,6 +413,7 @@ function ScheduleEditor({ item, periods, classes, onChange, onClose, onSave, onD
 
 function ReminderWorkspace({ reminders, view, onView, onAdd, onBatch, onEdit, onSave, onSaveBatch, onToggle, onDelete }: { reminders: TimerReminder[]; view: 'list' | 'quadrant'; onView: (v: 'list' | 'quadrant') => void; onAdd: () => void; onBatch: () => void; onEdit: (item: TimerReminder) => void; onSave: (item: TimerReminder) => void | Promise<void>; onSaveBatch: (items: TimerReminder[]) => Promise<void>; onToggle: (id: string) => void | Promise<void>; onDelete: (id: string) => void | Promise<void> }) {
   const [showTools, setShowTools] = useState(false);
+  const [showCreateActions, setShowCreateActions] = useState(false);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(true);
   const [showRecurring, setShowRecurring] = useState(false);
@@ -455,7 +456,7 @@ function ReminderWorkspace({ reminders, view, onView, onAdd, onBatch, onEdit, on
       </section>
     ) : null;
   return (
-    <section className="min-h-0 flex-1">
+    <section className="min-h-0 flex-1 pb-20 sm:pb-0">
       {overdue.length ? (
         <button onClick={() => setShowOverdue(true)} className="mb-3 flex w-full items-center justify-between rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-left text-xs text-red-800 transition-colors hover:bg-red-100 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
           <span className="flex items-center gap-2 font-bold">
@@ -489,7 +490,7 @@ function ReminderWorkspace({ reminders, view, onView, onAdd, onBatch, onEdit, on
             <Sparkles className="h-4 w-4" />
             AI 批量创建
           </button>
-          <button onClick={onAdd} className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-emerald-700 px-3 text-xs font-bold text-white">
+          <button onClick={onAdd} className="hidden min-h-11 items-center gap-1 rounded-lg bg-emerald-700 px-3 text-xs font-bold text-white sm:inline-flex">
             <Plus className="h-4 w-4" />
             新建日程
           </button>
@@ -513,12 +514,22 @@ function ReminderWorkspace({ reminders, view, onView, onAdd, onBatch, onEdit, on
         <div className="grid min-h-0 grid-cols-2 gap-2 sm:gap-3">
           {quadrants.map(([label, important, urgent, color]) => (
             <div key={label} onDragOver={(event) => event.preventDefault()} onDrop={() => moveToQuadrant(important, urgent)} className={`min-h-44 min-w-0 rounded-2xl border bg-white p-2 sm:p-3 transition-colors ${color} ${draggedId ? 'border-dashed' : 'dark:border-zinc-800'} dark:bg-zinc-900/50`}>
-              <h3 className="mb-3 text-xs font-black">{label}</h3>
-              <div className="space-y-2">{quadrantItems.filter((item) => Boolean(item.important) === important && Boolean(item.urgent) === urgent).map(item => <React.Fragment key={item.id}><div className="sm:hidden"><button type="button" onClick={() => onEdit(item)} className={`block min-h-14 w-full rounded-xl border p-2 text-left sm:hidden ${item.status === 'completed' ? 'bg-slate-50 text-slate-500' : 'bg-white text-slate-800'} dark:bg-zinc-900 dark:text-slate-200`}><strong className={`block break-words text-sm ${item.status === 'completed' ? 'line-through' : ''}`}>{item.name}</strong><span className="mt-1 block break-words text-xs text-slate-500">{formatReminderTime(item)}</span><span className="mt-1 block text-xs text-emerald-700">{item.status === 'completed' ? '已完成 · 查看' : '查看 / 调整'}</span></button><button type="button" onClick={() => void onToggle(item.id)} className="min-h-11 w-full text-xs font-bold text-emerald-700">{item.status === 'completed' ? '恢复日程' : '标记完成'}</button></div><div className="hidden sm:block">{card(item, item.status === 'active')}</div></React.Fragment>)}</div>
+              <h3 className="mb-2 text-xs font-black sm:mb-3">{label}</h3>
+              <div className="space-y-2">{quadrantItems.filter((item) => Boolean(item.important) === important && Boolean(item.urgent) === urgent).map(item => <React.Fragment key={item.id}><div className={`flex min-h-16 items-start rounded-xl border p-1.5 sm:hidden ${item.status === 'completed' ? 'bg-slate-50 text-slate-500' : 'bg-white text-slate-800'} dark:bg-zinc-900 dark:text-slate-200`}><button type="button" onClick={() => void onToggle(item.id)} className="grid h-11 w-9 shrink-0 place-items-center" aria-label={item.status === 'completed' ? '恢复日程' : '完成日程'}><span className={`grid h-4 w-4 place-items-center rounded-[4px] border-2 ${item.status === 'completed' ? 'border-emerald-700 bg-emerald-700 text-white' : 'border-slate-400 bg-white'}`}>{item.status === 'completed' ? <Check className="h-3 w-3" /> : null}</span></button><button type="button" onClick={() => onEdit(item)} className="min-w-0 flex-1 py-1 pr-1 text-left"><strong className={`block break-words text-[13px] leading-4 ${item.status === 'completed' ? 'line-through' : ''}`}>{item.name}</strong><span className="mt-1 block break-words text-xs leading-4 text-slate-500">{formatReminderTime(item)}</span><span className={`mt-0.5 block text-xs ${item.status === 'completed' ? 'text-emerald-700' : 'text-slate-400'}`}>{item.status === 'completed' ? '已完成' : item.className || '点击调整'}</span></button></div><div className="hidden sm:block">{card(item, item.status === 'active')}</div></React.Fragment>)}</div>
             </div>
           ))}
         </div>
       )}
+      {showCreateActions && <button type="button" tabIndex={-1} aria-label="关闭创建菜单" onClick={() => setShowCreateActions(false)} className="fixed inset-0 z-40 bg-slate-950/10 sm:hidden" />}
+      <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+16px)] right-4 z-50 flex flex-col items-end gap-2 sm:hidden">
+        {showCreateActions && <>
+          <button type="button" onClick={() => { setShowCreateActions(false); onBatch(); }} className="inline-flex min-h-12 items-center gap-2 rounded-2xl bg-emerald-700 px-4 text-sm font-black text-white shadow-xl"><Sparkles className="h-4 w-4" />AI 批量创建</button>
+          <button type="button" onClick={() => { setShowCreateActions(false); onAdd(); }} className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 shadow-lg dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-200"><Plus className="h-4 w-4" />普通新建</button>
+        </>}
+        <button type="button" aria-label={showCreateActions ? '收起创建操作' : '打开创建操作'} aria-expanded={showCreateActions} onClick={() => setShowCreateActions(value => !value)} className="grid h-14 w-14 place-items-center rounded-2xl bg-emerald-700 text-white shadow-xl shadow-emerald-900/20">
+          {showCreateActions ? <X className="h-6 w-6" /> : <Plus className="h-6 w-6" />}
+        </button>
+      </div>
       {showRecurring ? (
         <RecurringReminderDialog
           items={recurring}

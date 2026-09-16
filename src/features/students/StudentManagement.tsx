@@ -6,13 +6,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Users, UserPlus, FileSpreadsheet, Edit, Trash2, Tag,
-  ArrowLeftRight, ArrowUpDown, Filter, Search, X, Eye, HelpCircle, Sparkles
+  ArrowLeftRight, ArrowUpDown, Filter, Search, X, Eye, HelpCircle, MoreHorizontal, Sparkles
 } from 'lucide-react';
 import { CommitteeRole, Student, SchoolClass, StudentStatus, ParentInfo, RosterStudent } from '../../domain/types';
 import { RosterImportGrid, RosterImportPreview, RosterImportResult } from '../../services/rosterApi';
 import { SortDirection, sortStudents, StudentSortKey } from '../../domain/studentSorting';
 import RosterImportDialog from './RosterImportDialog';
 import { dailyBehaviorTags } from '../../domain/behaviorTags';
+import ResponsiveDialog from '../../components/ResponsiveDialog';
 
 interface StudentManagementProps {
   students: RosterStudent[];
@@ -61,6 +62,7 @@ export default function StudentManagement({
   const [importSummary, setImportSummary] = useState<{changed:number;rejected:number}|null>(null);
   const [sortKey, setSortKey] = useState<StudentSortKey>('studentNo');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [mobilePicker, setMobilePicker] = useState<'class' | 'sort' | 'more' | null>(null);
   const [otherRelation, setOtherRelation] = useState('');
 
   // Form states for Student add/edit
@@ -233,7 +235,25 @@ export default function StudentManagement({
       <div className="flex-1 flex flex-col space-y-4 min-w-0">
         
         {/* Header toolbar */}
-        <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3 glass-panel rounded-2xl p-4">
+        <div className="glass-panel space-y-2 rounded-2xl p-3 md:hidden">
+          <div className="flex items-center gap-2">
+            <h2 className="mr-auto flex items-center gap-2 text-base font-bold text-slate-800 dark:text-slate-100">
+              <Users className="h-5 w-5 text-emerald-700 dark:text-emerald-400" />学生管理
+            </h2>
+            <button type="button" onClick={() => setMobilePicker('more')} aria-label="更多学生操作" className="grid h-11 w-11 place-items-center rounded-xl border border-slate-200 text-slate-600 dark:border-zinc-700 dark:text-slate-300"><MoreHorizontal className="h-5 w-5" /></button>
+            <button id="add-student-btn-mobile" type="button" onClick={handleOpenAdd} className="inline-flex min-h-11 items-center gap-1 rounded-xl bg-emerald-700 px-3 text-xs font-bold text-white"><UserPlus className="h-4 w-4" />添加</button>
+          </div>
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <input id="student-search-input-mobile" type="search" placeholder="搜索姓名或学号" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} className="min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-base text-slate-700 outline-none focus:border-emerald-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-slate-200" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            </div>
+            <button type="button" onClick={() => setMobilePicker('class')} aria-label="筛选班级" className={`relative grid h-11 w-11 shrink-0 place-items-center rounded-xl border ${selectedClassId === 'all' ? 'border-slate-200 text-slate-500 dark:border-zinc-700' : 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30'}`}><Filter className="h-4 w-4" />{selectedClassId !== 'all' && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-emerald-600" />}</button>
+            <button type="button" onClick={() => setMobilePicker('sort')} aria-label="学生排序" className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-slate-200 text-slate-500 dark:border-zinc-700"><ArrowUpDown className="h-4 w-4" /></button>
+          </div>
+        </div>
+
+        <div className="glass-panel hidden flex-col items-stretch justify-between gap-3 rounded-2xl p-4 md:flex xl:flex-row xl:items-center">
           <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 min-w-0">
             <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
               <Users className="w-5 h-5 text-emerald-700 dark:text-emerald-400" />
@@ -271,12 +291,6 @@ export default function StudentManagement({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <label className="md:hidden">
-              <span className="sr-only">学生排序</span>
-              <select value={`${sortKey}:${sortDirection}`} onChange={event=>{const [key,direction]=event.target.value.split(':') as [StudentSortKey,SortDirection];setSortKey(key);setSortDirection(direction)}} className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs">
-                <option value="studentNo:asc">学号升序</option><option value="studentNo:desc">学号降序</option><option value="name:asc">姓名拼音升序</option><option value="name:desc">姓名拼音降序</option><option value="status:asc">学情状态升序</option><option value="status:desc">学情状态降序</option>
-              </select>
-            </label>
             <button
               onClick={handleOpenImport}
               className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-850 dark:hover:bg-zinc-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer border border-slate-200 dark:border-zinc-700"
@@ -511,6 +525,15 @@ export default function StudentManagement({
           </aside>
         </>
       )}
+      {mobilePicker === 'class' && <ResponsiveDialog title="筛选班级" onClose={() => setMobilePicker(null)}><div className="grid gap-2">
+        {[{ id: 'all', name: '所有班级' }, ...classes.filter(item => item.status === 'active')].map(item => <button key={item.id} type="button" onClick={() => { setSelectedClassId(item.id); setMobilePicker(null); }} className={`min-h-11 rounded-xl border px-4 text-left text-sm font-bold ${selectedClassId === item.id ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30' : 'border-slate-200 dark:border-zinc-700'}`}>{item.name}</button>)}
+      </div></ResponsiveDialog>}
+      {mobilePicker === 'sort' && <ResponsiveDialog title="学生排序" onClose={() => setMobilePicker(null)}><div className="grid gap-2">
+        {([
+          ['studentNo:asc', '学号升序'], ['studentNo:desc', '学号降序'], ['name:asc', '姓名拼音升序'], ['name:desc', '姓名拼音降序'], ['status:asc', '学情状态升序'], ['status:desc', '学情状态降序']
+        ] as const).map(([value, label]) => <button key={value} type="button" onClick={() => { const [key, direction] = value.split(':') as [StudentSortKey, SortDirection]; setSortKey(key); setSortDirection(direction); setMobilePicker(null); }} className={`min-h-11 rounded-xl border px-4 text-left text-sm font-bold ${`${sortKey}:${sortDirection}` === value ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30' : 'border-slate-200 dark:border-zinc-700'}`}>{label}</button>)}
+      </div></ResponsiveDialog>}
+      {mobilePicker === 'more' && <ResponsiveDialog title="学生操作" onClose={() => setMobilePicker(null)}><button type="button" onClick={() => { setMobilePicker(null); handleOpenImport(); }} className="flex min-h-11 w-full items-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-bold dark:border-zinc-700"><FileSpreadsheet className="h-4 w-4 text-emerald-600" />批量导入名册</button></ResponsiveDialog>}
       {showImportModal && (
         <RosterImportDialog classes={classes} initialClassId={importClassId} onClose={()=>setShowImportModal(false)} onPreview={onPreviewBulkImport} onImport={onBulkImport} onComplete={result=>{setShowImportModal(false);setImportSummary({changed:result.created.length+result.updated.length,rejected:result.rejected.length});setTimeout(()=>setImportSummary(null),4000)}}/>
       )}

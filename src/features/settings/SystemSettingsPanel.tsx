@@ -10,6 +10,7 @@ import ScheduleTimeInput from '../../components/ScheduleTimeInput';
 import { isScheduleTime } from '../../domain/scheduleTime';
 import AccountAccessPanel from './AccountAccessPanel';
 import { useAuth } from '../auth/AuthGate';
+import { readClassroomExportStudentNo, writeClassroomExportStudentNo } from '../../domain/userPreferences';
 
 interface SystemSettingsPanelProps {
   lowConfidenceThreshold: number;
@@ -120,6 +121,7 @@ export default function SystemSettingsPanel({
   const [imageSavePolicy, setImageSavePolicy] = useState('保存原图与裁剪图');
   const [archivePolicy, setArchivePolicy] = useState('按学期归档');
   const [exportFormat, setExportFormat] = useState('PDF + Excel');
+  const [classroomExportStudentNo, setClassroomExportStudentNo] = useState(() => readClassroomExportStudentNo(user.id));
   const [theme, setTheme] = useState(() => readStoredTheme(user.id));
   const [localSchedulePeriods, setLocalSchedulePeriods] = useState(schedulePeriods);
   const [isScheduleSaving, setIsScheduleSaving] = useState(false);
@@ -181,7 +183,10 @@ export default function SystemSettingsPanel({
       schoolName: schoolName.trim(),
       title: title.trim()
     });
-    if (await saveSchedulePeriodSettings(false)) onShowToast('系统设置已保存');
+    if (await saveSchedulePeriodSettings(false)) {
+      writeClassroomExportStudentNo(user.id, classroomExportStudentNo);
+      onShowToast('系统设置已保存');
+    }
   };
 
   const updateSchedulePeriod = (index: number, patch: Partial<SchedulePeriod>) => {
@@ -369,6 +374,13 @@ export default function SystemSettingsPanel({
             <SettingSelect label="原图保存策略" value={imageSavePolicy} onChange={setImageSavePolicy} options={['保存原图与裁剪图', '仅保存原图', '仅保存裁剪图']} />
             <SettingSelect label="诊断报告导出格式" value={exportFormat} onChange={setExportFormat} options={['PDF + Excel', 'PDF', 'Excel', 'CSV']} />
             <SettingSelect label="数据归档策略" value={archivePolicy} onChange={setArchivePolicy} options={['按学期归档', '按学年归档', '手动归档']} />
+            <label className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:col-span-2 dark:border-zinc-800 dark:bg-zinc-900/60">
+              <span>
+                <strong className="block text-sm text-slate-700 dark:text-slate-200">座位表导出包含学号</strong>
+                <span className="mt-1 block text-xs text-slate-400">关闭后，Excel 座位只显示学生姓名。</span>
+              </span>
+              <input type="checkbox" checked={classroomExportStudentNo} onChange={event => setClassroomExportStudentNo(event.target.checked)} className="h-5 w-5 accent-emerald-700" />
+            </label>
           </div>
         )}
 
