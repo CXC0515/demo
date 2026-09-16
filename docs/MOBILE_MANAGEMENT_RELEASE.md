@@ -3,7 +3,7 @@
 - 版本：v1.1
 - 日期：2026-09-17
 - 状态：已发布，公网和存储验收通过
-- 功能 PR：#26；应用生产提交：983729802d846cb36dc299ae0ee156ceb216eff3
+- 功能 PR：#26、#28；应用生产提交：b13be3603bc873ff3316d53b716a1275b7396add
 
 ## 问题、决策与范围
 
@@ -29,7 +29,8 @@
 - 未验证：iOS Safari / Android 真机、真实软键盘、真实教师登录后的业务验收、200% 浏览器缩放；不把视口模拟等同于真机。
 - 已知限制：构建仍提示已有的大包体积；标签管理原有模拟持久化行为未在此项扩展。
 
-- 上线后：公网 live/ready 均 200，未登录 classes 401；公网 JS/CSS SHA-256 与新发布构建相同；真实浏览器成功打开 HTTPS 登录页。
+- v1.1 上线后：回环及公网 live/ready 均正常，服务 active，当前链接指向 `b13be36`。
+- v1.0 上线验收：公网 live/ready 均 200，未登录 classes 401；公网 JS/CSS SHA-256 与新发布构建相同；真实浏览器成功打开 HTTPS 登录页。
 - 服务器服务 active/running、NRestarts=0；5 个 SQLite integrity_check 均 ok，两个工作区学生各 53 人，班级分别 4/2 个、资料分别 2/0 份，与发布前相同。
 
 ## 发布与回滚
@@ -38,7 +39,7 @@
 
 Git HTTPS 连接故障时，通过 GitHub Git Data API 上传相同 blob/tree/commit，并验证远端提交与本地 6712ae9 完全相同。PR #26 合并为 9837298；从 GitHub 签名 payload 重建并验证 merge commit SHA，母文件夹 main 快进到该提交。发布包来自母文件夹 main 的 git archive，上传 SHA-256 校验一致。
 
-服务器新目录独立 npm ci、lint、test:classroom、build 后原子切换 current，重启 systemd，并检查 ready。旧目录 03b3a0d 保留；发布失败可切回该代码目录后重启，数据目录不回退。
+服务器新目录独立 npm ci 和 build 后原子切换 current，重启 systemd，并检查回环和公网 live/ready。当前发布目录为 `b13be36`，仅保留 `9837298` 作为即时回滚版；已删除旧代码目录 `03b3a0d` 和 `0a7b95f`。代码可从 GitHub 重建，生产数据目录和备份未修改。
 
 ## 修改历史
 
