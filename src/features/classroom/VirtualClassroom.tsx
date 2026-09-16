@@ -14,11 +14,16 @@ import {
   GraduationCap,
   LoaderCircle,
   LogOut,
+  Maximize2,
+  Minimize2,
   Minus,
+  MoveLeft,
+  MoveRight,
   Plus,
   RotateCcw,
   Save,
   Sparkles,
+  Users,
   X
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthGate';
@@ -68,6 +73,8 @@ export default function VirtualClassroom({
 }: VirtualClassroomProps) {
   const { user } = useAuth();
   const [showPlacement, setShowPlacement] = useState(false);
+  const [expandedSeats, setExpandedSeats] = useState(false);
+  const [portraitViewport, setPortraitViewport] = useState(false);
   const [swapAxis, setSwapAxis] = useState<'row' | 'column'>('column');
   const [swapFrom, setSwapFrom] = useState(0);
   const [swapTo, setSwapTo] = useState(1);
@@ -96,6 +103,10 @@ export default function VirtualClassroom({
   const studentById = useMemo(() => new Map(classStudents.map(student => [student.id, student])), [classStudents]);
   const activeLayout = draft ?? layout;
   const editMode = Boolean(draft);
+  const studentIdBySeatIndex = useMemo(
+    () => new Map((activeLayout?.seats ?? []).map(seat => [seat.seatIndex, seat.studentId])),
+    [activeLayout]
+  );
   const seatedStudentIds = useMemo(
     () => new Set((activeLayout?.seats ?? []).map(seat => seat.studentId)),
     [activeLayout]
@@ -139,6 +150,31 @@ export default function VirtualClassroom({
       });
     return () => { active = false; };
   }, [effectiveClassId, layoutCache]);
+
+  useEffect(() => {
+    if (!expandedSeats) return;
+    const updateOrientation = () => setPortraitViewport(window.innerHeight > window.innerWidth);
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) setExpandedSeats(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setExpandedSeats(false);
+    };
+    const previousOverflow = document.body.style.overflow;
+    updateOrientation();
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('resize', updateOrientation);
+    window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('resize', updateOrientation);
+      window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      const orientation = screen.orientation as (ScreenOrientation & { unlock?: () => void }) | undefined;
+      orientation?.unlock?.();
+    };
+  }, [expandedSeats]);
 
   useEffect(() => {
     if (!selectedStudent || editMode) return;
@@ -306,6 +342,29 @@ export default function VirtualClassroom({
     }
   };
 
+  const openExpandedSeats = () => {
+    setPortraitViewport(window.innerHeight > window.innerWidth);
+    setExpandedSeats(true);
+    const fullscreen = document.documentElement.requestFullscreen?.().catch(() => undefined);
+    if (fullscreen && window.matchMedia('(max-width: 639px)').matches) {
+      void fullscreen.then(async () => {
+        const orientation = screen.orientation as (ScreenOrientation & { lock?: (value: 'landscape') => Promise<void> }) | undefined;
+        try {
+          await orientation?.lock?.('landscape');
+        } catch {
+          // Fullscreen remains useful when this browser does not support orientation locking.
+        }
+      }).catch(() => undefined);
+    }
+  };
+
+  const closeExpandedSeats = () => {
+    setExpandedSeats(false);
+    const orientation = screen.orientation as (ScreenOrientation & { unlock?: () => void }) | undefined;
+    orientation?.unlock?.();
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+  };
+
   const quickActions = draft && <div className="space-y-2 rounded-xl border border-slate-200 p-3 dark:border-zinc-700">
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => shiftSeats(-1)} className="min-h-11 rounded-lg bg-slate-100 px-3 text-sm dark:bg-zinc-800">← 向左轮换</button>
@@ -322,6 +381,41 @@ export default function VirtualClassroom({
                 <span className="text-xs text-slate-500">第 1 行靠近讲台</span>
               </div>
             </div>;
+
+  const layoutSizeControls = draft && (
+    <div className="grid grid-cols-2 gap-2 xl:flex xl:items-center">
+      {([
+        { label: '行', value: draft.rowCount, decrease: () => resizeLayout(draft.rowCount - 1, draft.columnCount), increase: () => resizeLayout(draft.rowCount + 1, draft.columnCount) },
+        { label: '列', value: draft.columnCount, decrease: () => resizeLayout(draft.rowCount, draft.columnCount - 1), increase: () => resizeLayout(draft.rowCount, draft.columnCount + 1) }
+      ] as const).map(control => (
+        <div key={control.label} className="flex min-w-0 items-center justify-between gap-1.5 rounded-xl border border-slate-200 bg-white p-1 pl-3 dark:border-zinc-700 dark:bg-zinc-900">
+          <span className="shrink-0 text-xs font-bold text-slate-500">{control.label}</span>
+          <div className="inline-grid shrink-0 grid-cols-[44px_28px_44px] items-stretch overflow-hidden rounded-lg bg-slate-50 dark:bg-zinc-800">
+            <button type="button" aria-label={`减少一${control.label}`} onClick={control.decrease} className="grid min-h-11 min-w-11 place-items-center text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-zinc-700"><Minus className="h-4 w-4" /></button>
+            <span className="grid place-items-center border-x border-slate-200 text-center text-sm font-black tabular-nums dark:border-zinc-700">{control.value}</span>
+            <button type="button" aria-label={`增加一${control.label}`} onClick={control.increase} className="grid min-h-11 min-w-11 place-items-center text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-zinc-700"><Plus className="h-4 w-4" /></button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const mobileArrangeActions = draft && (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:hidden">
+      <button type="button" onClick={autoArrange} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-200">
+        <Sparkles className="h-4 w-4 text-amber-500" />学号排列
+      </button>
+      <button type="button" onClick={() => shiftSeats(-1)} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-slate-100 px-2 text-xs font-bold text-slate-700 dark:bg-zinc-800 dark:text-slate-200">
+        <MoveLeft className="h-4 w-4" />左轮换
+      </button>
+      <button type="button" onClick={() => shiftSeats(1)} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-slate-100 px-2 text-xs font-bold text-slate-700 dark:bg-zinc-800 dark:text-slate-200">
+        <MoveRight className="h-4 w-4" />右轮换
+      </button>
+      <button type="button" onClick={() => setShowPlacement(true)} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50/70 px-2 text-xs font-bold text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
+        <Users className="h-4 w-4" />待安排 {unassignedStudents.length}
+      </button>
+    </div>
+  );
 
   const unassignedPanel = (
     <section className="rounded-md border border-slate-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
@@ -355,6 +449,103 @@ export default function VirtualClassroom({
       )}
     </section>
   );
+
+  const renderSeatBoard = (expanded = false) => {
+    if (!activeLayout) return null;
+    const rowHeight = expanded ? 44 : 64;
+    const columnWidth = expanded ? 76 : 82;
+    return (
+      <div className={`relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-200 bg-slate-50 dark:border-zinc-800 dark:bg-zinc-950/40 ${expanded ? 'p-2 sm:p-3' : 'p-3 sm:p-4'}`}>
+        {!expanded && (
+          <button type="button" onClick={openExpandedSeats} aria-label="放大座位图" title="放大座位图" className="absolute right-2 top-2 z-10 grid h-11 w-11 place-items-center rounded-xl border border-slate-200 bg-white/95 text-slate-700 shadow-sm backdrop-blur hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-slate-200">
+            <Maximize2 className="h-5 w-5" />
+          </button>
+        )}
+        <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
+          <div
+            className="grid h-full"
+            style={{
+              gridTemplateColumns: '38px minmax(0, 1fr)',
+              gridTemplateRows: 'minmax(0, 1fr) 24px',
+              columnGap: '8px',
+              rowGap: '5px',
+              minWidth: `${activeLayout.columnCount * columnWidth + 46}px`,
+              minHeight: `${activeLayout.rowCount * rowHeight + 29}px`
+            }}
+          >
+            <div
+              className="grid min-h-0 text-xs font-bold tabular-nums text-slate-500"
+              style={{ gridTemplateRows: `repeat(${activeLayout.rowCount}, minmax(0, 1fr))`, rowGap: '6px' }}
+              aria-hidden="true"
+            >
+              {Array.from({ length: activeLayout.rowCount }, (_, visualRow) => (
+                <span key={visualRow} className="flex items-center justify-end whitespace-nowrap">{activeLayout.rowCount - visualRow}行</span>
+              ))}
+            </div>
+            <div
+              className="grid min-h-0"
+              style={{
+                gridTemplateColumns: `repeat(${activeLayout.columnCount}, minmax(74px, 1fr))`,
+                gridTemplateRows: `repeat(${activeLayout.rowCount}, minmax(0, 1fr))`,
+                columnGap: '8px',
+                rowGap: '6px'
+              }}
+            >
+              {Array.from({ length: activeLayout.rowCount * activeLayout.columnCount }, (_, visualIndex) => {
+                const visualRow = Math.floor(visualIndex / activeLayout.columnCount);
+                const column = visualIndex % activeLayout.columnCount;
+                const logicalRow = activeLayout.rowCount - 1 - visualRow;
+                const seatIndex = logicalRow * activeLayout.columnCount + column;
+                const studentId = studentIdBySeatIndex.get(seatIndex);
+                const student = studentId ? studentById.get(studentId) : undefined;
+                const isPlacement = student?.id === placementStudentId;
+                return (
+                  <button
+                    type="button"
+                    key={seatIndex}
+                    onClick={() => handleSeatClick(seatIndex)}
+                    className={`relative flex min-h-0 overflow-hidden rounded-md border p-1.5 text-center transition-colors ${
+                      student
+                        ? isPlacement
+                          ? 'border-amber-500 bg-amber-50 ring-2 ring-amber-200'
+                          : 'border-slate-200 bg-white hover:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900'
+                        : editMode
+                          ? 'border-dashed border-slate-300 bg-white/60 hover:border-emerald-400 hover:bg-emerald-50/50'
+                          : 'cursor-default border-dashed border-slate-200 bg-transparent'
+                    }`}
+                    aria-label={student ? `第${logicalRow + 1}行第${column + 1}列，${student.name}，${student.studentNo}` : `第${logicalRow + 1}行第${column + 1}列，空位`}
+                  >
+                    {student ? (
+                      <span className="m-auto flex min-w-0 flex-col items-center justify-center leading-tight">
+                        <span className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full ${statusMeta[student.status].dot}`} />
+                        <span className="max-w-full truncate text-xs font-bold text-slate-800 dark:text-slate-100">{student.name}</span>
+                        <span className="mt-0.5 text-[10px] text-slate-400">{student.studentNo}</span>
+                        {student.committeeRoleIds.length > 0 && <Award className="absolute bottom-1 right-1.5 h-3.5 w-3.5 text-amber-500" aria-label="班委" />}
+                      </span>
+                    ) : (
+                      <span className="m-auto text-[11px] text-slate-400">空位</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <span aria-hidden="true" />
+            <div
+              className="grid text-xs font-bold tabular-nums text-slate-500"
+              style={{ gridTemplateColumns: `repeat(${activeLayout.columnCount}, minmax(74px, 1fr))`, columnGap: '8px' }}
+              aria-hidden="true"
+            >
+              {Array.from({ length: activeLayout.columnCount }, (_, column) => (
+                <span key={column} className="text-center whitespace-nowrap">{column + 1}列</span>
+              ))}
+            </div>
+          </div>
+        </div>
+        {!expanded && <div className="mx-auto my-3 flex min-h-11 w-36 shrink-0 items-center justify-center rounded-sm border border-amber-200 bg-amber-50 text-xs font-semibold text-amber-900">讲台</div>}
+        {!expanded && <div className="mx-auto flex h-11 w-full max-w-3xl shrink-0 items-center justify-center rounded-sm bg-slate-800 text-xs font-semibold text-white">黑板</div>}
+      </div>
+    );
+  };
 
   if (!activeClass) return (
     <section className="grid min-h-[320px] place-items-center rounded-3xl border border-slate-200 bg-white/80 px-4 py-10 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-900/70" id="classroom-page">
@@ -463,118 +654,22 @@ export default function VirtualClassroom({
         </div>
       ) : (
         <div className={`grid min-h-0 flex-1 gap-5 ${editMode ? 'overflow-y-auto xl:grid-cols-[minmax(0,1fr)_340px] xl:overflow-hidden' : 'max-xl:overflow-visible xl:overflow-hidden'}`}>
-          {editMode && <div className="flex flex-wrap items-center gap-2 xl:hidden">
-            <button type="button" onClick={() => setShowPlacement(true)} className="min-h-11 rounded-xl border border-emerald-200 px-3 text-sm font-bold text-emerald-700">待安排学生 · {unassignedStudents.length}</button>
-            <span role="status" className="text-sm text-slate-600">{placementStudentId ? `已选 ${studentById.get(placementStudentId)?.name}，点击目标座位` : '点击一位学生，再点目标座位即可交换'}</span>
-            {placementStudentId && <><button type="button" onClick={() => setPlacementStudentId(null)} className="min-h-11 px-3 text-sm">取消选择</button>{seatedStudentIds.has(placementStudentId) && <button type="button" onClick={removePlacementStudent} className="min-h-11 px-3 text-sm text-red-700">移出座位</button>}</>}
-          </div>}
           <section className="flex min-h-0 min-w-0 flex-col gap-3 max-xl:shrink-0">
             {editMode && (
-              <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-slate-200 pb-3">
-                <span className="text-xs font-semibold text-slate-500">行数</span>
-                <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
-                  <button type="button" title="减少一行" onClick={() => resizeLayout(draft.rowCount - 1, draft.columnCount)} className="min-h-11 min-w-11 p-2 text-slate-600"><Minus className="h-4 w-4" /></button>
-                  <span className="min-w-8 border-x border-slate-200 px-2 py-2 text-center text-xs font-bold">{draft.rowCount}</span>
-                  <button type="button" title="增加一行" onClick={() => resizeLayout(draft.rowCount + 1, draft.columnCount)} className="min-h-11 min-w-11 p-2 text-slate-600"><Plus className="h-4 w-4" /></button>
-                </div>
-                <span className="text-xs font-semibold text-slate-500">列数</span>
-                <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
-                  <button type="button" title="减少一列" onClick={() => resizeLayout(draft.rowCount, draft.columnCount - 1)} className="min-h-11 min-w-11 p-2 text-slate-600"><Minus className="h-4 w-4" /></button>
-                  <span className="min-w-8 border-x border-slate-200 px-2 py-2 text-center text-xs font-bold">{draft.columnCount}</span>
-                  <button type="button" title="增加一列" onClick={() => resizeLayout(draft.rowCount, draft.columnCount + 1)} className="min-h-11 min-w-11 p-2 text-slate-600"><Plus className="h-4 w-4" /></button>
-                </div>
-                <button type="button" onClick={autoArrange} className="ml-auto inline-flex min-h-11 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
-                  <Sparkles className="h-4 w-4 text-amber-500" />按学号排列
-                </button>
+              <div className="shrink-0 space-y-2 border-b border-slate-200 pb-3 dark:border-zinc-800">
+                {layoutSizeControls}
+                {mobileArrangeActions}
+                {placementStudentId && (
+                  <div role="status" className="flex min-h-11 flex-wrap items-center gap-1.5 rounded-xl bg-amber-50 px-3 py-1.5 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    <span className="mr-auto font-semibold">已选 {studentById.get(placementStudentId)?.name}，点击目标座位</span>
+                    <button type="button" onClick={() => setPlacementStudentId(null)} className="min-h-9 rounded-lg px-2 font-bold">取消</button>
+                    {seatedStudentIds.has(placementStudentId) && <button type="button" onClick={removePlacementStudent} className="min-h-9 rounded-lg px-2 font-bold text-red-700 dark:text-red-300">移出座位</button>}
+                  </div>
+                )}
               </div>
             )}
 
-            {editMode && <div className="xl:hidden">{quickActions}</div>}
-
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/40 sm:p-4">
-              <div className="min-h-0 flex-1 overflow-auto">
-                <div
-                  className="grid h-full"
-                  style={{
-                    gridTemplateColumns: '24px minmax(0, 1fr)',
-                    gridTemplateRows: 'minmax(0, 1fr) 20px',
-                    columnGap: '8px',
-                    rowGap: '5px',
-                    minWidth: `${activeLayout.columnCount * 82 + 32}px`,
-                    minHeight: `${activeLayout.rowCount * 64 + 25}px`
-                  }}
-                >
-                  <div
-                    className="grid min-h-0 text-[10px] font-semibold text-slate-400"
-                    style={{ gridTemplateRows: `repeat(${activeLayout.rowCount}, minmax(0, 1fr))`, rowGap: '6px' }}
-                    aria-hidden="true"
-                  >
-                    {Array.from({ length: activeLayout.rowCount }, (_, visualRow) => (
-                      <span key={visualRow} className="flex items-center justify-center">{activeLayout.rowCount - visualRow}</span>
-                    ))}
-                  </div>
-                  <div
-                    className="grid min-h-0"
-                    style={{
-                      gridTemplateColumns: `repeat(${activeLayout.columnCount}, minmax(74px, 1fr))`,
-                      gridTemplateRows: `repeat(${activeLayout.rowCount}, minmax(0, 1fr))`,
-                      columnGap: '8px',
-                      rowGap: '6px'
-                    }}
-                  >
-                    {Array.from({ length: activeLayout.rowCount * activeLayout.columnCount }, (_, visualIndex) => {
-                      const visualRow = Math.floor(visualIndex / activeLayout.columnCount);
-                      const column = visualIndex % activeLayout.columnCount;
-                      const logicalRow = activeLayout.rowCount - 1 - visualRow;
-                      const seatIndex = logicalRow * activeLayout.columnCount + column;
-                      const assignment = activeLayout.seats.find(seat => seat.seatIndex === seatIndex);
-                      const student = assignment ? studentById.get(assignment.studentId) : undefined;
-                      const isPlacement = student?.id === placementStudentId;
-                      return (
-                        <button
-                          type="button"
-                          key={seatIndex}
-                          onClick={() => handleSeatClick(seatIndex)}
-                          className={`relative flex min-h-0 overflow-hidden rounded-md border p-1.5 text-center transition-colors ${
-                            student
-                              ? isPlacement
-                                ? 'border-amber-500 bg-amber-50 ring-2 ring-amber-200'
-                                : 'border-slate-200 bg-white hover:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900'
-                              : editMode
-                                ? 'border-dashed border-slate-300 bg-white/60 hover:border-emerald-400 hover:bg-emerald-50/50'
-                                : 'cursor-default border-dashed border-slate-200 bg-transparent'
-                          }`}
-                          aria-label={student ? `第${logicalRow + 1}行第${column + 1}列，${student.name}，${student.studentNo}` : `第${logicalRow + 1}行第${column + 1}列，空位`}
-                        >
-                          {student ? (
-                            <span className="m-auto flex min-w-0 flex-col items-center justify-center leading-tight">
-                              <span className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full ${statusMeta[student.status].dot}`} />
-                              <span className="max-w-full truncate text-xs font-bold text-slate-800 dark:text-slate-100">{student.name}</span>
-                              <span className="mt-0.5 text-[10px] text-slate-400">{student.studentNo}</span>
-                              {student.committeeRoleIds.length > 0 && <Award className="absolute bottom-1 right-1.5 h-3.5 w-3.5 text-amber-500" aria-label="班委" />}
-                            </span>
-                          ) : (
-                            <span className="m-auto text-[11px] text-slate-400">空位</span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <span aria-hidden="true" />
-                  <div
-                    className="grid text-[10px] font-semibold text-slate-400"
-                    style={{ gridTemplateColumns: `repeat(${activeLayout.columnCount}, minmax(74px, 1fr))`, columnGap: '8px' }}
-                    aria-hidden="true"
-                  >
-                    {Array.from({ length: activeLayout.columnCount }, (_, column) => (
-                      <span key={column} className="text-center">{column + 1}</span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="mx-auto my-3 flex min-h-11 w-36 shrink-0 items-center justify-center rounded-sm border border-amber-200 bg-amber-50 text-xs font-semibold text-amber-900">讲台</div>
-              <div className="mx-auto flex h-11 w-full max-w-3xl shrink-0 items-center justify-center rounded-sm bg-slate-800 text-xs font-semibold text-white">黑板</div>
-            </div>
+            {renderSeatBoard()}
 
             <div className="flex shrink-0 flex-wrap gap-x-5 gap-y-2 text-xs text-slate-500">
               {(Object.keys(statusMeta) as Student['status'][]).map(status => (
@@ -590,6 +685,24 @@ export default function VirtualClassroom({
         </div>
       )}
 
+      {expandedSeats && createPortal(
+        <section role="dialog" aria-modal="true" aria-label={`${activeClass.name}座位图放大预览`} className="fixed inset-0 z-[70] flex min-h-0 flex-col bg-white p-[env(safe-area-inset-top)_env(safe-area-inset-right)_env(safe-area-inset-bottom)_env(safe-area-inset-left)] dark:bg-zinc-950">
+          <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-slate-200 px-3 dark:border-zinc-800 sm:px-5">
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-black text-slate-900 dark:text-slate-100 sm:text-base">{activeClass.name}座位图</h2>
+              <p className="text-xs text-slate-500">讲台视角 · {editMode ? '排座草稿，点击座位继续换位' : `已安排 ${activeLayout.seats.length} 人`}</p>
+            </div>
+            <button type="button" autoFocus onClick={closeExpandedSeats} aria-label="退出放大预览" className="ml-auto grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-slate-200 text-slate-700 hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:text-slate-200">
+              <Minimize2 className="h-5 w-5" />
+            </button>
+          </header>
+          {portraitViewport && (
+            <p role="status" className="shrink-0 bg-amber-50 px-3 py-2 text-center text-xs font-semibold text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">旋转手机以横屏查看完整座位图</p>
+          )}
+          <div className="min-h-0 flex-1 p-1 sm:p-3">{renderSeatBoard(true)}</div>
+        </section>,
+        document.body
+      )}
       {showPlacement && editMode && <ResponsiveDialog title="选择待安排学生" onClose={() => setShowPlacement(false)}>{unassignedPanel}</ResponsiveDialog>}
       {selectedStudent && !editMode && createPortal(
         <>
