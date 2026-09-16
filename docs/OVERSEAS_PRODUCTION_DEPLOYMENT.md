@@ -1,0 +1,101 @@
+# DEMO 海外生产部署方案
+
+> 文档版本：`v1.1`
+> 日期：2026-09-16
+> 状态：已完成
+
+## 1. 原始问题与目标
+
+DEMO 包含登录、教师工作区、AI/OCR 和真实产品数据，不再使用中国内地服务器对外提供本服务。目标是把当前母文件夹中的权威数据安全迁移到腾讯云硅谷实例，并通过 `https://td.unreached.top` 向少量受邀用户开放。
+
+完成标准：
+
+- 域名只通过 80/443 访问，HTTP 自动跳转 HTTPS；
+- Node 仅监听服务器回环地址，由 Nginx 反向代理；
+- systemd 接管应用和每日备份，异常退出自动恢复；
+- 迁移快照的文件哈希和 5 个 SQLite 完整性检查通过；
+- 公网健康检查、登录页、未登录权限边界和核心只读页面通过；
+- 回滚不覆盖本地 `var-product` 或服务器故障目录。
+
+## 2. 已确认事实与边界
+
+- 入口域名：`td.unreached.top`；域名已实名，DNS 由阿里云管理。
+- 生产实例：腾讯云 Lighthouse `lhins-mtpcwz75`，硅谷二区，Ubuntu 26.04，2 vCPU、2 GB 内存、50 GB SSD，公网 IP `43.172.77.153`。
+- 当前唯一权威数据：`/Users/cxc/Projects/DEMO/var-product`。
+- 用户已确认该产品数据可以存储到境外。
+- 2026-09-16 已从最新权威数据创建恢复点 `product-2026-09-16-pre-overseas-cutover`；清单包含 1,255 个产品文件和 5 个 SQLite，清单哈希及数据库完整性检查通过，快照目录占用约 506 MiB。
+- 上海实例不承载 DEMO；后续用于 Hermes。本方案不安装 Hermes，也不修改上海实例。
+- 不购买 COS、CDN 或收费 SSL；当前数据量和两个用户规模不需要这些附加服务。
+- 不在部署验收中主动消耗真实 AI/OCR 调用额度；只检查配置状态，真实调用另行验收。
+
+## 3. 生产架构
+
+```mermaid
+flowchart LR
+    U[受邀教师浏览器] -->|HTTPS 443| N[Nginx / Let's Encrypt]
+    N -->|127.0.0.1:4317| A[Node / Express]
+    A --> S[(system/auth.sqlite)]
+    A --> W[(workspace SQLite)]
+    A --> F[上传文件与 OCR 产物]
+    A --> O[外部 AI / PaddleOCR]
+    T[systemd timer] --> B[在线产品快照]
+    B --> D[/var/lib/teacher-dashboard/backups/automatic]
+```
+
+目录约定：
+
+```text
+/opt/teacher-dashboard/releases/<git-commit>  # 不可变代码发布目录
+/opt/teacher-dashboard/current                # 当前版本符号链接
+/etc/teacher-dashboard/teacher-dashboard.env # 600 权限的生产环境变量
+/var/lib/teacher-dashboard/product-<time>     # 当前产品数据根
+/var/lib/teacher-dashboard/backups/automatic # 最近两份自动快照
+```
+
+应用用户 `teacher-dashboard` 只写 `/var/lib/teacher-dashboard`。公网不开放 4317、数据库、上传目录或 SSH 密钥内容。
+
+## 4. 最短实施路径
+
+1. 为该实例绑定独立 Ed25519 部署公钥，SSH 登录后核对系统、磁盘、内存、端口和防火墙。
+2. 安装受支持的 Node.js、Nginx、Certbot 和构建依赖；2 GB 实例配置交换空间，降低构建和 OCR 处理时的 OOM 风险。
+3. 从已验证的 `origin/main` 建立不可变发布目录，执行 `npm ci`、`npm run build` 和必要测试。
+4. 以 600 权限写入生产环境文件；保留现有认证密钥，仅替换域名、回环监听和服务器数据路径。
+5. 上传已验证的产品快照，在服务器全新目录执行 `restore:product` 和 `verify:product`，禁止直接复制运行中的 SQLite。
+6. 安装 systemd 与 Nginx 配置，先通过回环和 Host 头验证，再在阿里云新增 `td` 的 A 记录。
+7. 签发 Let's Encrypt 证书，验证 HTTPS、鉴权、核心页面和服务重启恢复。
+8. 验收通过后把服务器新目录标记为权威运行数据；本地 `var-product` 和迁移前快照保留为短期回滚源。
+
+## 5. 回滚与故障边界
+
+- DNS 或证书失败：撤销/暂停 `td` 公网入口，保留服务器回环服务和数据。
+- 应用失败且尚无新写入：停止服务，切回上一个发布目录和已验证数据目录。
+- 上线后已有新写入：冻结服务，保留两边目录并导出差异；未经新方案批准不得自动合并 SQLite。
+- 数据恢复失败：保留失败目录用于调查，从迁移快照恢复到另一个全新目录，不覆盖失败目录。
+- 本地 `var-product`、历史手工恢复点和上海服务器不在自动清理范围。
+
+## 6. 风险与取舍
+
+- 硅谷到中国内地的网络延迟高于内地节点，30 Mbps 是峰值带宽而非稳定保证；两个用户的初期试用可接受性必须以真实网络测试为准。
+- 单实例仍存在整机故障风险；同机自动备份能处理误操作和逻辑损坏，不能替代异地备份。规模扩大后再评估 COS 或另一处加密备份。
+- `.top` 域名实名与 ICP 备案不是同一件事；本方案的源站和数据均在境外，不使用该域名接入中国内地服务器。具体经营资质和内容合规仍由运营主体按实际业务判断。
+- 2 GB 内存足以支撑少量用户，但构建与并发 OCR 峰值需要交换空间和运行监控；不把它描述为高并发容量。
+
+## 7. 实施记录
+
+| 时间 | 状态 | 证据 |
+| --- | --- | --- |
+| 2026-09-16 | 已完成 | 本地分支 `codex/overseas-production-deploy` 从 `origin/main@0a7b95f` 创建；`npm ci`、lint、build、operations/auth/workspace-isolation 测试通过。 |
+| 2026-09-16 | 已完成 | 最新 `var-product` 在线快照创建并通过 `verify:product`；未使用旧上海服务器演练副本。 |
+| 2026-09-16 | 已完成 | 独立部署公钥已绑定；Node 22、Nginx、Certbot、systemd、UFW 与 2 GB swap 已配置，4317 仅监听回环。 |
+| 2026-09-16 | 已完成 | 上传产生的 1,618 个 `._*` 元数据仅从服务器快照副本中清除；服务器端 1,255 个文件和 5 个 SQLite 再次校验通过。 |
+| 2026-09-16 | 已完成 | 首次恢复因 `.DS_Store` 失败并保留故障目录；PR #24 修复后恢复到 `/var/lib/teacher-dashboard/product-2026-09-16-r2` 成功。 |
+| 2026-09-16 | 已完成 | 阿里云 A 记录已生效；Let's Encrypt 证书签发并配置自动续期，证书到期日为 2026-12-15。 |
+| 2026-09-16 | 已完成 | 定位到腾讯云实例防火墙缺少 443，补充 HTTPS 规则后公网 `live` 正常；真实浏览器显示登录首屏，无证书拦截。 |
+| 2026-09-16 | 已完成 | 首次服务器自动产品备份手工触发成功；上海实例未修改，真实 AI/OCR 调用未消耗。 |
+
+## 8. 修改历史
+
+| 版本 | 日期 | 状态 | 修改概要 |
+| --- | --- | --- | --- |
+| v1.0 | 2026-09-16 | 已被 v1.1 取代 | 固定硅谷实例、`td.unreached.top`、权威数据迁移、systemd/Nginx/HTTPS 和回滚边界。 |
+| v1.1 | 2026-09-16 | 当前 | 记录服务器安装、数据恢复修复、DNS、HTTPS、防火墙、自动备份和公网首屏验收结果。 |

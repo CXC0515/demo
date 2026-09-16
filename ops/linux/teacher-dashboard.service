@@ -1,0 +1,24 @@
+[Unit]
+Description=DEMO Teacher Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=teacher-dashboard
+Group=teacher-dashboard
+WorkingDirectory=/opt/teacher-dashboard/current
+EnvironmentFile=/etc/teacher-dashboard/teacher-dashboard.env
+ExecStart=/usr/bin/node --import tsx server/index.ts
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/teacher-dashboard
+
+[Install]
+WantedBy=multi-user.target

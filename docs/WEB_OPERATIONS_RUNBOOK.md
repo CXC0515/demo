@@ -1,305 +1,141 @@
-# DEMO 网页产品本地生产运行手册
+# DEMO 海外生产运维手册
 
-> 文档版本：`v1.12`
-> 日期：2026-09-12
-> 适用范围：网页产品第一阶段第 2、3 切片操作口径
-> 当前边界：首次备案处于管局审核；公网解析与 Tunnel 已停止，`var-product` 继续作为本地开发和未来迁移的唯一权威数据
+> 文档版本：`v2.0`
+> 日期：2026-09-16
+> 当前入口：`https://td.unreached.top`
 
-## 1. 当前运行边界
+## 1. 边界与目录
 
-本切片已经加入邀请登录、每教师工作区和受保护文件访问，公开 `/uploads` 已移除。域名、Tunnel 和后台自启已完成基础验收；可以按计划邀请两名指定试用者查错，同时继续完成国内三网、手机和微信内置浏览器的 48 小时观察，在观察结论确认前不扩大邀请范围。
-
-原始权威母数据仍保持不动：
+本手册只适用于腾讯云硅谷实例上的 DEMO。上海实例预留给 Hermes，不是 DEMO 的回滚源或数据源。旧 MacBook + Cloudflare Tunnel 部署已退出当前架构，历史记录仅通过 Git 追溯。
 
 ```text
-/Users/cxc/Projects/DEMO/var
+/opt/teacher-dashboard/current
+/etc/teacher-dashboard/teacher-dashboard.env
+/var/lib/teacher-dashboard/product-2026-09-16-r2
+/var/lib/teacher-dashboard/backups/automatic
 ```
 
-第 3 切片已经从候选副本的在线快照恢复出产品目录：
+- systemd 服务：`teacher-dashboard.service`
+- 自动备份：`teacher-dashboard-backup.timer`
+- Nginx 站点：`td.unreached.top`
+- 应用监听：`127.0.0.1:4317`
+- 环境变量文件必须为 `root:root`、权限 `600`；不得输出或提交密钥。
 
-```text
-/Users/cxc/Projects/DEMO/var-product
-```
-
-真实密钥只从下列外部文件加载，不复制进仓库：
-
-```text
-/Users/cxc/Projects/DEMO/.env
-```
-
-## 2. 首次准备
-
-在项目目录执行：
+## 2. 日常只读检查
 
 ```bash
-npm ci
-npm run build
-```
-
-生产启动会检查 `dist/index.html`、数据目录、上传目录和备份目录。缺少生产构建时进程会拒绝启动。
-
-## 3. 本机生产启动
-
-在项目目录执行以下完整命令：
-
-```bash
-NODE_ENV=production \
-APP_DATA_ROOT=/Users/cxc/Projects/DEMO/var-web-auth-candidate \
-APP_URL=https://td.unreached.cn \
-AUTH_SECRET='<至少 32 字符的独立随机密钥>' \
-API_HOST=127.0.0.1 \
-API_PORT=4317 \
-node --env-file=/Users/cxc/Projects/DEMO/.env --import tsx server/index.ts
-```
-
-正式 HTTPS 尚未接通前，不要用生产模式的 Secure Cookie 配置测试 HTTP。本机验收需要两个进程：API 使用候选数据，Vite 提供前端并代理 `/api`。先启动 API：
-
-```bash
-NODE_ENV=development \
-APP_DATA_ROOT=/Users/cxc/Projects/DEMO/var-web-auth-candidate \
-APP_URL=http://localhost:3000 \
-API_HOST=127.0.0.1 \
-API_PORT=4317 \
-node --env-file=/Users/cxc/Projects/DEMO/.env --import tsx server/index.ts
-```
-
-再在另一个终端启动前端：
-
-```bash
-API_PROXY_TARGET=http://127.0.0.1:4317 npm run dev
-```
-
-浏览器访问 `http://localhost:3000`。不要把 `--env-file` 追加在 `npm start --` 后面；那会把参数交给应用而不是 Node。
-
-`npm start` 仅适用于环境变量已经由进程管理器完整注入的情况。
-
-首次使用邀请链接完成注册。注册成功后页面必须回到普通登录表单，并显示“注册成功，请使用新账户登录”；此时尚无登录会话。用户再次输入密码并点击“登录”后才进入工作台。首个所有者读取迁移候选数据，之后邀请的教师进入全新空工作区。
-
-## 4. 健康检查
-
-存活检查：
-
-```bash
+sudo systemctl status teacher-dashboard --no-pager
+sudo systemctl status teacher-dashboard-backup.timer --no-pager
+sudo journalctl -u teacher-dashboard -n 100 --no-pager
+sudo nginx -t
 curl -fsS http://127.0.0.1:4317/api/health/live
-```
-
-就绪检查：
-
-```bash
 curl -fsS http://127.0.0.1:4317/api/health/ready
+df -h / /var/lib/teacher-dashboard
+free -h
 ```
 
-就绪检查会验证认证库、系统目录和工作区根可用，并报告 AI 与 PaddleOCR 是否已配置。第三方服务未配置不会让本地资料读取整体失效。
-
-## 5. 停止与重启
-
-前台运行时使用 `Ctrl-C`。进程收到 `SIGINT` 或 `SIGTERM` 后会停止接收新连接、等待活动连接、关闭 SQLite，再退出。日志中应依次出现：
-
-```text
-server_shutdown_started
-server_shutdown_completed
-```
-
-如果超过 `SHUTDOWN_TIMEOUT_MS`，进程会记录强制退出事件。当前默认值为 15 秒。
-
-本切片没有安装自动开机启动服务；`launchd`、断线自动重连和公网 Tunnel 属于后续获批切片。
-
-## 6. 日志
-
-服务日志为一行一个 JSON 对象，包含时间、级别、事件、request ID、路由模板、状态码和耗时。令牌、Cookie、授权头和敏感查询参数会脱敏；不得主动把学生姓名、OCR 正文或资料内容写入日志。
-
-当前日志输出到标准输出/错误。日志轮转和长期保留将在正式后台运行配置中完成。
-
-## 7. 备份、校验和恢复
-
-第 2 切片上线后必须使用产品快照，同时包含认证库和全部工作区：
+公网检查：
 
 ```bash
-npm run backup:product -- \
-  /Users/cxc/Projects/DEMO/var-web-auth-candidate \
-  /Users/cxc/Projects/DEMO/var/backups/product-YYYYMMDD-HHMMSS
+curl -fsS https://td.unreached.top/api/health/live
+curl -fsS https://td.unreached.top/api/health/ready
+curl -sSI https://td.unreached.top/
 ```
 
-校验与恢复演练：
+`live` 证明进程可响应；`ready` 同时检查存储和外部能力配置。配置状态不是一次真实 OCR/AI 调用成功的证据。
+
+## 3. 发布新版本
+
+正式服务只能发布已验收并合入 `origin/main` 的提交：
+
+1. 在 `/opt/teacher-dashboard/releases/<commit>` 创建新发布目录。
+2. 执行 `npm ci`、`npm run build` 和与风险相称的测试。
+3. 确认数据结构变更及恢复点；需要迁移时先按 [WEB_DATA_MIGRATION_RUNBOOK.md](./WEB_DATA_MIGRATION_RUNBOOK.md) 创建在线产品快照。
+4. 原子更新 `/opt/teacher-dashboard/current` 符号链接。
+5. `sudo systemctl restart teacher-dashboard`，检查日志、回环健康和公网健康。
+6. 验收前保留上一发布目录，不删除当前数据目录。
+
+不得从临时 Codex worktree 长期运行生产服务。
+
+## 4. 服务操作
 
 ```bash
-npm run verify:product -- /Users/cxc/Projects/DEMO/var/backups/product-YYYYMMDD-HHMMSS
-npm run restore:product -- \
-  /Users/cxc/Projects/DEMO/var/backups/product-YYYYMMDD-HHMMSS \
-  /Users/cxc/Projects/DEMO/var-web-auth-restored
+sudo systemctl restart teacher-dashboard
+sudo systemctl stop teacher-dashboard
+sudo systemctl start teacher-dashboard
+sudo systemctl enable --now teacher-dashboard
+sudo systemctl enable --now teacher-dashboard-backup.timer
+sudo systemctl start teacher-dashboard-backup.service
 ```
 
-备份对认证库和每个工作区 SQLite 使用在线备份 API；`manifest.json` 保存大小和 SHA-256。恢复只允许不存在的新目录，并映射数据库与 JSON 的内部绝对路径。旧 `backup:data/restore:data` 只用于迁移前的单工作区格式，不能作为新产品的完整备份。
+重启前先确认没有正在提交的长任务。应用启动会把遗留的进行中任务标记为中断，由用户重试；不会把半完成结果标为成功。
 
-完整迁移和回滚步骤见 `docs/WEB_DATA_MIGRATION_RUNBOOK.md`。
+## 5. 备份与恢复
 
-## 8. 升级前最小检查
+自动任务每天 03:15 检查数据；无变化时跳过，有变化时生成并验证快照，仅保留最近两份成功的自动快照。升级前手工恢复点不参与自动清理。
 
-每次升级至少执行：
+手工备份：
 
 ```bash
-npm ci
-npm run build
-npm run lint
-npm run test:operations
-npm run verify:data -- /Users/cxc/Projects/DEMO/var-web
+sudo systemctl start teacher-dashboard-backup.service
+sudo journalctl -u teacher-dashboard-backup.service -n 100 --no-pager
 ```
 
-升级前创建新快照；升级后检查首页、存活与就绪接口、班级和资料读取、PDF Range 请求。失败时停止新版本并按迁移手册切回旧代码和旧数据副本。
-
-## 9. 第 3 切片运行口径与当前进度
-
-完整批准范围和实时实施记录见 `docs/WEB_PUBLIC_TRIAL_DEPLOYMENT_PLAN.md`。`cloudflared 2026.8.3`、Cloudflare 免费 Zone、命名 Tunnel、`td.unreached.cn` 路由和三个 LaunchAgent 均已启用；当前处于国内网络 48 小时观察期。
-
-### 9.0 DNS 切换与回滚
-
-域名继续由阿里云持有和续费，权威 DNS 已于 2026-09-09 从阿里云切换到 Cloudflare：
-
-```text
-原值：dns11.hichina.com
-原值：dns12.hichina.com
-新值：mustafa.ns.cloudflare.com
-新值：ophelia.ns.cloudflare.com
-```
-
-2026-09-08 切换前检查未发现 A、AAAA、MX、TXT、`www`、`td` 或 DNSSEC 记录，因此没有现有网站或域名邮箱记录需要迁移。2026-09-09 已由 Cloudflare 控制台、WHOIS、`1.1.1.1` 和 `223.5.5.5` 确认新名称服务器生效。回滚时先在阿里云 DNS 建立必要记录，再恢复两条原名称服务器。
-
-### 9.1 正式入口和运行目录
-
-```text
-网址：https://td.unreached.cn
-项目：/Users/cxc/Projects/DEMO
-数据：/Users/cxc/Projects/DEMO/var-product
-监听：127.0.0.1:4317
-环境：/Users/cxc/Projects/DEMO/.env
-```
-
-教师工作台使用 `td.unreached.cn`，根域名 `unreached.cn` 留作未来入口；不从 Codex worktree 启动生产服务，不使用外置盘、iCloud 或一个月建站权益保存真实数据。
-
-### 9.2 后台进程
-
-三个用户级 `launchd` 项已经从母文件夹正式 `main` 安装：
-
-- Node/Express：登录后启动并在异常退出后重启；
-- `cloudflared`：把 `td.unreached.cn` Tunnel 转到本机回环端口并自动重连；
-- 每日备份：检查数据变化，有变化才创建和验证快照。
-
-应用与 Tunnel 日志通过 macOS unified log 保存，不写入产品数据根。常用只读查看命令：
+恢复必须停止写入并落入全新目录：
 
 ```bash
-log show --last 1h --predicate 'process == "logger" AND eventMessage CONTAINS "cn.unreached.teacher-dashboard"'
+sudo systemctl stop teacher-dashboard
+cd /opt/teacher-dashboard/current
+sudo -u teacher-dashboard /usr/bin/node --import tsx server/scripts/verifyProductData.ts <snapshot>
+sudo -u teacher-dashboard /usr/bin/node --import tsx server/scripts/restoreProductData.ts <snapshot> <new-target>
 ```
 
-重装时按顺序执行：
+随后把环境文件中的 `APP_DATA_ROOT` 指向新目录，启动服务并验收。禁止把快照覆盖到原目录，禁止普通复制在线 SQLite。
+
+## 6. Nginx、证书与 DNS
+
+- 阿里云 DNS：`td.unreached.top` 的 A 记录指向 `43.172.77.153`。
+- 腾讯云实例防火墙与 UFW 均需放行 80/443；2026-09-16 曾因云防火墙缺少 443 导致公网 TLS 握手无法到达 Nginx。
+- Nginx 只代理到 `127.0.0.1:4317`，上传限制为 82 MiB，请求读取/发送超时为 600 秒。
+- Let's Encrypt 证书由 Certbot 管理；当前证书到期日为 2026-12-15。续期检查：
 
 ```bash
-node /Users/cxc/Projects/DEMO/scripts/configure-production-env.mjs
-/Users/cxc/Projects/DEMO/scripts/install-production-launch-agents.sh
+sudo certbot renew --dry-run
+systemctl list-timers --all | grep certbot
 ```
 
-第二条命令只有在 `/Users/cxc/.cloudflared/config.yml` 已创建并校验后才会成功；它不会从 worktree 安装长期服务。
+证书或 Nginx 变更前先运行 `sudo nginx -t`。域名故障时先区分权威 DNS、公共递归解析、证书和应用回环健康，不用重启应用掩盖 DNS 问题。
 
-当前 Tunnel 名为 `teacher-dashboard`，只把 `td.unreached.cn` 转发到 `http://127.0.0.1:4317`。配置和凭据位于 `/Users/cxc/.cloudflared`，权限为 `600`，不得提交仓库或复制到操作记录。
+## 7. 故障处理
 
-2026-09-09 安装后实测：应用与 Tunnel 为运行态，备份任务按每天 03:15 的日历计划唤醒；人工 `kickstart -k` 重启应用和 Tunnel 后，两者自动恢复，公网 `ready` 继续返回 200。
+### 应用 502/不可达
 
-仓库只保存无密钥模板。`AUTH_SECRET`、AI/OCR 密钥和 Tunnel 凭据不写入仓库，也不输出到操作记录。
+1. 查 `systemctl status` 和 `journalctl`；
+2. 查回环 `live/ready`；
+3. 查 4317 是否只监听回环；
+4. 查 Nginx 配置和日志；
+5. 只有确认根因后才重启。
 
-### 9.3 自动备份
+### 磁盘或内存告警
 
-- 只覆盖 `var-product/system` 与 `var-product/workspaces`；
-- 每天最多检查一次，无数据变化时不创建目录；
-- 新快照只有通过清单哈希和 SQLite 完整性检查后才算成功；
-- 自动目录只保留最近 2 份成功快照；
-- 升级/迁移前快照和当前 `var/backups` 历史快照不自动删除；
-- 恢复永远落到全新的目录，禁止覆盖运行目录。
+- 先查上传、快照、日志和发布目录各自占用；不得直接删除未知目录。
+- 2 GB 实例依赖交换空间吸收短时峰值，交换空间不是长期内存容量。
+- 删除历史手工恢复点、数据目录或旧发布目录前，必须列出精确目标、可恢复性并取得批准。
 
-2026-09-08 实测：第一次在 `var-product/backups/automatic` 创建成功快照；紧接着第二次检查检测到内容未变化并跳过，没有产生重复快照。当前只有 1 个成功自动恢复点。
+### AI/OCR 异常
 
-这一策略的 RPO 目标为 24 小时、RTO 目标为 2 小时。同盘备份不能抵御整机丢失或物理磁盘损坏，该风险在本阶段接受。
+区分密钥/配置、请求格式、供应商排队、限流、超时和模型输出问题。`ready` 只验证配置存在；供应商真实调用失败时保留原始证据、任务状态和人工重试入口。
 
-### 9.4 公网故障人工接管
+## 8. 安全边界
 
-- 域名/Tunnel 异常：停止 Tunnel，保留本机服务和数据，先通过回环地址检查；
-- 应用异常：停止 LaunchAgent，记录当前提交和日志，再以前台方式诊断；
-- 数据异常：先停止写入，保留故障目录，从已验证快照恢复到新目录；
-- 长任务异常：重启后遗留状态应显示 interrupted/failed，由教师人工重试；
-- 中国大陆链路不达标：不扩大邀请，重新审批国内入口，不自动购买服务器。
+- 公网只开放 80/443；SSH 使用独立公钥，禁止把私钥放入仓库或聊天。
+- 登录、API 和上传文件保持同源；未登录业务接口应返回 401。
+- 生产密钥只存于服务器环境文件，不写入 systemd unit、Nginx 配置或文档。
+- 服务器下线、数据跨境策略变化或新用户扩大前，重新评估备份、合规与容量。
 
-### 9.5 国内网络验收
-
-公网开放后连续 48 小时在中国电信、联通、移动以及微信内置浏览器测试登录、首屏、核心 API、PDF 打开和上传。测试前关闭会影响结论的开发机代理；免费 Cloudflare 不构成中国大陆高速承诺。
-
-### 9.6 Shadowrocket 共存与 Tunnel 协议
-
-2026-09-09 15:22–15:25，公网班级保存请求没有到达 Express；同期 `cloudflared` 的 QUIC 连接持续报告无网络活动并重连。只读核查确认 MacBook 正在通过 Shadowrocket 的 TUN 接口和 `198.18.0.0/15` 合成地址转发流量。应用、SQLite 和班级 API 均正常，故障边界位于 MacBook 到 Cloudflare 边缘的 Tunnel 连接。
-
-曾按批准方案试验 `protocol: http2`，希望让连接通过 TCP 而不是 QUIC/UDP。配置校验通过，但真实启动预检查确认 Shadowrocket 当前链路阻断 Cloudflare TCP 7844，TLS 握手失败且公网返回 530，因此当场删除该配置项并恢复自动协议选择。生产仍使用可连接的 QUIC；HTTP/2 不能作为当前环境的稳定方案。
-
-该修正只处理 MacBook 出口的 Tunnel 稳定性，不能绕过学校网络对 Cloudflare 入口的封锁；校园网仍需域名/SNI 白名单或另行批准国内入口。
-
-### 9.7 课表 OCR 班级匹配升级
-
-2026-09-10，课表 OCR 班级匹配修复通过 PR #15 合并并部署。升级前创建并验证独立产品快照 `product-2026-09-10T01-45-21-pre-pr15`，包含 192 个文件和 5 个 SQLite 数据库；未修改数据库结构，也未删除旧恢复点。
-
-母文件夹保留本地运维历史并普通合并远端 `main@dfdf87c`，重新安装锁定依赖、构建，并通过 26 项课表测试、9 项运维测试和 TypeScript 检查。应用 LaunchAgent 重启后第 2 次回环探测恢复；公网登录页和就绪接口为 200，存储、AI、PaddleOCR 均为 ready，本地与公网主脚本均为 `index-VP2ezFcr.js`。
-
-本次升级没有调整 Tunnel、DNS 或生产数据路径。PaddleOCR 外部队列繁忙仍可能发生；应用会有限重试，最终失败返回 503 和阶段化提示，不写入不完整课表草稿。
-
-### 9.8 上传隔离与导航稳定性升级
-
-2026-09-10，上传隔离、班级课表、班级可视化和知识图谱稳定性修复通过 PR #16 合并至远端 `main@52754d1`。母文件夹保留本地文档历史后普通合并为 `9584d7c`，生产继续从母文件夹运行；本次功能 worktree、远端和本地功能分支均已删除。
-
-升级前创建并验证产品快照 `product-2026-09-10T04-07-32-pre-pr16`，包含 192 个文件和 5 个 SQLite 数据库。母文件夹重新执行 `npm ci`、生产构建、TypeScript、28 项课表测试、3 项隔离测试、4 项班级测试和 9 项运维测试，全部通过；依赖安装仍报告 4 项既有审计问题，未在本次稳定性修复中升级依赖。
-
-应用 LaunchAgent 重启后 PID 为 71615，回环和公网 ready 均返回 200，AI 与 PaddleOCR 为 ready；本地与公网主脚本均为 `index-BuhYsX85.js`。公网登录页返回 200/no-store，知识图谱哈希脚本返回 JavaScript/immutable，缺失旧脚本明确返回 404/no-store，未登录业务 API 返回 401。浏览器确认登录表单正常显示。
-
-公网连续检查中出现一次 Cloudflare TLS 瞬断，立即重试恢复；该现象属于既有 MacBook 出口/Tunnel 网络波动，不能视为应用回归，也不能据此承诺校园网稳定访问。真实账号仍需验证班级课表上传耗时、座位图再次进入和登录后知识图谱交互。
-
-### 9.9 作息与资料 OCR 富内容升级
-
-2026-09-10，PR #17 合并至远端 `main@54ff5dc` 并从母文件夹部署。升级前恢复点 `product-2026-09-10T14-55-20-pre-pr17` 包含 198 个文件和 5 个 SQLite，独立校验通过；随后只读预检和正式回填依次执行，安全更新 217 个 OCR 内容块、归位 11 张页面底图，两个块数不一致的历史页面保持不变。两个资源库完整性检查均为 `ok`。
-
-母文件夹执行 `npm ci`、生产构建、TypeScript、14 项资源测试、31 项课表测试、1 项认证测试、3 项隔离测试和 9 项运维测试，全部通过。依赖安装仍报告 4 项既有审计问题，未运行破坏性自动升级。
-
-应用与 Tunnel LaunchAgent 恢复运行后，回环和公网 ready 均返回 200，存储、AI、PaddleOCR 为 ready；公网与本地加载相同的 `index-UOPK7apf.js` 和 `index-DvH96bqB.css`，登录页为 200/no-store，未登录资料 API 返回 401。本次没有调整 DNS、Tunnel 和 80 MiB 上传上限。
-
-### 9.10 备案审核期间的离线开发
-
-2026-09-12，`td.unreached.cn` 的 Cloudflare Tunnel DNS 记录已删除；权威 DNS、`223.5.5.5` 和 `1.1.1.1` 查询均无 A/CNAME。SSL 验证 TXT `_dnsauth.td.unreached.cn` 保留。MacBook 的应用与 Tunnel LaunchAgent 均已停止，Cloudflare Tunnel 对象和本地配置未删除。
-
-离线开发继续使用唯一权威数据 `/Users/cxc/Projects/DEMO/var-product`。先确认后台生产进程已停止，再分别启动：
-
-```bash
-NODE_ENV=development \
-APP_DATA_ROOT=/Users/cxc/Projects/DEMO/var-product \
-APP_URL=http://localhost:3000 \
-API_HOST=127.0.0.1 \
-API_PORT=4317 \
-node --env-file=.env node_modules/tsx/dist/cli.mjs watch server/index.ts
-```
-
-```bash
-API_PROXY_TARGET=http://127.0.0.1:4317 \
-npx vite --port=3000 --host=127.0.0.1
-```
-
-只使用 `http://localhost:3000` 登录；不要通过公网 IP 或非标端口开放。2026-09-12 实测前端、Vite API 代理和直接 ready 均正常，存储、AI、PaddleOCR 为 ready。两个前台进程停止后数据仍保留在 `var-product`。
-
-## 10. 修改历史
+## 9. 修改历史
 
 | 版本 | 日期 | 状态 | 修改概要 |
 | --- | --- | --- | --- |
-| v1.0 | 2026-09-07 | 已被 v1.1 取代 | 建立第 1 切片本地生产启动、健康检查、退出、日志和备份恢复操作基线。 |
-| v1.1 | 2026-09-07 | 已被 v1.2 取代 | 加入认证环境变量、本机验收边界和覆盖认证库/全部工作区的 v2 产品快照。 |
-| v1.2 | 2026-09-08 | 已被 v1.3 取代 | 修正本机双进程启动说明；补充“注册后返回登录页”、无注册会话和新教师空工作区的验收步骤。 |
-| v1.3 | 2026-09-08 | 已被 v1.4 取代 | 固定 `unreached.cn` 根域名、`var-product` 和三个 LaunchAgent 的运行口径；排除外置盘/云盘，改为每日变更检测及最近两份自动快照，并加入公网故障与三网验收步骤。 |
-| v1.4 | 2026-09-08 | 已被 v1.5 取代 | 教师工作台入口改为 `td.unreached.cn`，同步生产 `APP_URL`、Tunnel 路由和后台运行说明；根域名保留给未来入口。 |
-| v1.5 | 2026-09-08 | 已被 v1.6 取代 | 记录 cloudflared、本地产品副本、自动备份去重、unified log 与合并后 LaunchAgent 安装顺序；公网入口仍未启用。 |
-| v1.6 | 2026-09-08 | 已被 v1.7 取代 | 记录 Cloudflare 免费 Zone、阿里云与 Cloudflare DNS 职责、精确名称服务器、切换前空记录核查、用户授权和回滚步骤。 |
-| v1.7 | 2026-09-09 | 已被 v1.8 取代 | 记录 DNS 生效、Tunnel 与 `td` 路由、三个 LaunchAgent、公网 HTTPS/鉴权检查及重启恢复实测；保留三网和微信 48 小时验收。 |
-| v1.8 | 2026-09-09 | 已被 v1.9 取代 | 记录 Shadowrocket TUN 与 Cloudflare QUIC 断线证据；HTTP/2 实测因 TCP 7844 被阻断而立即回滚，生产恢复自动协议，并保留校园网问题边界。 |
-| v1.9 | 2026-09-10 | 已被 v1.10 取代 | 记录 PR #15 课表 OCR 班级匹配升级、升级前快照、母文件夹检查、LaunchAgent 重启及公网构建一致性验收。 |
-| v1.10 | 2026-09-10 | 已被 v1.11 取代 | 记录 PR #16 上传隔离与导航稳定性升级、升级前快照、生产构建测试、LaunchAgent 重启及公网缓存边界验收。 |
-| v1.11 | 2026-09-10 | 已被 v1.12 取代 | 记录 PR #17 作息、资料缓存、上传错误和 OCR 富内容升级；包含恢复点、正式回填、测试、LaunchAgent 与公网构建一致性验收。 |
-| v1.12 | 2026-09-12 | 当前 | 记录首次备案审核期间删除 `td` 公网解析、停止 Tunnel 与后台生产应用，并使用唯一 `var-product` 进行 localhost 离线开发。 |
+| v1.x | 2026-09-08 至 2026-09-12 | 已归档 | MacBook、Cloudflare Tunnel 和备案期间本地运行方案。 |
+| v2.0 | 2026-09-16 | 当前 | 改为腾讯云硅谷、Nginx、systemd、Let's Encrypt 和服务器产品快照运维。 |
