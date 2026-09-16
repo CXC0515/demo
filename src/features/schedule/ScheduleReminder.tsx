@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import ResponsiveDialog from '../../components/ResponsiveDialog';
 import React, { useMemo, useState } from 'react';
 import { AlertCircle, Bell, CalendarDays, Check, Circle, FileScan, GripVertical, LayoutGrid, ListTodo, LoaderCircle, Pencil, Plus, Repeat2, Settings2, Sparkles, Trash2, X } from 'lucide-react';
 import { ReminderImportDraft, ScheduleItem, SchedulePeriod, SchoolClass, TimerReminder } from '../../domain/types';
@@ -100,6 +101,7 @@ const createScheduleColorSlots = (keys: string[]) => {
 export default function ScheduleReminder(props: Props) {
   const activeClasses = props.classes.filter((item) => item.status === 'active');
   const [section, setSection] = useState<'schedule' | 'reminders'>('schedule');
+  const [showTools, setShowTools] = useState(false);
   const [scope, setScope] = useState<'teacher' | 'class'>('teacher');
   const [reminderView, setReminderView] = useState<'list' | 'quadrant'>('quadrant');
   const [editingSchedule, setEditingSchedule] = useState<ScheduleItem | null>(null);
@@ -172,8 +174,9 @@ export default function ScheduleReminder(props: Props) {
                 ))}
               </select>
             )}
-            <span className="text-xs text-slate-400">{props.showWeekends ? '显示周一至周日' : '显示周一至周五'}</span>
-            <div className="ml-auto flex items-center gap-2">
+            <span className="hidden text-xs text-slate-400 md:inline">{props.showWeekends ? '显示周一至周日' : '显示周一至周五'}</span>
+            <button type="button" onClick={() => setShowTools(true)} className="ml-auto min-h-11 rounded-lg border px-3 text-sm font-bold sm:hidden">更多</button>
+            <div className="ml-auto hidden items-center gap-2 sm:flex">
               <button onClick={props.onOpenPeriodSettings} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-slate-300">
                 <Settings2 className="h-4 w-4" />
                 设置课节时间
@@ -184,17 +187,19 @@ export default function ScheduleReminder(props: Props) {
               </button>
             </div>
           </div>
+          {showTools && <ResponsiveDialog title="课表操作" onClose={() => setShowTools(false)}><div className="grid gap-3">
+            <button type="button" onClick={() => { setShowTools(false); props.onOpenPeriodSettings(); }} className="min-h-11 rounded-xl border px-4 text-left">设置课节时间</button>
+            <button type="button" onClick={() => { setShowTools(false); setShowImport(true); }} className="min-h-11 rounded-xl border px-4 text-left">扫描导入</button>
+          </div></ResponsiveDialog>}
           <div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-            <div style={{ minWidth: `${150 + visibleDays * 142}px` }}>
+            <div style={{ '--schedule-days': visibleDays } as React.CSSProperties}>
               <div
-                className="sticky top-0 z-20 grid border-b border-slate-200 bg-slate-50 text-center text-xs font-bold text-slate-500 dark:border-zinc-800 dark:bg-zinc-950"
-                style={{
-                  gridTemplateColumns: `150px repeat(${visibleDays},minmax(142px,1fr))`,
-                }}
+                className="schedule-row sticky top-0 z-20 grid border-b border-slate-200 bg-slate-50 text-center text-xs font-bold text-slate-500 dark:border-zinc-800 dark:bg-zinc-950"
+
               >
-                <div className="sticky left-0 z-30 bg-slate-50 px-4 py-3 text-left dark:bg-zinc-950">课节 / 时段</div>
+                <div className="sticky left-0 z-30 bg-slate-50 px-1 py-3 text-center sm:px-4 sm:text-left dark:bg-zinc-950"><span className="sm:hidden">课节</span><span className="hidden sm:inline">课节 / 时段</span></div>
                 {dayNames.slice(0, visibleDays).map((day) => (
-                  <div key={day} className="border-l border-slate-200 px-3 py-3 dark:border-zinc-800">
+                  <div key={day} className="border-l border-slate-200 px-0.5 py-3 sm:px-3 dark:border-zinc-800">
                     {day}
                   </div>
                 ))}
@@ -202,14 +207,12 @@ export default function ScheduleReminder(props: Props) {
               {periods.map((period) => (
                 <div
                   key={period.period}
-                  className="grid min-h-[70px] border-b border-slate-100 last:border-b-0 dark:border-zinc-800"
-                  style={{
-                    gridTemplateColumns: `150px repeat(${visibleDays},minmax(142px,1fr))`,
-                  }}
+                  className="schedule-row grid min-h-[76px] border-b border-slate-100 last:border-b-0 dark:border-zinc-800"
+
                 >
-                  <div className="sticky left-0 z-10 flex flex-col justify-center bg-slate-50/95 px-4 dark:bg-zinc-950/95">
-                    <strong className="text-xs">{period.label}</strong>
-                    <span className="mt-1 font-mono text-[10px] text-slate-400">{periodTime(period)}</span>
+                  <div className="sticky left-0 z-10 flex flex-col justify-center bg-slate-50/95 px-1 sm:px-4 dark:bg-zinc-950/95">
+                    <strong className="text-center text-xs sm:text-left"><span className="sm:hidden">{period.period}</span><span className="hidden sm:inline">{period.label}</span></strong>
+                    <span className="mt-1 text-center font-mono text-xs text-slate-500 sm:text-left"><span className="block sm:hidden">{period.startTime}<br />{period.endTime}</span><span className="hidden sm:inline">{periodTime(period)}</span></span>
                   </div>
                   {Array.from({ length: visibleDays }, (_, di) => {
                     const item = itemMap.get(`${di + 1}-${period.period}`);
@@ -224,6 +227,9 @@ export default function ScheduleReminder(props: Props) {
       ) : (
         <ReminderWorkspace reminders={props.reminders} view={reminderView} onView={setReminderView} onAdd={() => setEditingReminder(emptyReminder())} onBatch={() => setShowReminderImport(true)} onEdit={setEditingReminder} onSave={props.onAddReminder} onSaveBatch={props.onUpdateReminderBatch} onToggle={props.onToggleReminderStatus} onDelete={props.onDeleteReminder} />
       )}
+      <style>{`.schedule-row { grid-template-columns: 42px repeat(var(--schedule-days), minmax(0, 1fr)); }
+        @media (min-width: 640px) { .schedule-row { grid-template-columns: 96px repeat(var(--schedule-days), minmax(70px, 1fr)); } }
+        @media (min-width: 1024px) { .schedule-row { grid-template-columns: 150px repeat(var(--schedule-days), minmax(90px, 1fr)); } }`}</style>
       {editingSchedule && (
         <ScheduleEditor
           item={editingSchedule}
@@ -267,7 +273,7 @@ export default function ScheduleReminder(props: Props) {
 
 function Tab({ active, onClick, icon: Icon, children }: { active: boolean; onClick: () => void; icon: React.ElementType; children: React.ReactNode }) {
   return (
-    <button onClick={onClick} className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-bold ${active ? 'bg-white text-slate-900 shadow-sm dark:bg-zinc-800 dark:text-white' : 'text-slate-500'}`}>
+    <button onClick={onClick} className={`inline-flex min-h-11 items-center gap-1 rounded-lg px-2 py-2 text-xs font-bold sm:gap-1.5 sm:px-4 ${active ? 'bg-white text-slate-900 shadow-sm dark:bg-zinc-800 dark:text-white' : 'text-slate-500'}`}>
       <Icon className="h-4 w-4" />
       {children}
     </button>
@@ -293,8 +299,8 @@ function Modal({ title, onClose, children, footer, wide = false, compactFull = f
 function ScheduleCell({ item, scope, colorSlot, onClick }: { key?: React.Key; item: ScheduleItem | undefined; scope: 'teacher' | 'class'; colorSlot: number | undefined; onClick: () => void }) {
   if (!item)
     return (
-      <button onClick={onClick} className="min-w-0 border-l border-slate-100 p-1.5 text-left hover:bg-emerald-50/50 dark:border-zinc-800 dark:hover:bg-emerald-950/20">
-        <span className="flex h-full items-center justify-center text-[10px] text-slate-300">＋ 安排</span>
+      <button onClick={onClick} className="min-w-0 border-l border-slate-100 p-0.5 sm:p-1.5 text-left hover:bg-emerald-50/50 dark:border-zinc-800 dark:hover:bg-emerald-950/20">
+        <span className="flex h-full items-center justify-center text-xs text-slate-400"><span aria-label="安排课程">＋<span className="hidden sm:inline"> 安排</span></span></span>
       </button>
     );
   const hasClass = Boolean(item.classId || item.className);
@@ -310,10 +316,10 @@ function ScheduleCell({ item, scope, colorSlot, onClick }: { key?: React.Key; it
         }
       : undefined;
   return (
-    <button onClick={onClick} className="min-w-0 border-l border-slate-100 p-1.5 text-center hover:bg-slate-50 dark:border-zinc-800 dark:hover:bg-zinc-800/40">
-      <span style={style} className={`flex h-full min-w-0 flex-col items-center justify-center rounded-lg border px-2.5 py-2 text-center ${lowConfidence ? 'border-amber-300 bg-amber-50 text-amber-900' : colorSlot ? '' : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-slate-200'}`}>
-        <strong className="w-full truncate text-sm">{primary}</strong>
-        {secondary ? <span className="mt-1 w-full truncate text-[10px] opacity-75">{secondary}</span> : null}
+    <button onClick={onClick} className="min-w-0 border-l border-slate-100 p-0.5 sm:p-1.5 text-center hover:bg-slate-50 dark:border-zinc-800 dark:hover:bg-zinc-800/40">
+      <span style={style} className={`flex h-full min-w-0 flex-col items-center justify-center rounded-lg border px-0.5 py-2 text-center sm:px-2.5 ${lowConfidence ? 'border-amber-300 bg-amber-50 text-amber-900' : colorSlot ? '' : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-slate-200'}`}>
+        <strong className="w-full break-words text-xs font-bold sm:truncate sm:text-sm">{primary}</strong>
+        {secondary ? <span className="mt-1 w-full break-words text-xs opacity-75 sm:truncate">{secondary}</span> : null}
       </span>
     </button>
   );
@@ -406,6 +412,7 @@ function ScheduleEditor({ item, periods, classes, onChange, onClose, onSave, onD
 }
 
 function ReminderWorkspace({ reminders, view, onView, onAdd, onBatch, onEdit, onSave, onSaveBatch, onToggle, onDelete }: { reminders: TimerReminder[]; view: 'list' | 'quadrant'; onView: (v: 'list' | 'quadrant') => void; onAdd: () => void; onBatch: () => void; onEdit: (item: TimerReminder) => void; onSave: (item: TimerReminder) => void | Promise<void>; onSaveBatch: (items: TimerReminder[]) => Promise<void>; onToggle: (id: string) => void | Promise<void>; onDelete: (id: string) => void | Promise<void> }) {
+  const [showTools, setShowTools] = useState(false);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(true);
   const [showRecurring, setShowRecurring] = useState(false);
@@ -468,25 +475,31 @@ function ReminderWorkspace({ reminders, view, onView, onAdd, onBatch, onEdit, on
           </Tab>
         </div>
         {view === 'quadrant' && completed.length ? (
-          <button onClick={() => setShowCompleted((value) => !value)} className={`h-9 rounded-lg border px-3 text-xs font-bold ${showCompleted ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-500'}`}>
+          <button onClick={() => setShowCompleted((value) => !value)} className={`hidden sm:block h-9 rounded-lg border px-3 text-xs font-bold ${showCompleted ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-500'}`}>
             {showCompleted ? '隐藏' : '显示'}已完成 {completed.length}
           </button>
         ) : null}
-        <button onClick={() => setShowRecurring(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-300">
+        <button onClick={() => setShowRecurring(true)} className="hidden sm:inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-300">
           <Repeat2 className="h-4 w-4" />
           周期任务 {recurring.length}
         </button>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={onBatch} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-bold text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
+          <button type="button" onClick={() => setShowTools(true)} className="min-h-11 rounded-lg border px-3 text-sm font-bold sm:hidden">更多</button>
+          <button onClick={onBatch} className="hidden sm:inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-bold text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
             <Sparkles className="h-4 w-4" />
             AI 批量创建
           </button>
-          <button onClick={onAdd} className="inline-flex h-9 items-center gap-1 rounded-lg bg-emerald-700 px-3 text-xs font-bold text-white">
+          <button onClick={onAdd} className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-emerald-700 px-3 text-xs font-bold text-white">
             <Plus className="h-4 w-4" />
             新建日程
           </button>
         </div>
       </div>
+      {showTools && <ResponsiveDialog title="日程操作" onClose={() => setShowTools(false)}><div className="grid gap-3">
+        <button type="button" onClick={() => { setShowTools(false); onBatch(); }} className="min-h-11 rounded-xl border px-4 text-left">AI 批量创建</button>
+        <button type="button" onClick={() => { setShowTools(false); setShowRecurring(true); }} className="min-h-11 rounded-xl border px-4 text-left">周期任务 · {recurring.length}</button>
+        {view === 'quadrant' && <button type="button" onClick={() => { setShowCompleted(value => !value); setShowTools(false); }} className="min-h-11 rounded-xl border px-4 text-left">{showCompleted ? '隐藏' : '显示'}已完成日程</button>}
+      </div></ResponsiveDialog>}
       {view === 'list' ? (
         <div className="space-y-5">
           {group('时间待定', untimed, 'text-amber-700')}
@@ -497,11 +510,11 @@ function ReminderWorkspace({ reminders, view, onView, onAdd, onBatch, onEdit, on
           {!reminders.length && <Empty />}
         </div>
       ) : (
-        <div className="grid min-h-0 gap-3 md:grid-cols-2">
+        <div className="grid min-h-0 grid-cols-2 gap-2 sm:gap-3">
           {quadrants.map(([label, important, urgent, color]) => (
-            <div key={label} onDragOver={(event) => event.preventDefault()} onDrop={() => moveToQuadrant(important, urgent)} className={`min-h-44 rounded-2xl border bg-white p-3 transition-colors ${color} ${draggedId ? 'border-dashed' : 'dark:border-zinc-800'} dark:bg-zinc-900/50`}>
+            <div key={label} onDragOver={(event) => event.preventDefault()} onDrop={() => moveToQuadrant(important, urgent)} className={`min-h-44 min-w-0 rounded-2xl border bg-white p-2 sm:p-3 transition-colors ${color} ${draggedId ? 'border-dashed' : 'dark:border-zinc-800'} dark:bg-zinc-900/50`}>
               <h3 className="mb-3 text-xs font-black">{label}</h3>
-              <div className="space-y-2">{quadrantItems.filter((item) => Boolean(item.important) === important && Boolean(item.urgent) === urgent).map((item) => card(item, item.status === 'active'))}</div>
+              <div className="space-y-2">{quadrantItems.filter((item) => Boolean(item.important) === important && Boolean(item.urgent) === urgent).map(item => <React.Fragment key={item.id}><div className="sm:hidden"><button type="button" onClick={() => onEdit(item)} className={`block min-h-14 w-full rounded-xl border p-2 text-left sm:hidden ${item.status === 'completed' ? 'bg-slate-50 text-slate-500' : 'bg-white text-slate-800'} dark:bg-zinc-900 dark:text-slate-200`}><strong className={`block break-words text-sm ${item.status === 'completed' ? 'line-through' : ''}`}>{item.name}</strong><span className="mt-1 block break-words text-xs text-slate-500">{formatReminderTime(item)}</span><span className="mt-1 block text-xs text-emerald-700">{item.status === 'completed' ? '已完成 · 查看' : '查看 / 调整'}</span></button><button type="button" onClick={() => void onToggle(item.id)} className="min-h-11 w-full text-xs font-bold text-emerald-700">{item.status === 'completed' ? '恢复日程' : '标记完成'}</button></div><div className="hidden sm:block">{card(item, item.status === 'active')}</div></React.Fragment>)}</div>
             </div>
           ))}
         </div>

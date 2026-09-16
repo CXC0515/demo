@@ -24,6 +24,7 @@ import {
 import { useAuth } from '../auth/AuthGate';
 import { ClassroomLayout, CommitteeRole, SchoolClass, Student } from '../../domain/types';
 import { exportClassroomLayout, getClassroomLayout, saveClassroomLayout } from '../../services/classroomApi';
+import ResponsiveDialog from '../../components/ResponsiveDialog';
 import BehaviorTagEditor from '../students/BehaviorTagEditor';
 
 interface VirtualClassroomProps {
@@ -66,6 +67,11 @@ export default function VirtualClassroom({
   onUpdateStudent
 }: VirtualClassroomProps) {
   const { user } = useAuth();
+  const [showPlacement, setShowPlacement] = useState(false);
+  const [swapAxis, setSwapAxis] = useState<'row' | 'column'>('column');
+  const [swapFrom, setSwapFrom] = useState(0);
+  const [swapTo, setSwapTo] = useState(1);
+  const [undoLayout, setUndoLayout] = useState<ClassroomLayout | null>(null);
   const [layout, setLayout] = useState<ClassroomLayout | null>(null);
   const [draft, setDraft] = useState<ClassroomLayout | null>(null);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
@@ -104,6 +110,8 @@ export default function VirtualClassroom({
     setLoading(!cachedLayout);
     setLayout(cachedLayout ?? null);
     setDraft(null);
+    setUndoLayout(null);
+    setShowPlacement(false);
     setSelectedStudentId(null);
     setPlacementStudentId(null);
     setMessage(null);
@@ -150,8 +158,36 @@ export default function VirtualClassroom({
     setDraft(current => current ? { ...current, seats } : current);
   };
 
+  // Remap occupied seats as a permutation: empty seats move with their column/row.
+  const shiftSeats = (direction: -1 | 1) => {
+    if (!draft || saving) return;
+    setUndoLayout(cloneLayout(draft));
+    updateDraftSeats(draft.seats.map(seat => ({ ...seat,
+      seatIndex: Math.floor(seat.seatIndex / draft.columnCount) * draft.columnCount
+        + (seat.seatIndex % draft.columnCount + direction + draft.columnCount) % draft.columnCount
+    })));
+    setPlacementStudentId(null);
+    setMessage({ type: 'success', text: `${direction === -1 ? '向左' : '向右'}循环移列已预览，尚未保存。` });
+  };
+  const swapLines = () => {
+    if (!draft || saving) return;
+    const count = swapAxis === 'row' ? draft.rowCount : draft.columnCount;
+    if (swapFrom === swapTo || swapFrom >= count || swapTo >= count) return;
+    setUndoLayout(cloneLayout(draft));
+    updateDraftSeats(draft.seats.map(seat => {
+      let row = Math.floor(seat.seatIndex / draft.columnCount);
+      let column = seat.seatIndex % draft.columnCount;
+      const exchange = (value: number) => value === swapFrom ? swapTo : value === swapTo ? swapFrom : value;
+      if (swapAxis === 'row') row = exchange(row); else column = exchange(column);
+      return { ...seat, seatIndex: row * draft.columnCount + column };
+    }));
+    setPlacementStudentId(null);
+    setMessage({ type: 'success', text: `第 ${swapFrom + 1} ${swapAxis === 'row' ? '行' : '列'}与第 ${swapTo + 1} ${swapAxis === 'row' ? '行' : '列'}已交换，尚未保存。` });
+  };
+
   const handleSeatClick = (seatIndex: number) => {
-    if (!activeLayout) return;
+    if (!activeLayout || saving) return;
+    if (editMode) setUndoLayout(null);
     const occupantId = activeLayout.seats.find(seat => seat.seatIndex === seatIndex)?.studentId;
     if (!editMode) {
       if (occupantId) setSelectedStudentId(occupantId);
@@ -182,13 +218,15 @@ export default function VirtualClassroom({
   };
 
   const removePlacementStudent = () => {
-    if (!activeLayout || !placementStudentId) return;
+    if (saving || !activeLayout || !placementStudentId) return;
+    setUndoLayout(null);
     updateDraftSeats(activeLayout.seats.filter(seat => seat.studentId !== placementStudentId));
     setPlacementStudentId(null);
   };
 
   const resizeLayout = (nextRows: number, nextColumns: number) => {
-    if (!draft || nextRows < 1 || nextRows > 10 || nextColumns < 1 || nextColumns > 12) return;
+    if (saving || !draft || nextRows < 1 || nextRows > 10 || nextColumns < 1 || nextColumns > 12) return;
+    setUndoLayout(null);
     const converted = draft.seats.map(seat => {
       const row = Math.floor(seat.seatIndex / draft.columnCount);
       const column = seat.seatIndex % draft.columnCount;
@@ -208,7 +246,8 @@ export default function VirtualClassroom({
   };
 
   const autoArrange = () => {
-    if (!draft) return;
+    if (!draft || saving) return;
+    setUndoLayout(null);
     updateDraftSeats(classStudents
       .slice(0, draft.rowCount * draft.columnCount)
       .map((student, seatIndex) => ({ seatIndex, studentId: student.id })));
@@ -221,7 +260,7 @@ export default function VirtualClassroom({
   };
 
   const saveDraft = async () => {
-    if (!draft) return;
+    if (!draft || saving) return;
     setSaving(true);
     setMessage(null);
     try {
@@ -229,10 +268,11 @@ export default function VirtualClassroom({
       layoutCache.current.set(saved.classId, saved);
       setLayout(saved);
       setDraft(null);
+      setSelectedStudentId(null);
       setPlacementStudentId(null);
       setMessage({ type: 'success', text: '座位表已保存。' });
     } catch (error) {
-      setMessage({ type: 'error', text: `保存失败：${error instanceof Error ? error.message : '未知错误'}` });
+      setMessage({ type: 'error', text: '座位保存失败，当前草稿仍保留在页面中。请检查网络后重试；刷新前请先保留本次安排。' });
     } finally {
       setSaving(false);
     }
@@ -266,6 +306,23 @@ export default function VirtualClassroom({
     }
   };
 
+  const quickActions = draft && <div className="space-y-2 rounded-xl border border-slate-200 p-3 dark:border-zinc-700">
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => shiftSeats(-1)} className="min-h-11 rounded-lg bg-slate-100 px-3 text-sm dark:bg-zinc-800">← 向左轮换</button>
+                <button type="button" onClick={() => shiftSeats(1)} className="min-h-11 rounded-lg bg-slate-100 px-3 text-sm dark:bg-zinc-800">向右轮换 →</button>
+                {undoLayout && <button type="button" disabled={saving} onClick={() => { setDraft(undoLayout); setUndoLayout(null); setPlacementStudentId(null); setMessage(null); }} className="min-h-11 px-3 text-sm text-emerald-700">撤销快捷换位</button>}
+              </div>
+              <p className="text-xs text-slate-500">按当前图示左右方向；向左时最左列移到最右，向右时最右列移到最左。预览后点击保存。</p>
+              <div className="hidden flex-wrap items-center gap-2 lg:flex">
+                <select aria-label="交换行或列" value={swapAxis} onChange={event => { setSwapAxis(event.target.value as 'row' | 'column'); setSwapFrom(0); setSwapTo(1); }} className="min-h-11 rounded-lg border px-2 dark:bg-zinc-900"><option value="column">交换两列</option><option value="row">交换两行</option></select>
+                {[swapFrom, swapTo].map((value, index) => <select key={index} aria-label={index === 0 ? '交换起点' : '交换终点'} value={value} onChange={event => (index === 0 ? setSwapFrom : setSwapTo)(Number(event.target.value))} className="min-h-11 rounded-lg border px-2 dark:bg-zinc-900">
+                  {Array.from({ length: swapAxis === 'row' ? draft.rowCount : draft.columnCount }, (_, i) => <option key={i} value={i}>第 {i + 1} {swapAxis === 'row' ? '行' : '列'}</option>)}
+                </select>)}
+                <button type="button" disabled={swapFrom === swapTo || Math.max(swapFrom, swapTo) >= (swapAxis === 'row' ? draft.rowCount : draft.columnCount)} onClick={swapLines} className="min-h-11 rounded-lg border px-3 text-sm disabled:opacity-40">预览交换</button>
+                <span className="text-xs text-slate-500">第 1 行靠近讲台</span>
+              </div>
+            </div>;
+
   const unassignedPanel = (
     <section className="rounded-md border border-slate-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="mb-3 flex items-center justify-between">
@@ -277,7 +334,7 @@ export default function VirtualClassroom({
           <button
             type="button"
             key={student.id}
-            onClick={() => setPlacementStudentId(current => current === student.id ? null : student.id)}
+            onClick={() => { setPlacementStudentId(student.id); setShowPlacement(false); }}
             className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left ${placementStudentId === student.id ? 'border-amber-400 bg-amber-50' : 'border-slate-100 bg-slate-50'}`}
           >
             <span className="truncate text-sm font-semibold text-slate-700">{student.name}</span>
@@ -311,7 +368,7 @@ export default function VirtualClassroom({
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 animate-fade-in" id="classroom-page">
+    <div className="flex h-full min-h-0 flex-col gap-4 animate-fade-in max-xl:h-auto" id="classroom-page">
       <header className="flex shrink-0 flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100">
@@ -323,8 +380,9 @@ export default function VirtualClassroom({
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={effectiveClassId}
-            onChange={event => onSelectClass(event.target.value)}
-            className="h-9 min-w-32 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-200"
+            disabled={saving}
+            onChange={event => { if (!editMode || window.confirm('座位修改尚未保存，切换班级将放弃修改。继续切换吗？')) onSelectClass(event.target.value); }}
+            className="min-h-11 min-w-32 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-200"
             aria-label="切换班级"
           >
             {classes.filter(schoolClass => schoolClass.status === 'active').map(schoolClass => (
@@ -335,8 +393,9 @@ export default function VirtualClassroom({
             <>
               <button
                 type="button"
-                onClick={() => { setDraft(null); setPlacementStudentId(null); setMessage(null); }}
-                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-300"
+                disabled={saving}
+                onClick={() => { setDraft(null); setSelectedStudentId(null); setPlacementStudentId(null); setMessage(null); }}
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-300"
               >
                 <X className="h-4 w-4" />取消
               </button>
@@ -344,7 +403,7 @@ export default function VirtualClassroom({
                 type="button"
                 onClick={() => void saveDraft()}
                 disabled={saving}
-                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white disabled:opacity-60"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white disabled:opacity-60"
               >
                 {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 保存座位
@@ -352,7 +411,7 @@ export default function VirtualClassroom({
             </>
           ) : (
             <>
-              <label className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-300">
+              <label className="inline-flex min-h-11 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-300">
                 <input
                   type="checkbox"
                   checked={includeStudentNo}
@@ -368,7 +427,7 @@ export default function VirtualClassroom({
                 type="button"
                 onClick={() => void exportLayout()}
                 disabled={!layout || exporting}
-                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-200"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-200"
               >
                 {exporting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                 导出 Excel
@@ -379,9 +438,10 @@ export default function VirtualClassroom({
                   if (!layout) return;
                   setSelectedStudentId(null);
                   setDraft(cloneLayout(layout));
+                  setUndoLayout(null);
                 }}
                 disabled={!layout}
-                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white disabled:opacity-50"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white disabled:opacity-50"
               >
                 <BookOpen className="h-4 w-4" />编辑座位
               </button>
@@ -402,31 +462,37 @@ export default function VirtualClassroom({
           <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />读取座位表
         </div>
       ) : (
-        <div className={`grid min-h-0 flex-1 gap-5 ${editMode ? 'overflow-y-auto xl:grid-cols-[minmax(0,1fr)_340px] xl:overflow-hidden' : 'overflow-hidden'}`}>
-          {editMode && <div className="xl:hidden">{unassignedPanel}</div>}
-          <section className="flex min-h-0 min-w-0 flex-col gap-3">
+        <div className={`grid min-h-0 flex-1 gap-5 ${editMode ? 'overflow-y-auto xl:grid-cols-[minmax(0,1fr)_340px] xl:overflow-hidden' : 'max-xl:overflow-visible xl:overflow-hidden'}`}>
+          {editMode && <div className="flex flex-wrap items-center gap-2 xl:hidden">
+            <button type="button" onClick={() => setShowPlacement(true)} className="min-h-11 rounded-xl border border-emerald-200 px-3 text-sm font-bold text-emerald-700">待安排学生 · {unassignedStudents.length}</button>
+            <span role="status" className="text-sm text-slate-600">{placementStudentId ? `已选 ${studentById.get(placementStudentId)?.name}，点击目标座位` : '点击一位学生，再点目标座位即可交换'}</span>
+            {placementStudentId && <><button type="button" onClick={() => setPlacementStudentId(null)} className="min-h-11 px-3 text-sm">取消选择</button>{seatedStudentIds.has(placementStudentId) && <button type="button" onClick={removePlacementStudent} className="min-h-11 px-3 text-sm text-red-700">移出座位</button>}</>}
+          </div>}
+          <section className="flex min-h-0 min-w-0 flex-col gap-3 max-xl:shrink-0">
             {editMode && (
               <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-slate-200 pb-3">
                 <span className="text-xs font-semibold text-slate-500">行数</span>
                 <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
-                  <button type="button" title="减少一行" onClick={() => resizeLayout(draft.rowCount - 1, draft.columnCount)} className="p-2 text-slate-600"><Minus className="h-4 w-4" /></button>
+                  <button type="button" title="减少一行" onClick={() => resizeLayout(draft.rowCount - 1, draft.columnCount)} className="min-h-11 min-w-11 p-2 text-slate-600"><Minus className="h-4 w-4" /></button>
                   <span className="min-w-8 border-x border-slate-200 px-2 py-2 text-center text-xs font-bold">{draft.rowCount}</span>
-                  <button type="button" title="增加一行" onClick={() => resizeLayout(draft.rowCount + 1, draft.columnCount)} className="p-2 text-slate-600"><Plus className="h-4 w-4" /></button>
+                  <button type="button" title="增加一行" onClick={() => resizeLayout(draft.rowCount + 1, draft.columnCount)} className="min-h-11 min-w-11 p-2 text-slate-600"><Plus className="h-4 w-4" /></button>
                 </div>
                 <span className="text-xs font-semibold text-slate-500">列数</span>
                 <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
-                  <button type="button" title="减少一列" onClick={() => resizeLayout(draft.rowCount, draft.columnCount - 1)} className="p-2 text-slate-600"><Minus className="h-4 w-4" /></button>
+                  <button type="button" title="减少一列" onClick={() => resizeLayout(draft.rowCount, draft.columnCount - 1)} className="min-h-11 min-w-11 p-2 text-slate-600"><Minus className="h-4 w-4" /></button>
                   <span className="min-w-8 border-x border-slate-200 px-2 py-2 text-center text-xs font-bold">{draft.columnCount}</span>
-                  <button type="button" title="增加一列" onClick={() => resizeLayout(draft.rowCount, draft.columnCount + 1)} className="p-2 text-slate-600"><Plus className="h-4 w-4" /></button>
+                  <button type="button" title="增加一列" onClick={() => resizeLayout(draft.rowCount, draft.columnCount + 1)} className="min-h-11 min-w-11 p-2 text-slate-600"><Plus className="h-4 w-4" /></button>
                 </div>
-                <button type="button" onClick={autoArrange} className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
+                <button type="button" onClick={autoArrange} className="ml-auto inline-flex min-h-11 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
                   <Sparkles className="h-4 w-4 text-amber-500" />按学号排列
                 </button>
               </div>
             )}
 
+            {editMode && <div className="xl:hidden">{quickActions}</div>}
+
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/40 sm:p-4">
-              <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden">
+              <div className="min-h-0 flex-1 overflow-auto">
                 <div
                   className="grid h-full"
                   style={{
@@ -434,7 +500,8 @@ export default function VirtualClassroom({
                     gridTemplateRows: 'minmax(0, 1fr) 20px',
                     columnGap: '8px',
                     rowGap: '5px',
-                    minWidth: `${activeLayout.columnCount * 94 + 32}px`
+                    minWidth: `${activeLayout.columnCount * 82 + 32}px`,
+                    minHeight: `${activeLayout.rowCount * 64 + 25}px`
                   }}
                 >
                   <div
@@ -451,7 +518,7 @@ export default function VirtualClassroom({
                     style={{
                       gridTemplateColumns: `repeat(${activeLayout.columnCount}, minmax(74px, 1fr))`,
                       gridTemplateRows: `repeat(${activeLayout.rowCount}, minmax(0, 1fr))`,
-                      columnGap: 'clamp(12px, 2vw, 24px)',
+                      columnGap: '8px',
                       rowGap: '6px'
                     }}
                   >
@@ -496,7 +563,7 @@ export default function VirtualClassroom({
                   <span aria-hidden="true" />
                   <div
                     className="grid text-[10px] font-semibold text-slate-400"
-                    style={{ gridTemplateColumns: `repeat(${activeLayout.columnCount}, minmax(74px, 1fr))`, columnGap: 'clamp(12px, 2vw, 24px)' }}
+                    style={{ gridTemplateColumns: `repeat(${activeLayout.columnCount}, minmax(74px, 1fr))`, columnGap: '8px' }}
                     aria-hidden="true"
                   >
                     {Array.from({ length: activeLayout.columnCount }, (_, column) => (
@@ -505,8 +572,8 @@ export default function VirtualClassroom({
                   </div>
                 </div>
               </div>
-              <div className="mx-auto my-3 flex h-9 w-36 shrink-0 items-center justify-center rounded-sm border border-amber-200 bg-amber-50 text-xs font-semibold text-amber-900">讲台</div>
-              <div className="mx-auto flex h-11 min-w-80 max-w-3xl shrink-0 items-center justify-center rounded-sm bg-slate-800 text-xs font-semibold text-white">黑板</div>
+              <div className="mx-auto my-3 flex min-h-11 w-36 shrink-0 items-center justify-center rounded-sm border border-amber-200 bg-amber-50 text-xs font-semibold text-amber-900">讲台</div>
+              <div className="mx-auto flex h-11 w-full max-w-3xl shrink-0 items-center justify-center rounded-sm bg-slate-800 text-xs font-semibold text-white">黑板</div>
             </div>
 
             <div className="flex shrink-0 flex-wrap gap-x-5 gap-y-2 text-xs text-slate-500">
@@ -519,10 +586,11 @@ export default function VirtualClassroom({
             </div>
           </section>
 
-          {editMode && <aside className="hidden min-w-0 xl:block">{unassignedPanel}</aside>}
+          {editMode && <aside className="hidden min-w-0 space-y-4 overflow-y-auto xl:block">{quickActions}{unassignedPanel}</aside>}
         </div>
       )}
 
+      {showPlacement && editMode && <ResponsiveDialog title="选择待安排学生" onClose={() => setShowPlacement(false)}>{unassignedPanel}</ResponsiveDialog>}
       {selectedStudent && !editMode && createPortal(
         <>
           <button
