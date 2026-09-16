@@ -65,8 +65,9 @@ export const verifyProductSnapshot = async (snapshotInput: string) => {
 
 const remapWorkspacePaths = async (targetRoot: string, sourceRoot: string) => {
   const workspaceRoot = path.join(targetRoot, 'workspaces');
-  for (const workspaceId of await readdir(workspaceRoot)) {
-    const root = path.join(workspaceRoot, workspaceId);
+  for (const entry of await readdir(workspaceRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const root = path.join(workspaceRoot, entry.name);
     const resourceDb = path.join(root, 'data', 'resources.sqlite');
     try {
       const db = new Database(resourceDb); const rows = db.prepare('SELECT id, disk_path FROM resources').all() as Array<{ id: string; disk_path: string }>;

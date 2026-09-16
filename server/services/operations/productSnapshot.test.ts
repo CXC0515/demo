@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { afterEach } from 'node:test';
 import Database from 'better-sqlite3';
-import { createManagedProductSnapshot } from './productSnapshot';
+import { createManagedProductSnapshot, createProductSnapshot, restoreProductSnapshot } from './productSnapshot';
 
 const temporaryRoots: string[] = [];
 afterEach(async () => {
@@ -65,4 +65,16 @@ test('creates a new recovery point when an older snapshot is damaged', async () 
   const replacement = await createManagedProductSnapshot(source, automatic, 2, new Date('2026-09-08T02:00:00Z'));
   assert.equal(replacement.status, 'created');
   assert.equal((await readdir(automatic)).filter(name => name.startsWith('product-')).length, 2);
+});
+
+test('restores a snapshot when the workspaces root contains metadata files', async () => {
+  const { source } = await createFixture();
+  await writeFile(path.join(source, 'workspaces', '.DS_Store'), 'metadata');
+  const snapshot = path.join(path.dirname(source), 'snapshot');
+  const restored = path.join(path.dirname(source), 'restored');
+
+  await createProductSnapshot(source, snapshot);
+  await restoreProductSnapshot(snapshot, restored);
+
+  assert.deepEqual((await readdir(path.join(restored, 'workspaces'))).sort(), ['.DS_Store', 'workspace-test']);
 });
