@@ -123,15 +123,15 @@ export default function TagManagement({ onShowToast }: TagManagementProps) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-5">
-        <aside className="glass-panel rounded-[24px] p-4 space-y-2">
+        <aside className="glass-panel rounded-[24px] grid grid-cols-4 gap-1 p-1 lg:block lg:space-y-2 lg:p-4">
           {groups.map(group => (
             <button
               key={group.id}
               onClick={() => setActiveGroupId(group.id)}
-              className={`w-full px-4 py-3 rounded-2xl text-left transition-all ${activeGroupId === group.id ? 'bg-emerald-700 text-white shadow-lg' : 'hover:bg-white/70 dark:hover:bg-zinc-800 text-slate-600 dark:text-slate-300'}`}
+              className={`min-h-11 min-w-0 w-full px-1 py-3 rounded-2xl text-center lg:px-4 lg:text-left transition-all ${activeGroupId === group.id ? 'bg-emerald-700 text-white shadow-lg' : 'hover:bg-white/70 dark:hover:bg-zinc-800 text-slate-600 dark:text-slate-300'}`}
             >
-              <span className="block text-sm font-black">{group.name}</span>
-              <span className={`block text-[11px] mt-1 ${activeGroupId === group.id ? 'text-white/75' : 'text-slate-400'}`}>{group.tags.length} 个标签</span>
+              <span className="block text-sm font-black"><span className="lg:hidden">{{family: '家庭关注', academic: '学情状态', behavior: '日常表现', risk: '风险提醒'}[group.id]}</span><span className="hidden lg:inline">{group.name}</span></span>
+              <span className={`hidden lg:block text-xs mt-1 ${activeGroupId === group.id ? 'text-white/75' : 'text-slate-400'}`}>{group.tags.length} 个标签</span>
             </button>
           ))}
         </aside>
@@ -145,14 +145,14 @@ export default function TagManagement({ onShowToast }: TagManagementProps) {
               </h3>
               <p className="text-xs text-slate-500 mt-1">{activeGroup.desc}</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
               <input
                 value={newTagName}
                 onChange={(e) => setNewTagName(e.target.value)}
                 placeholder="输入新标签"
-                className="px-3 py-2 rounded-2xl bg-slate-50/80 dark:bg-zinc-900/60 border border-slate-200/70 dark:border-zinc-800/80 text-sm focus:outline-none"
+                className="min-w-0 flex-1 px-3 py-2 rounded-2xl bg-slate-50/80 dark:bg-zinc-900/60 border border-slate-200/70 dark:border-zinc-800/80 text-sm focus:outline-none"
               />
-              <button onClick={addTag} className="px-3 py-2 rounded-2xl bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all">
+              <button onClick={addTag} className="min-h-11 shrink-0 px-3 py-2 rounded-2xl bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all">
                 <Plus className="w-4 h-4" />
                 添加
               </button>

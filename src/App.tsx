@@ -636,6 +636,13 @@ export default function App() {
               onPreviewBulkImport={previewRosterStudentsImport}
               onBulkMoveClass={handleBulkMoveClass}
               onBulkAddTags={handleBulkAddTags}
+              onViewStudentProfile={(studentId) => {
+                const student = students.find(item => item.id === studentId);
+                if (student) setSelectedClassId(student.classId);
+                setSelectedStudentId(studentId);
+                setDiagnosisRequestedTab('student');
+                setActivePage('diagnosis-workspace');
+              }}
               targetStudentId={studentManagementTargetId}
               onTargetStudentHandled={() => setStudentManagementTargetId(null)}
             />

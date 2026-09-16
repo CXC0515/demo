@@ -28,6 +28,7 @@ interface StudentManagementProps {
   onPreviewBulkImport: (classId: string, grid: RosterImportGrid) => Promise<RosterImportPreview>;
   onBulkMoveClass: (studentIds: string[], targetClassId: string) => void;
   onBulkAddTags: (studentIds: string[], tags: string[]) => void;
+  onViewStudentProfile: (studentId: string) => void;
   targetStudentId?: string | null;
   onTargetStudentHandled?: () => void;
 }
@@ -43,6 +44,7 @@ export default function StudentManagement({
   onPreviewBulkImport,
   onBulkMoveClass,
   onBulkAddTags,
+  onViewStudentProfile,
   targetStudentId,
   onTargetStudentHandled
 }: StudentManagementProps) {
@@ -485,6 +487,7 @@ export default function StudentManagement({
               </section>
             </div>
             <div className="shrink-0 grid grid-cols-2 gap-2 p-4 border-t border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+              <button type="button" onClick={() => { onViewStudentProfile(selectedStudent.id); setSelectedStudentId(null); }} className="col-span-2 flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-700 text-sm font-bold text-white"><Eye className="h-4 w-4" />查看学生画像</button>
               <button
                 type="button"
                 onClick={() => { handleOpenEdit(selectedStudent); setSelectedStudentId(null); }}
