@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { CheckCircle, Edit3, Plus, Sparkles, Tag, Trash2 } from 'lucide-react';
+import { Edit3, Plus, Sparkles, Tag, Trash2 } from 'lucide-react';
 
 interface TagGroup {
   id: string;
@@ -119,7 +119,6 @@ export default function TagManagement({ onShowToast }: TagManagementProps) {
       <div>
         <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wider">管理 / 标签管理</p>
         <h2 className="text-2xl font-black text-slate-900 dark:text-slate-50 tracking-tight">标签管理</h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">统一维护家庭关注、学情状态、日常表现和风险提醒标签。</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-5">
@@ -159,25 +158,18 @@ export default function TagManagement({ onShowToast }: TagManagementProps) {
             </div>
           </div>
 
-          <div className="p-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-2 p-3 md:grid-cols-2 md:p-5 xl:grid-cols-3">
             {activeGroup.tags.map(tag => (
-              <div key={tag.name} className="rounded-2xl bg-white/65 dark:bg-zinc-900/50 border border-slate-200/70 dark:border-zinc-800/80 p-4 space-y-3">
-                <div className="flex items-start justify-between gap-2">
-                  <span className={`px-2.5 py-1 rounded-full border text-xs font-bold ${tone[tag.color]}`}>{tag.name}</span>
-                  {tag.enabled ? (
-                    <span className="text-[10px] text-emerald-700 flex items-center gap-1"><CheckCircle className="w-3 h-3" />启用</span>
-                  ) : (
-                    <span className="text-[10px] text-slate-400">停用</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => toggleTag(tag.name)} className="flex-1 py-2 rounded-xl bg-slate-50 dark:bg-zinc-800 text-xs font-bold text-slate-600 dark:text-slate-300 active:scale-95 transition-all">
+              <div key={tag.name} className="flex min-h-14 items-center gap-1 rounded-xl border border-slate-200/70 bg-white/65 p-1.5 pl-3 dark:border-zinc-800/80 dark:bg-zinc-900/50">
+                <span className={`min-w-0 truncate rounded-full border px-2.5 py-1 text-xs font-bold ${tag.enabled ? tone[tag.color] : 'border-slate-200 bg-slate-100 text-slate-400 dark:border-zinc-700 dark:bg-zinc-800'}`}>{tag.name}</span>
+                <div className="ml-auto flex shrink-0 items-center gap-0.5">
+                  <button onClick={() => toggleTag(tag.name)} aria-label={`${tag.enabled ? '停用' : '启用'}标签 ${tag.name}`} className="min-h-11 rounded-xl px-2 text-xs font-bold text-slate-600 transition-all active:scale-95 dark:text-slate-300">
                     {tag.enabled ? '停用' : '启用'}
                   </button>
-                  <button onClick={() => onShowToast('已模拟打开标签编辑面板')} className="p-2 rounded-xl bg-slate-50 dark:bg-zinc-800 text-slate-500 active:scale-95 transition-all">
+                  <button onClick={() => onShowToast('已模拟打开标签编辑面板')} aria-label={`编辑标签 ${tag.name}`} className="grid h-11 w-11 place-items-center rounded-xl text-slate-500 transition-all active:scale-95">
                     <Edit3 className="w-4 h-4" />
                   </button>
-                  <button onClick={() => deleteTag(tag.name)} className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/30 text-rose-600 active:scale-95 transition-all">
+                  <button onClick={() => deleteTag(tag.name)} aria-label={`删除标签 ${tag.name}`} className="grid h-11 w-11 place-items-center rounded-xl text-rose-600 transition-all active:scale-95">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -194,4 +186,3 @@ export default function TagManagement({ onShowToast }: TagManagementProps) {
     </div>
   );
 }
-
