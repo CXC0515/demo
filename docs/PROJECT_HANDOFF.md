@@ -1,7 +1,7 @@
 # DEMO 项目当前交接
 
 > 本文是当前统一交接入口。历史专项文档只用于追溯当时的决策，不再代表当前 Git、数据路径或部署状态。
-> 更新时间：2026-09-16；当前应用生产提交：`origin/main@03b3a0d`。
+> 更新时间：2026-09-17；当前应用生产提交：`9837298`（PR #26）。
 
 ## 1. 当前阶段与产品边界
 
@@ -32,7 +32,7 @@ flowchart LR
 - DNS：阿里云 `td` A 记录指向 `43.172.77.153`，TTL 10 分钟。
 - 公网只使用 80/443；80 自动跳转 HTTPS，应用端口 4317 只监听回环。
 - 服务：`teacher-dashboard.service`；每日备份：`teacher-dashboard-backup.timer`。
-- 代码：`/opt/teacher-dashboard/current` 指向 `/opt/teacher-dashboard/releases/03b3a0d`。
+- 代码：`/opt/teacher-dashboard/current` 指向 `/opt/teacher-dashboard/releases/9837298`。
 - 数据：`/var/lib/teacher-dashboard/product-2026-09-16-r2`。
 - 证书：Let's Encrypt，当前证书到期日 2026-12-15，Certbot 自动续期。
 - 健康检查：`/api/health/live` 与 `/api/health/ready`。
@@ -49,13 +49,16 @@ flowchart LR
 
 ## 4. Git 与协作基线
 
-- GitHub `origin/main` 是唯一稳定基线，生产应用当前运行 `03b3a0d`（PR #24）。
+- GitHub `origin/main` 是唯一稳定基线，生产应用当前运行 `9837298`（PR #26）。
 - PR #24 修复产品恢复工具：只遍历实际工作区目录，忽略 `.DS_Store` 等非目录元数据；聚焦测试 4/4 和 lint 通过。
 - 母文件夹固定为 `/Users/cxc/Projects/DEMO`；正式发布只能来自已合并的 `origin/main`，不得长期依赖临时 worktree。
 - 真实环境变量只存于服务器 `/etc/teacher-dashboard/teacher-dashboard.env`，权限 `600 root:root`；不得提交或输出密钥。
 - 后续修改继续遵守根目录 `AGENTS.md` 的方案、授权、验证和 Git 边界。
 
 ## 5. 已完成验收
+
+- 2026-09-17：PR #26 移动端管理优化已发布；服务器 npm ci、lint、build、座位测试 4/4 通过，回环及公网 live/ready 正常；公网静态资源哈希与新构建一致，5 个 SQLite 完整性和关键计数通过。保留旧发布目录 `03b3a0d`。本次仅更新代码，未修改生产数据目录或数据库结构。
+- 手机班级详情改为底部面板，新增学生画像按钮、座位快捷换位，课表紧凑展示、四象限 2×2、标签四类同一行。完整验收及限制见 [MOBILE_MANAGEMENT_RELEASE.md](./MOBILE_MANAGEMENT_RELEASE.md)。
 
 - 权威 DNS 与公共递归解析均返回 `43.172.77.153`。
 - 云防火墙已允许 22、80、443；UFW 允许 OpenSSH 与 Nginx Full。
@@ -91,4 +94,5 @@ flowchart LR
 | 版本 | 日期 | 状态 | 修改概要 |
 | --- | --- | --- | --- |
 | v1.0-v2.5 | 2026-09-06 至 2026-09-12 | 已归档 | 本地原型、Cloudflare Tunnel、国内实例演练和备案期间下线状态。 |
-| v3.0 | 2026-09-16 | 当前 | 记录硅谷生产切换、`td.unreached.top`、权威数据 `-r2`、HTTPS、自动备份及最小公网验收。 |
+| v3.0 | 2026-09-16 | 历史 | 记录硅谷生产切换、`td.unreached.top`、权威数据 `-r2`、HTTPS、自动备份及最小公网验收。 |
+| v3.1 | 2026-09-17 | 当前 | PR #26 手机管理体验发布至硅谷实例，应用提交 9837298，数据目录保持 -r2。 |
