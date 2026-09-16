@@ -1,0 +1,16 @@
+[Unit]
+Description=Create and verify a DEMO product snapshot
+After=teacher-dashboard.service
+
+[Service]
+Type=oneshot
+User=teacher-dashboard
+Group=teacher-dashboard
+WorkingDirectory=/opt/teacher-dashboard/current
+EnvironmentFile=/etc/teacher-dashboard/teacher-dashboard.env
+ExecStart=/usr/bin/node --import tsx server/scripts/backupProductionData.ts /var/lib/teacher-dashboard/backups/automatic
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/teacher-dashboard
