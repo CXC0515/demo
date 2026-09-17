@@ -205,32 +205,34 @@ export default function KnowledgeLibrary({
           </button>
         </div>
       </div>
-      <div className={`min-h-0 flex-1 ${mode === "graph" ? "overflow-hidden lg:overflow-y-auto lg:pr-1" : "overflow-hidden"}`}>
-      {mode === "graph" ? (
-        <KnowledgeGraphWorkspace
-          graph={graph}
-          loading={loading}
-          narrowLayout={narrowLayout}
-          onDataChanged={reloadGraph}
-          onOpenSource={openSource}
-          onShowToast={onShowToast}
-        />
-      ) : (
-        <ResourceLibraryEditor
-          resources={resources}
-          detail={detail}
-          selectedResourceId={selectedResourceId}
-          nodes={graph.nodes}
-          selectedPage={selectedPage}
-          loading={loading}
-          narrowLayout={narrowLayout}
-          openReaderOnCompact={openReaderOnCompact}
-          onSelectResource={selectResource}
-          onOpenPage={setSelectedPage}
-          onDataChanged={(resourceId) => loadAll(resourceId, true)}
-          onShowToast={onShowToast}
-        />
-      )}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <div className={mode === "graph" ? "h-full overflow-hidden lg:overflow-y-auto lg:pr-1" : "hidden"}>
+          <KnowledgeGraphWorkspace
+            graph={graph}
+            loading={loading}
+            narrowLayout={narrowLayout}
+            onDataChanged={reloadGraph}
+            onOpenSource={openSource}
+            onShowToast={onShowToast}
+          />
+        </div>
+        <div className={mode === "editor" ? "h-full" : "hidden"}>
+          <ResourceLibraryEditor
+            resources={resources}
+            detail={detail}
+            selectedResourceId={selectedResourceId}
+            nodes={graph.nodes}
+            selectedPage={selectedPage}
+            loading={loading}
+            narrowLayout={narrowLayout}
+            openReaderOnCompact={openReaderOnCompact}
+            readerVisible={active && mode === "editor"}
+            onSelectResource={selectResource}
+            onOpenPage={setSelectedPage}
+            onDataChanged={(resourceId) => loadAll(resourceId, true)}
+            onShowToast={onShowToast}
+          />
+        </div>
       </div>
     </div>
   );

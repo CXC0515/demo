@@ -17,6 +17,8 @@ interface Props {
   periods: SchedulePeriod[];
   showWeekends: boolean;
   selectedClassId: string;
+  section: 'schedule' | 'reminders';
+  onSectionChange: (section: 'schedule' | 'reminders') => void;
   onSelectClass: (classId: string) => void;
   onOpenPeriodSettings: () => void;
   onAddScheduleItem: (item: ScheduleItem) => void | Promise<void>;
@@ -101,7 +103,6 @@ const createScheduleColorSlots = (keys: string[]) => {
 
 export default function ScheduleReminder(props: Props) {
   const activeClasses = props.classes.filter((item) => item.status === 'active');
-  const [section, setSection] = useState<'schedule' | 'reminders'>('schedule');
   const [showTools, setShowTools] = useState(false);
   const [showClassPicker, setShowClassPicker] = useState(false);
   const [scope, setScope] = useState<'teacher' | 'class'>('teacher');
@@ -146,19 +147,19 @@ export default function ScheduleReminder(props: Props) {
   };
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 animate-fade-in" id="schedule-page">
-      <header className="flex shrink-0">
+      <header className="hidden shrink-0 sm:flex">
         <nav className="inline-flex w-fit rounded-xl bg-slate-100 p-1 dark:bg-zinc-900" aria-label="课表与日程子页面">
-          <Tab compact active={section === 'schedule'} onClick={() => setSection('schedule')} icon={CalendarDays}>
+          <Tab compact active={props.section === 'schedule'} onClick={() => props.onSectionChange('schedule')} icon={CalendarDays}>
             课表
           </Tab>
-          <Tab compact active={section === 'reminders'} onClick={() => setSection('reminders')} icon={Bell}>
+          <Tab compact active={props.section === 'reminders'} onClick={() => props.onSectionChange('reminders')} icon={Bell}>
             日程
           </Tab>
         </nav>
       </header>
-      {section === 'schedule' ? (
+      {props.section === 'schedule' ? (
         <section className="flex min-h-0 flex-1 flex-col gap-3">
-          <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2.5 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="flex shrink-0 flex-nowrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2.5 sm:flex-wrap dark:border-zinc-800 dark:bg-zinc-900">
             <div className="inline-flex rounded-lg bg-slate-100 p-1 dark:bg-zinc-800">
               <button onClick={() => setScope('teacher')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${scope === 'teacher' ? 'bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-300' : 'text-slate-500'}`}>
                 我的课表
@@ -169,8 +170,8 @@ export default function ScheduleReminder(props: Props) {
             </div>
             {scope === 'class' && (
               <>
-                <button type="button" onClick={() => setShowClassPicker(true)} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold sm:hidden dark:border-zinc-700 dark:bg-zinc-950">
-                  <span>{selectedClass?.name ?? '选择班级'}</span><ChevronDown className="h-4 w-4 text-slate-400" />
+                <button type="button" onClick={() => setShowClassPicker(true)} className="inline-flex min-h-11 w-20 min-w-0 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 text-sm font-bold sm:hidden dark:border-zinc-700 dark:bg-zinc-950">
+                  <span className="min-w-0 flex-1 truncate">{selectedClass?.name ?? '选择班级'}</span><ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
                 </button>
                 <select value={effectiveClassId} onChange={(e) => props.onSelectClass(e.target.value)} className="hidden h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold sm:block dark:border-zinc-700 dark:bg-zinc-950">
                   {activeClasses.map((c) => (
@@ -182,7 +183,7 @@ export default function ScheduleReminder(props: Props) {
               </>
             )}
             <span className="hidden text-xs text-slate-400 md:inline">{props.showWeekends ? '显示周一至周日' : '显示周一至周五'}</span>
-            <button type="button" onClick={() => setShowTools(true)} className="ml-auto min-h-11 rounded-lg border px-3 text-sm font-bold sm:hidden">更多</button>
+            <button type="button" onClick={() => setShowTools(true)} className="ml-auto min-h-11 shrink-0 rounded-lg border px-3 text-sm font-bold sm:hidden">更多</button>
             <div className="ml-auto hidden items-center gap-2 sm:flex">
               <button onClick={props.onOpenPeriodSettings} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-slate-300">
                 <Settings2 className="h-4 w-4" />
