@@ -53,6 +53,8 @@ export default function KnowledgeLibrary({
   const [narrowLayout, setNarrowLayout] = useState(false);
   const [openReaderOnCompact, setOpenReaderOnCompact] = useState(false);
   const loadedRef = useRef(false);
+  const selectedResourceIdRef = useRef("");
+  const detailRequestRef = useRef(0);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 1023px)");
@@ -67,7 +69,12 @@ export default function KnowledgeLibrary({
       setDetail(null);
       return;
     }
+    const requestId = ++detailRequestRef.current;
     const next = await getLibraryResource(resourceId);
+    if (
+      requestId !== detailRequestRef.current ||
+      selectedResourceIdRef.current !== resourceId
+    ) return next;
     setDetail(next);
     setSelectedPage((current) =>
       Math.min(Math.max(current, 1), next.pageCount ?? 1),
@@ -77,6 +84,7 @@ export default function KnowledgeLibrary({
 
   const loadAll = useCallback(
     async (preferredResourceId?: string, forceGraph = false) => {
+      let targetResourceId = "";
       if (!loadedRef.current) setLoading(true);
       try {
         const [nextResources] = await Promise.all([
@@ -92,6 +100,8 @@ export default function KnowledgeLibrary({
                 nextResources.some((item) => item.id === selectedResourceId)
               ? selectedResourceId
               : (nextResources[0]?.id ?? "");
+        targetResourceId = resourceId;
+        selectedResourceIdRef.current = resourceId;
         setSelectedResourceId(resourceId);
         await loadResourceDetail(resourceId);
         loadedRef.current = true;
@@ -100,7 +110,9 @@ export default function KnowledgeLibrary({
           `资料库加载失败：${error instanceof Error ? error.message : "未知错误"}`,
         );
       } finally {
-        setLoading(false);
+        if (!targetResourceId || selectedResourceIdRef.current === targetResourceId) {
+          setLoading(false);
+        }
       }
     },
     [loadResourceDetail, onKnowledgeChanged, onShowToast, selectedResourceId],
@@ -113,6 +125,7 @@ export default function KnowledgeLibrary({
   useEffect(() => {
     if (!active || detail?.status !== "processing") return;
     const timer = window.setInterval(() => {
+      if (selectedResourceIdRef.current !== detail.id) return;
       void loadResourceDetail(detail.id)
         .then(async (nextDetail) => {
           if (nextDetail.status === "processing") return;
@@ -126,6 +139,7 @@ export default function KnowledgeLibrary({
   }, [active, detail?.id, detail?.status, loadResourceDetail, onKnowledgeChanged]);
 
   const selectResource = (resourceId: string) => {
+    selectedResourceIdRef.current = resourceId;
     setSelectedResourceId(resourceId);
     setSelectedPage(1);
     setLoading(true);
@@ -135,7 +149,9 @@ export default function KnowledgeLibrary({
           `资料加载失败：${error instanceof Error ? error.message : "未知错误"}`,
         ),
       )
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (selectedResourceIdRef.current === resourceId) setLoading(false);
+      });
   };
 
   const reloadGraph = async () => {
@@ -144,12 +160,15 @@ export default function KnowledgeLibrary({
   };
 
   const openSource = (resourceId: string, pageNumber: number) => {
+    selectedResourceIdRef.current = resourceId;
     setSelectedResourceId(resourceId);
     setSelectedPage(pageNumber);
     setOpenReaderOnCompact(true);
     onSwitchMode("editor");
     setLoading(true);
-    void loadResourceDetail(resourceId).finally(() => setLoading(false));
+    void loadResourceDetail(resourceId).finally(() => {
+      if (selectedResourceIdRef.current === resourceId) setLoading(false);
+    });
   };
 
   return (
@@ -200,6 +219,7 @@ export default function KnowledgeLibrary({
         <ResourceLibraryEditor
           resources={resources}
           detail={detail}
+          selectedResourceId={selectedResourceId}
           nodes={graph.nodes}
           selectedPage={selectedPage}
           loading={loading}
