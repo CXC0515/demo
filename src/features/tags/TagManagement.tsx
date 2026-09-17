@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Edit3, Plus, Sparkles, Tag, Trash2 } from 'lucide-react';
+import { Check, Edit3, Plus, Sparkles, Tag, Trash2 } from 'lucide-react';
 
 interface TagGroup {
   id: string;
@@ -163,8 +163,9 @@ export default function TagManagement({ onShowToast }: TagManagementProps) {
               <div key={tag.name} className="flex min-h-14 items-center gap-1 rounded-xl border border-slate-200/70 bg-white/65 p-1.5 pl-3 dark:border-zinc-800/80 dark:bg-zinc-900/50">
                 <span className={`min-w-0 truncate rounded-full border px-2.5 py-1 text-xs font-bold ${tag.enabled ? tone[tag.color] : 'border-slate-200 bg-slate-100 text-slate-400 dark:border-zinc-700 dark:bg-zinc-800'}`}>{tag.name}</span>
                 <div className="ml-auto flex shrink-0 items-center gap-0.5">
-                  <button onClick={() => toggleTag(tag.name)} aria-label={`${tag.enabled ? '停用' : '启用'}标签 ${tag.name}`} className="min-h-11 rounded-xl px-2 text-xs font-bold text-slate-600 transition-all active:scale-95 dark:text-slate-300">
-                    {tag.enabled ? '停用' : '启用'}
+                  <button onClick={() => toggleTag(tag.name)} aria-pressed={tag.enabled} aria-label={`${tag.enabled ? '停用' : '启用'}标签 ${tag.name}`} className={`inline-flex min-h-11 items-center gap-1.5 rounded-xl border px-2 text-xs font-bold transition-all active:scale-95 ${tag.enabled ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300' : 'border-slate-200 text-slate-500 dark:border-zinc-700 dark:text-slate-400'}`}>
+                    <span className={`grid h-4 w-4 place-items-center rounded border ${tag.enabled ? 'border-emerald-700 bg-emerald-700 text-white' : 'border-slate-400 bg-white dark:bg-zinc-900'}`}>{tag.enabled ? <Check className="h-3 w-3" /> : null}</span>
+                    {tag.enabled ? '已启用' : '已停用'}
                   </button>
                   <button onClick={() => onShowToast('已模拟打开标签编辑面板')} aria-label={`编辑标签 ${tag.name}`} className="grid h-11 w-11 place-items-center rounded-xl text-slate-500 transition-all active:scale-95">
                     <Edit3 className="w-4 h-4" />

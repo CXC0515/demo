@@ -4,7 +4,8 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { BarChart3, UserSquare2 } from 'lucide-react';
+import { BarChart3, Check, ChevronDown, UserSquare2 } from 'lucide-react';
+import ResponsiveDialog from '../../components/ResponsiveDialog';
 import { CommitteeRole, SchoolClass, Student, TeacherObservation } from '../../domain/types';
 import ClassDiagnosis from './ClassDiagnosis';
 import StudentProfile from '../students/StudentProfileV2';
@@ -51,6 +52,9 @@ export default function DiagnosisWorkspace({
 }: DiagnosisWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<DiagnosisTab>('class');
   const [studentDetailTargetId, setStudentDetailTargetId] = useState<string | null>(null);
+  const [showClassPicker, setShowClassPicker] = useState(false);
+  const activeClasses = classes.filter(item => item.status === 'active');
+  const selectedClass = activeClasses.find(item => item.id === selectedClassId) ?? activeClasses[0];
 
   useEffect(() => {
     if (!requestedTab) return;
@@ -92,13 +96,23 @@ export default function DiagnosisWorkspace({
             </button>
           );
         })}</div>
-        <label className="flex min-w-0 items-center gap-2 text-xs font-bold text-slate-400 sm:px-2">
+        <div className="flex min-w-0 items-center gap-2 text-xs font-bold text-slate-400 sm:px-2">
           <span className="hidden sm:inline">当前班级</span>
-          <select value={selectedClassId} onChange={event => onSelectClass(event.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none focus:border-emerald-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-slate-100 sm:w-auto sm:px-3">
-            {classes.filter(item => item.status === 'active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+          <button type="button" onClick={() => setShowClassPicker(true)} className="flex min-h-11 w-full min-w-0 items-center justify-between gap-1 rounded-xl border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 sm:hidden dark:border-zinc-700 dark:bg-zinc-800 dark:text-slate-100">
+            <span className="truncate">{selectedClass?.name}</span><ChevronDown className="h-4 w-4 shrink-0" />
+          </button>
+          <select value={selectedClass?.id ?? ''} onChange={event => onSelectClass(event.target.value)} className="hidden min-h-11 min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none focus:border-emerald-600 sm:block sm:w-auto dark:border-zinc-700 dark:bg-zinc-800 dark:text-slate-100">
+            {activeClasses.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-        </label>
+        </div>
       </div>
+
+      {showClassPicker && <ResponsiveDialog title="选择班级" onClose={() => setShowClassPicker(false)}><div className="grid gap-2">
+        {activeClasses.map(item => {
+          const selected = item.id === selectedClass?.id;
+          return <button key={item.id} type="button" onClick={() => { onSelectClass(item.id); setShowClassPicker(false); }} className={`flex min-h-12 items-center justify-between rounded-xl border px-4 text-left text-base font-bold ${selected ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30' : 'border-slate-200 dark:border-zinc-700'}`}><span>{item.name}</span>{selected ? <Check className="h-5 w-5" /> : null}</button>;
+        })}
+      </div></ResponsiveDialog>}
 
       {activeTab === 'class' && (
         <ClassDiagnosis
