@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { KnowledgeEntity, KnowledgeStage } from "../../domain/types";
 import { entityLabels } from "./knowledgeUi";
+import ResponsiveChoiceDialog from "../../components/ResponsiveChoiceDialog";
 
 const NODE_WIDTH = 210;
 const NODE_HEIGHT = 76;
@@ -132,6 +133,7 @@ const KnowledgeTreeCanvasInner = ({ compact, subject, nodes, stages, availableTa
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
   const [searchOpen, setSearchOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [filterPicker, setFilterPicker] = useState<"stage" | "type" | "tag" | null>(null);
   const [query, setQuery] = useState("");
   const [stageId, setStageId] = useState("");
   const [tag, setTag] = useState("");
@@ -344,12 +346,15 @@ const KnowledgeTreeCanvasInner = ({ compact, subject, nodes, stages, availableTa
       ) : null}
       {filterOpen ? (
         <div className="absolute left-3 top-[70px] z-20 grid w-[min(420px,calc(100%-1.5rem))] gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-lg sm:grid-cols-3 dark:border-zinc-700 dark:bg-zinc-900">
-          <label className="space-y-1"><span className="text-[10px] font-bold text-slate-400">学习阶段</span><select value={stageId} onChange={(event) => setStageId(event.target.value)} className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"><option value="">全部</option>{stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></label>
-          <label className="space-y-1"><span className="text-[10px] font-bold text-slate-400">节点类型</span><select value={nodeType} onChange={(event) => setNodeType(event.target.value as "" | TreeEntity["type"])} className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"><option value="">全部</option><option value="domain">板块</option><option value="topic">主题</option><option value="knowledge">知识点</option></select></label>
-          <label className="space-y-1"><span className="text-[10px] font-bold text-slate-400">标签</span><select value={tag} onChange={(event) => setTag(event.target.value)} className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"><option value="">全部</option>{availableTags.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-          {activeFilterCount ? <button type="button" onClick={clearFilters} className="text-left text-[10px] font-bold text-emerald-700 sm:col-span-3">清除筛选</button> : null}
+          <div className="space-y-1"><span className="text-xs font-bold text-slate-400">学习阶段</span><button type="button" onClick={() => setFilterPicker("stage")} className="flex min-h-11 w-full items-center justify-between rounded-lg border border-slate-200 px-3 text-sm font-bold sm:hidden dark:border-zinc-700"><span>{stages.find(stage => stage.id === stageId)?.name ?? "全部"}</span><ChevronDown className="h-4 w-4 text-slate-400" /></button><select value={stageId} onChange={(event) => setStageId(event.target.value)} className="hidden w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm sm:block dark:border-zinc-700 dark:bg-zinc-900"><option value="">全部</option>{stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></div>
+          <div className="space-y-1"><span className="text-xs font-bold text-slate-400">节点类型</span><button type="button" onClick={() => setFilterPicker("type")} className="flex min-h-11 w-full items-center justify-between rounded-lg border border-slate-200 px-3 text-sm font-bold sm:hidden dark:border-zinc-700"><span>{nodeType ? entityLabels[nodeType] : "全部"}</span><ChevronDown className="h-4 w-4 text-slate-400" /></button><select value={nodeType} onChange={(event) => setNodeType(event.target.value as "" | TreeEntity["type"])} className="hidden w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm sm:block dark:border-zinc-700 dark:bg-zinc-900"><option value="">全部</option><option value="domain">板块</option><option value="topic">主题</option><option value="knowledge">知识点</option></select></div>
+          <div className="space-y-1"><span className="text-xs font-bold text-slate-400">标签</span><button type="button" onClick={() => setFilterPicker("tag")} className="flex min-h-11 w-full items-center justify-between rounded-lg border border-slate-200 px-3 text-sm font-bold sm:hidden dark:border-zinc-700"><span>{tag || "全部"}</span><ChevronDown className="h-4 w-4 text-slate-400" /></button><select value={tag} onChange={(event) => setTag(event.target.value)} className="hidden w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm sm:block dark:border-zinc-700 dark:bg-zinc-900"><option value="">全部</option>{availableTags.map((value) => <option key={value} value={value}>{value}</option>)}</select></div>
+          {activeFilterCount ? <button type="button" onClick={clearFilters} className="min-h-10 text-left text-xs font-bold text-emerald-700 sm:col-span-3">清除筛选</button> : null}
         </div>
       ) : null}
+      {filterPicker === "stage" ? <ResponsiveChoiceDialog title="选择学习阶段" value={stageId} options={[{ value: "", label: "全部" }, ...stages.map(stage => ({ value: stage.id, label: stage.name }))]} onChange={setStageId} onClose={() => setFilterPicker(null)} /> : null}
+      {filterPicker === "type" ? <ResponsiveChoiceDialog title="选择节点类型" value={nodeType} options={[{ value: "", label: "全部" }, { value: "domain", label: "板块" }, { value: "topic", label: "主题" }, { value: "knowledge", label: "知识点" }]} onChange={value => setNodeType(value as "" | TreeEntity["type"])} onClose={() => setFilterPicker(null)} /> : null}
+      {filterPicker === "tag" ? <ResponsiveChoiceDialog title="选择标签" value={tag} options={[{ value: "", label: "全部" }, ...availableTags.map(value => ({ value, label: value }))]} onChange={setTag} onClose={() => setFilterPicker(null)} /> : null}
       <ReactFlow<TreeNode, Edge>
         className="h-full"
         nodes={renderNodes}

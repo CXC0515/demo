@@ -10,6 +10,7 @@ import {
   BookOpen,
   Check,
   CheckCheck,
+  ChevronDown,
   ChevronRight,
   CircleAlert,
   Eye,
@@ -57,6 +58,8 @@ import {
   resourceStatusLabels,
   resourceStatusTones,
 } from "./knowledgeUi";
+import PdfPageViewer from "../../components/PdfPageViewer";
+import ResponsiveChoiceDialog from "../../components/ResponsiveChoiceDialog";
 
 interface ResourceLibraryEditorProps {
   resources: LibraryResource[];
@@ -259,6 +262,7 @@ const MetadataDialog = ({
       : emptyMetadata,
   );
   const [file, setFile] = useState<File | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const submit = async (event: React.FormEvent) => {
@@ -344,6 +348,7 @@ const MetadataDialog = ({
                     return;
                   }
                   setFile(selected);
+                  setShowPreview(false);
                   if (selected && !metadata.title)
                     update("title", selected.name.replace(/\.pdf$/i, ""));
                 }}
@@ -358,6 +363,14 @@ const MetadataDialog = ({
                 </span>
               </span>
             </button>
+          )}
+          {!resource && file && (
+            <div className="sm:col-span-2">
+              <button type="button" onClick={() => setShowPreview(value => !value)} className="min-h-11 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 dark:border-zinc-700 dark:text-slate-200">
+                {showPreview ? "收起预览" : "预览首页"}
+              </button>
+              {showPreview ? <PdfPageViewer source={file} page={1} navigation={false} className="mt-3 h-[min(52dvh,420px)]" /> : null}
+            </div>
           )}
           {formError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 sm:col-span-2 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">{formError}</p>}
           <label className="space-y-1 sm:col-span-2">
@@ -698,12 +711,12 @@ export default function ResourceLibraryEditor({
 }: ResourceLibraryEditorProps) {
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<"all" | ResourceKind>("all");
+  const [showKindPicker, setShowKindPicker] = useState(false);
   const [dialog, setDialog] = useState<"upload" | "edit" | null>(null);
   const [inspectorTab, setInspectorTab] = useState<
     "overview" | "pages" | "rag" | "review"
   >("overview");
   const [readingMode, setReadingMode] = useState<"pdf" | "ocr">("pdf");
-  const [pdfPage, setPdfPage] = useState(selectedPage);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [compactSurface, setCompactSurface] = useState<"library" | "reader">("library");
   const [pageStart, setPageStart] = useState(1);
@@ -731,9 +744,6 @@ export default function ResourceLibraryEditor({
   const pageWindowStart = Math.floor(Math.max(0, selectedPage - 1) / 50) * 50;
   const visiblePages = detail?.pages.slice(pageWindowStart, pageWindowStart + 50) ?? [];
   useEffect(() => {
-    if (detail) setPdfPage(Math.min(selectedPage, detail.pageCount ?? selectedPage));
-  }, [detail?.id]);
-  useEffect(() => {
     if (narrowLayout && openReaderOnCompact && detail) setCompactSurface("reader");
   }, [detail?.id, narrowLayout, openReaderOnCompact]);
   const selectResource = (resourceId: string) => {
@@ -742,7 +752,6 @@ export default function ResourceLibraryEditor({
   };
   const navigatePage = (page: number) => {
     onOpenPage(page);
-    if (readingMode === "pdf") setPdfPage(page);
   };
   const runAnalysis = async () => {
     if (!detail) return;
@@ -791,7 +800,7 @@ export default function ResourceLibraryEditor({
     }
   };
   return (
-    <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:min-h-[680px] lg:grid-cols-[240px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)]">
+    <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:grid-cols-[240px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)]">
       <aside className={`glass-panel min-h-0 flex-col overflow-hidden rounded-2xl ${compactSurface === "reader" ? "hidden lg:flex" : "flex"}`}>
         <div className="p-3 border-b border-slate-200/70 dark:border-zinc-800 space-y-3">
           <button
@@ -812,10 +821,13 @@ export default function ResourceLibraryEditor({
           </div>
           <div className="flex items-center gap-2">
             <Filter className="w-3.5 h-3.5 text-slate-400" />
+            <button type="button" onClick={() => setShowKindPicker(true)} className="flex min-h-11 flex-1 items-center justify-between rounded-xl border border-slate-200 px-3 text-sm font-bold text-slate-600 sm:hidden dark:border-zinc-700 dark:text-slate-300">
+              <span>{kind === "all" ? "全部资料" : resourceKindLabels[kind]}</span><ChevronDown className="h-4 w-4 text-slate-400" />
+            </button>
             <select
               value={kind}
               onChange={(event) => setKind(event.target.value as typeof kind)}
-              className="flex-1 bg-transparent text-xs text-slate-500 outline-none"
+              className="hidden flex-1 bg-transparent text-sm text-slate-500 outline-none sm:block"
             >
               <option value="all">全部资料</option>
               {Object.entries(resourceKindLabels).map(([value, label]) => (
@@ -877,7 +889,7 @@ export default function ResourceLibraryEditor({
             <LoaderCircle className="w-6 h-6 animate-spin" />
           </div>
         ) : !detail ? (
-          <div className="grid h-full min-h-80 place-items-center text-center lg:min-h-[690px]">
+          <div className="grid h-full min-h-80 place-items-center text-center">
             <div>
               <FileText className="w-10 h-10 mx-auto text-slate-300" />
               <p className="font-bold text-slate-600 dark:text-slate-300 mt-3">
@@ -944,7 +956,7 @@ export default function ResourceLibraryEditor({
               <div className="flex min-h-0 flex-col bg-slate-200/50 dark:bg-zinc-950">
                 <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
                   <div className="inline-flex rounded-lg bg-slate-100 p-1 dark:bg-zinc-800">
-                    <button onClick={() => { setReadingMode("pdf"); onOpenPage(pdfPage); }} className={`min-h-10 rounded-md px-3 py-1.5 text-xs font-bold sm:min-h-0 ${readingMode === "pdf" ? "bg-white text-slate-900 shadow-sm dark:bg-zinc-700 dark:text-white" : "text-slate-500"}`}>PDF 原文</button>
+                    <button onClick={() => setReadingMode("pdf")} className={`min-h-10 rounded-md px-3 py-1.5 text-xs font-bold sm:min-h-0 ${readingMode === "pdf" ? "bg-white text-slate-900 shadow-sm dark:bg-zinc-700 dark:text-white" : "text-slate-500"}`}>PDF 原文</button>
                     <button onClick={() => {
                       setReadingMode("ocr");
                       const current = detail.pages.find((page) => page.pageNumber === selectedPage);
@@ -954,13 +966,11 @@ export default function ResourceLibraryEditor({
                       }
                     }} className={`min-h-10 rounded-md px-3 py-1.5 text-xs font-bold sm:min-h-0 ${readingMode === "ocr" ? "bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-300" : "text-slate-500"}`}>OCR 识别</button>
                   </div>
-                  <div className="flex items-center gap-2"><span className="whitespace-nowrap text-xs font-bold text-slate-500">第 {selectedPage} 页</span><button onClick={() => setInspectorOpen(true)} className="btn-secondary min-h-10 px-3 py-1.5 text-xs lg:hidden">详情</button></div>
+                  <div className="flex items-center gap-2">{readingMode === "ocr" ? <span className="whitespace-nowrap text-xs font-bold text-slate-500">第 {selectedPage} 页</span> : null}<button onClick={() => setInspectorOpen(true)} className="btn-secondary min-h-10 px-3 py-1.5 text-xs lg:hidden">详情</button></div>
                 </div>
                 <div className="relative min-h-0 flex-1 p-2 sm:p-3">
                   <div className={readingMode === "pdf" ? "h-full" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
-                    <object key={`${detail.id}-${pdfPage}`} data={`${detail.publicUrl}#page=${pdfPage}&view=FitH`} type="application/pdf" className="h-full w-full rounded-lg bg-white shadow-sm">
-                      <a href={`${detail.publicUrl}#page=${pdfPage}`} target="_blank" rel="noreferrer" className="text-emerald-700">打开 PDF</a>
-                    </object>
+                    <PdfPageViewer source={detail.publicUrl} page={selectedPage} onPageChange={navigatePage} openUrl={detail.publicUrl} className="h-full" />
                   </div>
                   <div className={readingMode === "ocr" ? "h-full" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
                     <OcrPageReader resourceId={detail.id} pages={detail.pages} chunks={detail.chunks} selectedPage={selectedPage} onSelectPage={onOpenPage} />
@@ -1239,6 +1249,7 @@ export default function ResourceLibraryEditor({
           </div>
         )}
       </section>
+      {showKindPicker && <ResponsiveChoiceDialog title="筛选资料类型" value={kind} options={[{ value: "all", label: "全部资料" }, ...Object.entries(resourceKindLabels).map(([value, label]) => ({ value, label }))]} onChange={value => setKind(value as typeof kind)} onClose={() => setShowKindPicker(false)} />}
       {dialog && (
         <MetadataDialog
           resource={dialog === "edit" ? (detail ?? undefined) : undefined}

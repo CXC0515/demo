@@ -12,6 +12,7 @@ import {
   ArrowRight,
   ArrowUp,
   BookOpen,
+  ChevronDown,
   ChevronRight,
   CircleDot,
   Edit3,
@@ -47,6 +48,7 @@ import {
   updateKnowledgeSubject,
 } from "../../services/resourceApi";
 import { entityLabels, entityTones, relationLabels, resourceKindLabels } from "./knowledgeUi";
+import ResponsiveChoiceDialog from "../../components/ResponsiveChoiceDialog";
 
 let graphCanvasPromise: ReturnType<typeof importGraphCanvas> | undefined;
 function importGraphCanvas() {
@@ -507,6 +509,7 @@ export default function KnowledgeGraphWorkspace({ graph, loading, narrowLayout, 
   const [focus, setFocus] = useState<KnowledgeFocusSnapshot>();
   const [focusLoading, setFocusLoading] = useState(false);
   const [subjectManagerOpen, setSubjectManagerOpen] = useState(false);
+  const [subjectPickerOpen, setSubjectPickerOpen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<"index" | "detail" | null>(null);
   const graphSectionRef = useRef<HTMLElement>(null);
   const detailSectionRef = useRef<HTMLElement>(null);
@@ -611,12 +614,9 @@ export default function KnowledgeGraphWorkspace({ graph, loading, narrowLayout, 
 
       <div className="order-1 flex min-h-0 min-w-0 flex-1 flex-col gap-3 lg:order-2 lg:block lg:space-y-4">
         <div className="flex flex-none items-center gap-2 lg:hidden">
-          <label className="min-w-0 flex-1">
-            <span className="sr-only">选择学科</span>
-            <select value={subject} onChange={(event) => setSubject(event.target.value)} className={`${fieldClass} min-h-11`}>
-              {subjects.map((value) => <option key={value.id} value={value.name}>{value.name}知识主干</option>)}
-            </select>
-          </label>
+          <button type="button" onClick={() => setSubjectPickerOpen(true)} className="flex min-h-11 min-w-0 flex-1 items-center justify-between rounded-xl border border-slate-200 bg-white px-3 text-left text-sm font-bold dark:border-zinc-700 dark:bg-zinc-900">
+            <span className="truncate">{subject}知识主干</span><ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+          </button>
           <button type="button" onClick={() => setMobilePanel("index")} className="btn-secondary flex min-h-11 items-center gap-2 px-3 text-sm font-bold"><List className="h-4 w-4" />索引</button>
           <button type="button" onClick={() => setDialog("create")} className="btn-primary grid h-11 w-11 shrink-0 place-items-center" aria-label="新增节点"><Plus className="h-4 w-4" /></button>
         </div>
@@ -642,6 +642,7 @@ export default function KnowledgeGraphWorkspace({ graph, loading, narrowLayout, 
         <MergeDialog selected={selected} nodes={graph.nodes} onClose={() => setDialog(null)} onSaved={onDataChanged} onShowToast={onShowToast} />
       ) : null}
       {subjectManagerOpen ? <SubjectManagerDialog subjects={subjects} onClose={() => setSubjectManagerOpen(false)} onSaved={onDataChanged} onShowToast={onShowToast} /> : null}
+      {subjectPickerOpen ? <ResponsiveChoiceDialog title="选择知识图谱学科" value={subject} options={subjects.map(item => ({ value: item.name, label: `${item.name}知识主干` }))} onChange={setSubject} onClose={() => setSubjectPickerOpen(false)} /> : null}
     </div>
   );
 }
