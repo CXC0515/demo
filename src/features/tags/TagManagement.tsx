@@ -158,10 +158,10 @@ export default function TagManagement({ onShowToast }: TagManagementProps) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-2 p-3 md:grid-cols-2 md:p-5 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2 p-3 md:grid-cols-2 md:p-5">
             {activeGroup.tags.map(tag => (
-              <div key={tag.name} className="flex min-h-14 items-center gap-1 rounded-xl border border-slate-200/70 bg-white/65 p-1.5 pl-3 dark:border-zinc-800/80 dark:bg-zinc-900/50">
-                <span className={`min-w-0 truncate rounded-full border px-2.5 py-1 text-xs font-bold ${tag.enabled ? tone[tag.color] : 'border-slate-200 bg-slate-100 text-slate-400 dark:border-zinc-700 dark:bg-zinc-800'}`}>{tag.name}</span>
+              <div key={tag.name} className="flex min-h-14 items-center gap-2 rounded-xl border border-slate-200/70 bg-white/65 p-1.5 pl-3 dark:border-zinc-800/80 dark:bg-zinc-900/50">
+                <span className={`min-w-24 flex-1 whitespace-normal break-words rounded-full border px-2.5 py-1 text-xs font-bold leading-5 ${tag.enabled ? tone[tag.color] : 'border-slate-200 bg-slate-100 text-slate-400 dark:border-zinc-700 dark:bg-zinc-800'}`}>{tag.name}</span>
                 <div className="ml-auto flex shrink-0 items-center gap-0.5">
                   <button onClick={() => toggleTag(tag.name)} aria-pressed={tag.enabled} aria-label={`${tag.enabled ? '停用' : '启用'}标签 ${tag.name}`} className={`inline-flex min-h-11 items-center gap-1.5 rounded-xl border px-2 text-xs font-bold transition-all active:scale-95 ${tag.enabled ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300' : 'border-slate-200 text-slate-500 dark:border-zinc-700 dark:text-slate-400'}`}>
                     <span className={`grid h-4 w-4 place-items-center rounded border ${tag.enabled ? 'border-emerald-700 bg-emerald-700 text-white' : 'border-slate-400 bg-white dark:bg-zinc-900'}`}>{tag.enabled ? <Check className="h-3 w-3" /> : null}</span>

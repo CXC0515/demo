@@ -65,6 +65,7 @@ import ResponsiveChoiceDialog from "../../components/ResponsiveChoiceDialog";
 interface ResourceLibraryEditorProps {
   resources: LibraryResource[];
   detail: ResourceDetail | null;
+  selectedResourceId: string;
   nodes: KnowledgeEntity[];
   selectedPage: number;
   loading: boolean;
@@ -700,6 +701,7 @@ const OcrPageReader = ({
 export default function ResourceLibraryEditor({
   resources,
   detail,
+  selectedResourceId,
   nodes,
   selectedPage,
   loading,
@@ -726,6 +728,8 @@ export default function ResourceLibraryEditor({
   const [ragQuery, setRagQuery] = useState("");
   const [ragResults, setRagResults] = useState<Array<ResourceChunk & { retrievalRank: number }>>([]);
   const [ragSearching, setRagSearching] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(true);
+  const [pdfLoadingSlow, setPdfLoadingSlow] = useState(false);
   const filtered = useMemo(
     () =>
       resources.filter(
@@ -744,6 +748,15 @@ export default function ResourceLibraryEditor({
   const latestJob = detail?.processingJobs[0];
   const pageWindowStart = Math.floor(Math.max(0, selectedPage - 1) / 50) * 50;
   const visiblePages = detail?.pages.slice(pageWindowStart, pageWindowStart + 50) ?? [];
+  const selectedResource = resources.find((resource) => resource.id === selectedResourceId);
+  const displayedResource = selectedResource ?? detail;
+  const detailPending = Boolean(selectedResourceId && detail?.id !== selectedResourceId);
+  useEffect(() => {
+    setPdfLoading(true);
+    setPdfLoadingSlow(false);
+    const timer = window.setTimeout(() => setPdfLoadingSlow(true), 6000);
+    return () => window.clearTimeout(timer);
+  }, [selectedResourceId]);
   useEffect(() => {
     if (narrowLayout && openReaderOnCompact && detail) setCompactSurface("reader");
   }, [detail?.id, narrowLayout, openReaderOnCompact]);
@@ -845,7 +858,7 @@ export default function ResourceLibraryEditor({
             <button
               key={resource.id}
               onClick={() => selectResource(resource.id)}
-              className={`min-h-16 w-full p-3.5 text-left transition-colors ${detail?.id === resource.id ? "bg-emerald-700/10 border-l-2 border-emerald-700" : "hover:bg-slate-50 dark:hover:bg-zinc-900/50 border-l-2 border-transparent"}`}
+              className={`min-h-16 w-full p-3.5 text-left transition-colors ${selectedResourceId === resource.id ? "bg-emerald-700/10 border-l-2 border-emerald-700" : "hover:bg-slate-50 dark:hover:bg-zinc-900/50 border-l-2 border-transparent"}`}
             >
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-zinc-800 grid place-items-center shrink-0">
@@ -871,7 +884,7 @@ export default function ResourceLibraryEditor({
                     )}
                   </div>
                 </div>
-                <ChevronRight className="w-4 h-4 text-slate-300 mt-1" />
+                {loading && selectedResourceId === resource.id ? <LoaderCircle className="mt-1 h-4 w-4 animate-spin text-emerald-700" /> : <ChevronRight className="w-4 h-4 text-slate-300 mt-1" />}
               </div>
             </button>
           ))}
@@ -913,28 +926,30 @@ export default function ResourceLibraryEditor({
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <h3 className="font-black text-slate-900 dark:text-slate-50 truncate">
-                    {detail.title}
+                    {displayedResource?.title ?? detail.title}
                   </h3>
                   <span
-                    className={`hidden shrink-0 rounded-md px-2 py-0.5 text-xs font-bold sm:inline-flex ${resourceStatusTones[detail.status]}`}
+                    className={`hidden shrink-0 rounded-md px-2 py-0.5 text-xs font-bold sm:inline-flex ${resourceStatusTones[displayedResource?.status ?? detail.status]}`}
                   >
-                    {resourceStatusLabels[detail.status]}
+                    {resourceStatusLabels[displayedResource?.status ?? detail.status]}
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 mt-0.5 truncate">
-                  {detail.subject || "未分类"} · {detail.grade || "全年级"} ·{" "}
-                  {detail.pageCount ?? 0} 页
+                  {displayedResource?.subject || "未分类"} · {displayedResource?.grade || "全年级"} ·{" "}
+                  {displayedResource?.pageCount ?? 0} 页
                 </p>
               </div>
               <button
                 onClick={() => setDialog("edit")}
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800"
+                disabled={detailPending}
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl hover:bg-slate-100 disabled:opacity-35 dark:hover:bg-zinc-800"
                 title="编辑资料"
               >
                 <Pencil className="w-4 h-4" />
               </button>
               <button
                 onClick={async () => {
+                  if (detailPending) return;
                   if (!window.confirm(`删除“${detail.title}”？`)) return;
                   try {
                     await deleteLibraryResource(detail.id);
@@ -947,7 +962,8 @@ export default function ResourceLibraryEditor({
                     );
                   }
                 }}
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-rose-500 hover:bg-rose-50"
+                disabled={detailPending}
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-rose-500 hover:bg-rose-50 disabled:opacity-35"
                 title="删除资料"
               >
                 <Trash2 className="w-4 h-4" />
@@ -968,17 +984,18 @@ export default function ResourceLibraryEditor({
                     }} className={`min-h-10 rounded-md px-3 py-1.5 text-xs font-bold sm:min-h-0 ${readingMode === "ocr" ? "bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-300" : "text-slate-500"}`}>OCR 识别</button>
                   </div>
                   <div className="flex items-center gap-1 sm:gap-2">
-                    {readingMode === "pdf" ? <a href={detail.publicUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 sm:px-3 dark:text-emerald-300 dark:hover:bg-emerald-950/30" title="用系统 PDF 阅读器打开"><ExternalLink className="h-4 w-4" /><span>系统打开</span></a> : <span className="whitespace-nowrap text-xs font-bold text-slate-500">第 {selectedPage} 页</span>}
+                    {readingMode === "pdf" ? <a href={displayedResource?.publicUrl ?? detail.publicUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 sm:px-3 dark:text-emerald-300 dark:hover:bg-emerald-950/30" title="在新页面打开 PDF"><ExternalLink className="h-4 w-4" /><span className="hidden sm:inline">在新页面打开 PDF</span><span className="sm:hidden">新页面打开</span></a> : <span className="whitespace-nowrap text-xs font-bold text-slate-500">第 {selectedPage} 页</span>}
                     <button onClick={() => setInspectorOpen(true)} className="btn-secondary min-h-11 px-3 py-1.5 text-xs lg:hidden">详情</button>
                   </div>
                 </div>
                 <div className="relative min-h-0 flex-1 p-2 sm:p-3">
                   <div className={readingMode === "pdf" ? "h-full" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
-                    <iframe src={detail.publicUrl} title={`${detail.title} PDF 原文`} className="h-full min-h-0 w-full rounded-lg border border-slate-200 bg-white dark:border-zinc-800" />
+                    <iframe key={selectedResourceId} src={displayedResource?.publicUrl ?? detail.publicUrl} onLoad={() => setPdfLoading(false)} title={`${displayedResource?.title ?? detail.title} PDF 原文`} className="h-full min-h-0 w-full rounded-lg border border-slate-200 bg-white dark:border-zinc-800" />
                   </div>
                   <div className={readingMode === "ocr" ? "h-full" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
                     <OcrPageReader resourceId={detail.id} pages={detail.pages} chunks={detail.chunks} selectedPage={selectedPage} onSelectPage={onOpenPage} />
                   </div>
+                  {(detailPending || (readingMode === "pdf" && pdfLoading)) ? <div className="absolute inset-2 z-20 grid place-items-center rounded-lg bg-slate-100/95 px-5 text-center backdrop-blur-sm sm:inset-3 dark:bg-zinc-950/95" role="status" aria-live="polite"><div className="w-full max-w-xs"><LoaderCircle className="mx-auto h-7 w-7 animate-spin text-emerald-700" /><p className="mt-3 text-sm font-black text-slate-700 dark:text-slate-200">正在打开《{displayedResource?.title ?? detail.title}》</p><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-zinc-800"><span className="block h-full w-2/3 animate-pulse rounded-full bg-emerald-600" /></div>{pdfLoadingSlow ? <p className="mt-3 text-xs leading-5 text-slate-500">加载时间较长，可以点击“在新页面打开 PDF”继续阅读。</p> : <p className="mt-2 text-xs text-slate-400">正在加载 PDF 和资料信息</p>}</div></div> : null}
                 </div>
               </div>
               {inspectorOpen && <button aria-label="关闭详情" onClick={() => setInspectorOpen(false)} className="fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-[1px] lg:hidden" />}
