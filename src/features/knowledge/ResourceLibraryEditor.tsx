@@ -733,6 +733,7 @@ export default function ResourceLibraryEditor({
     source: string;
     title: string;
   }>>([]);
+  const pdfReaderOrderRef = useRef<string[]>([]);
   const filtered = useMemo(
     () =>
       resources.filter(
@@ -758,10 +759,18 @@ export default function ResourceLibraryEditor({
   useEffect(() => {
     if (!selectedResourceId || !pdfSourceUrl) return;
     const title = displayedResource?.title ?? detail?.title ?? "PDF 原文";
-    setPdfReaderCache((current) => [
-      ...current.filter((entry) => entry.id !== selectedResourceId),
-      { id: selectedResourceId, source: pdfSourceUrl, title },
-    ].slice(-3));
+    const nextOrder = [
+      ...pdfReaderOrderRef.current.filter((id) => id !== selectedResourceId),
+      selectedResourceId,
+    ].slice(-3);
+    pdfReaderOrderRef.current = nextOrder;
+    setPdfReaderCache((current) => {
+      if (current.some((entry) => entry.id === selectedResourceId)) return current;
+      return [
+        ...current.filter((entry) => nextOrder.includes(entry.id)),
+        { id: selectedResourceId, source: pdfSourceUrl, title },
+      ];
+    });
   }, [detail?.title, displayedResource?.title, pdfSourceUrl, selectedResourceId]);
   useEffect(() => {
     if (narrowLayout && openReaderOnCompact && detail) setCompactSurface("reader");
@@ -1002,7 +1011,8 @@ export default function ResourceLibraryEditor({
                         key={entry.id}
                         src={entry.source}
                         title={`${entry.title} PDF 原文`}
-                        className={`${entry.id === selectedResourceId ? "h-full w-full" : "invisible pointer-events-none absolute inset-0 h-full w-full"} min-h-0 rounded-lg border border-slate-200 bg-white dark:border-zinc-800`}
+                        aria-hidden={entry.id !== selectedResourceId}
+                        className={`${entry.id === selectedResourceId ? "z-10 opacity-100" : "pointer-events-none z-0 opacity-0"} absolute inset-0 h-full min-h-0 w-full rounded-lg border border-slate-200 bg-white dark:border-zinc-800`}
                       />
                     ))}
                   </div>
