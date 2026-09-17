@@ -59,6 +59,7 @@ import {
   resourceStatusTones,
 } from "./knowledgeUi";
 import PdfPageViewer from "../../components/PdfPageViewer";
+import ProgressivePdfReader from "../../components/ProgressivePdfReader";
 import ResponsiveChoiceDialog from "../../components/ResponsiveChoiceDialog";
 
 interface ResourceLibraryEditorProps {
@@ -970,7 +971,7 @@ export default function ResourceLibraryEditor({
                 </div>
                 <div className="relative min-h-0 flex-1 p-2 sm:p-3">
                   <div className={readingMode === "pdf" ? "h-full" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
-                    <PdfPageViewer source={detail.publicUrl} page={selectedPage} onPageChange={navigatePage} openUrl={detail.publicUrl} className="h-full" />
+                    <ProgressivePdfReader pageCount={detail.pageCount ?? detail.pages.length} selectedPage={selectedPage} pageBaseUrl={detail.publicUrl.replace(/\/content$/, "")} onPageChange={navigatePage} openUrl={detail.publicUrl} className="h-full" />
                   </div>
                   <div className={readingMode === "ocr" ? "h-full" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
                     <OcrPageReader resourceId={detail.id} pages={detail.pages} chunks={detail.chunks} selectedPage={selectedPage} onSelectPage={onOpenPage} />
