@@ -4,8 +4,9 @@
  */
 
 import ResponsiveDialog from '../../components/ResponsiveDialog';
+import ResponsiveChoiceDialog from '../../components/ResponsiveChoiceDialog';
 import React, { useMemo, useState } from 'react';
-import { AlertCircle, Bell, CalendarDays, Check, Circle, FileScan, GripVertical, LayoutGrid, ListTodo, LoaderCircle, Pencil, Plus, Repeat2, Settings2, Sparkles, Trash2, X } from 'lucide-react';
+import { AlertCircle, Bell, CalendarDays, Check, ChevronDown, Circle, FileScan, GripVertical, LayoutGrid, ListTodo, LoaderCircle, Pencil, Plus, Repeat2, Settings2, Sparkles, Trash2, X } from 'lucide-react';
 import { ReminderImportDraft, ScheduleItem, SchedulePeriod, SchoolClass, TimerReminder } from '../../domain/types';
 import { createReminderImportDraft, importSchedule, ScheduleImportDraft, ScheduleImportItemDraft } from '../../services/scheduleApi';
 
@@ -102,6 +103,7 @@ export default function ScheduleReminder(props: Props) {
   const activeClasses = props.classes.filter((item) => item.status === 'active');
   const [section, setSection] = useState<'schedule' | 'reminders'>('schedule');
   const [showTools, setShowTools] = useState(false);
+  const [showClassPicker, setShowClassPicker] = useState(false);
   const [scope, setScope] = useState<'teacher' | 'class'>('teacher');
   const [reminderView, setReminderView] = useState<'list' | 'quadrant'>('quadrant');
   const [editingSchedule, setEditingSchedule] = useState<ScheduleItem | null>(null);
@@ -144,12 +146,12 @@ export default function ScheduleReminder(props: Props) {
   };
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 animate-fade-in" id="schedule-page">
-      <header className="flex shrink-0 border-b border-slate-200 pb-4 dark:border-zinc-800">
+      <header className="flex shrink-0">
         <nav className="inline-flex w-fit rounded-xl bg-slate-100 p-1 dark:bg-zinc-900" aria-label="课表与日程子页面">
-          <Tab active={section === 'schedule'} onClick={() => setSection('schedule')} icon={CalendarDays}>
+          <Tab compact active={section === 'schedule'} onClick={() => setSection('schedule')} icon={CalendarDays}>
             课表
           </Tab>
-          <Tab active={section === 'reminders'} onClick={() => setSection('reminders')} icon={Bell}>
+          <Tab compact active={section === 'reminders'} onClick={() => setSection('reminders')} icon={Bell}>
             日程
           </Tab>
         </nav>
@@ -166,13 +168,18 @@ export default function ScheduleReminder(props: Props) {
               </button>
             </div>
             {scope === 'class' && (
-              <select value={effectiveClassId} onChange={(e) => props.onSelectClass(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold dark:border-zinc-700 dark:bg-zinc-950">
-                {activeClasses.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <>
+                <button type="button" onClick={() => setShowClassPicker(true)} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold sm:hidden dark:border-zinc-700 dark:bg-zinc-950">
+                  <span>{selectedClass?.name ?? '选择班级'}</span><ChevronDown className="h-4 w-4 text-slate-400" />
+                </button>
+                <select value={effectiveClassId} onChange={(e) => props.onSelectClass(e.target.value)} className="hidden h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold sm:block dark:border-zinc-700 dark:bg-zinc-950">
+                  {activeClasses.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </>
             )}
             <span className="hidden text-xs text-slate-400 md:inline">{props.showWeekends ? '显示周一至周日' : '显示周一至周五'}</span>
             <button type="button" onClick={() => setShowTools(true)} className="ml-auto min-h-11 rounded-lg border px-3 text-sm font-bold sm:hidden">更多</button>
@@ -249,6 +256,7 @@ export default function ScheduleReminder(props: Props) {
         />
       )}
       {editingReminder && <ReminderEditor item={editingReminder} classes={activeClasses} onChange={setEditingReminder} onClose={() => setEditingReminder(null)} onSave={(scope) => void saveReminderItem(scope)} />}
+      {showClassPicker && <ResponsiveChoiceDialog title="选择班级课表" value={effectiveClassId} options={activeClasses.map(item => ({ value: item.id, label: item.name }))} onChange={props.onSelectClass} onClose={() => setShowClassPicker(false)} />}
       {showImport && (
         <ImportDialog
           scope={scope}
@@ -271,9 +279,9 @@ export default function ScheduleReminder(props: Props) {
   );
 }
 
-function Tab({ active, onClick, icon: Icon, children }: { active: boolean; onClick: () => void; icon: React.ElementType; children: React.ReactNode }) {
+function Tab({ active, onClick, icon: Icon, children, compact = false }: { active: boolean; onClick: () => void; icon: React.ElementType; children: React.ReactNode; compact?: boolean }) {
   return (
-    <button onClick={onClick} className={`inline-flex min-h-11 items-center gap-1 rounded-lg px-2 py-2 text-xs font-bold sm:gap-1.5 sm:px-4 ${active ? 'bg-white text-slate-900 shadow-sm dark:bg-zinc-800 dark:text-white' : 'text-slate-500'}`}>
+    <button onClick={onClick} className={`inline-flex items-center gap-1 rounded-lg px-2 text-xs font-bold sm:gap-1.5 sm:px-4 ${compact ? 'h-9 py-1.5' : 'min-h-11 py-2'} ${active ? 'bg-white text-slate-900 shadow-sm dark:bg-zinc-800 dark:text-white' : 'text-slate-500'}`}>
       <Icon className="h-4 w-4" />
       {children}
     </button>
