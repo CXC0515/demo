@@ -71,6 +71,7 @@ interface ResourceLibraryEditorProps {
   loading: boolean;
   narrowLayout: boolean;
   openReaderOnCompact: boolean;
+  readerVisible: boolean;
   onSelectResource: (id: string) => void;
   onOpenPage: (page: number) => void;
   onDataChanged: (resourceId?: string) => Promise<void>;
@@ -707,6 +708,7 @@ export default function ResourceLibraryEditor({
   loading,
   narrowLayout,
   openReaderOnCompact,
+  readerVisible,
   onSelectResource,
   onOpenPage,
   onDataChanged,
@@ -728,8 +730,8 @@ export default function ResourceLibraryEditor({
   const [ragQuery, setRagQuery] = useState("");
   const [ragResults, setRagResults] = useState<Array<ResourceChunk & { retrievalRank: number }>>([]);
   const [ragSearching, setRagSearching] = useState(false);
-  const [pdfLoading, setPdfLoading] = useState(true);
-  const [pdfLoadingSlow, setPdfLoadingSlow] = useState(false);
+  const [pdfFrameRevision, setPdfFrameRevision] = useState(0);
+  const previousReaderVisibleRef = useRef(readerVisible);
   const filtered = useMemo(
     () =>
       resources.filter(
@@ -751,12 +753,14 @@ export default function ResourceLibraryEditor({
   const selectedResource = resources.find((resource) => resource.id === selectedResourceId);
   const displayedResource = selectedResource ?? detail;
   const detailPending = Boolean(selectedResourceId && detail?.id !== selectedResourceId);
+  const pdfSourceUrl = displayedResource?.publicUrl ?? detail?.publicUrl ?? "";
+  const embeddedPdfUrl = pdfSourceUrl ? `${pdfSourceUrl}#page=1&view=FitH` : "";
   useEffect(() => {
-    setPdfLoading(true);
-    setPdfLoadingSlow(false);
-    const timer = window.setTimeout(() => setPdfLoadingSlow(true), 6000);
-    return () => window.clearTimeout(timer);
-  }, [selectedResourceId]);
+    if (readerVisible && !previousReaderVisibleRef.current) {
+      setPdfFrameRevision((revision) => revision + 1);
+    }
+    previousReaderVisibleRef.current = readerVisible;
+  }, [readerVisible]);
   useEffect(() => {
     if (narrowLayout && openReaderOnCompact && detail) setCompactSurface("reader");
   }, [detail?.id, narrowLayout, openReaderOnCompact]);
@@ -985,23 +989,24 @@ export default function ResourceLibraryEditor({
                   </div>
                   <div className="flex items-center gap-1 sm:gap-2">
                     {readingMode === "pdf" ? <a href={displayedResource?.publicUrl ?? detail.publicUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 sm:px-3 dark:text-emerald-300 dark:hover:bg-emerald-950/30" title="在新页面打开 PDF"><ExternalLink className="h-4 w-4" /><span className="hidden sm:inline">在新页面打开 PDF</span><span className="sm:hidden">新页面打开</span></a> : <span className="whitespace-nowrap text-xs font-bold text-slate-500">第 {selectedPage} 页</span>}
-                    <button onClick={() => setInspectorOpen(true)} className="btn-secondary min-h-11 px-3 py-1.5 text-xs lg:hidden">详情</button>
+                    <button onClick={() => setInspectorOpen(true)} className="btn-secondary min-h-11 px-3 py-1.5 text-xs lg:hidden">解析</button>
                   </div>
                 </div>
-                <div className="relative min-h-0 flex-1 p-2 sm:p-3">
-                  <div className={readingMode === "pdf" ? "h-full" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
-                    <iframe key={selectedResourceId} src={displayedResource?.publicUrl ?? detail.publicUrl} onLoad={() => setPdfLoading(false)} title={`${displayedResource?.title ?? detail.title} PDF 原文`} className="h-full min-h-0 w-full rounded-lg border border-slate-200 bg-white dark:border-zinc-800" />
+                <div className="relative flex min-h-0 flex-1 flex-col p-2 sm:p-3">
+                  {readingMode === "pdf" && <p className="mb-2 shrink-0 px-1 text-xs leading-5 text-slate-500 sm:hidden dark:text-slate-400">PDF 由浏览器加载，首次打开可能需要几秒，具体取决于文件大小。</p>}
+                  <div className={readingMode === "pdf" ? "min-h-0 flex-1" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
+                    <iframe key={`${selectedResourceId}:${pdfFrameRevision}`} src={embeddedPdfUrl} title={`${displayedResource?.title ?? detail.title} PDF 原文`} className="h-full min-h-0 w-full rounded-lg border border-slate-200 bg-white dark:border-zinc-800" />
                   </div>
-                  <div className={readingMode === "ocr" ? "h-full" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
+                  <div className={readingMode === "ocr" ? "min-h-0 flex-1" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
                     <OcrPageReader resourceId={detail.id} pages={detail.pages} chunks={detail.chunks} selectedPage={selectedPage} onSelectPage={onOpenPage} />
                   </div>
-                  {(detailPending || (readingMode === "pdf" && pdfLoading)) ? <div className="absolute inset-2 z-20 grid place-items-center rounded-lg bg-slate-100/95 px-5 text-center backdrop-blur-sm sm:inset-3 dark:bg-zinc-950/95" role="status" aria-live="polite"><div className="w-full max-w-xs"><LoaderCircle className="mx-auto h-7 w-7 animate-spin text-emerald-700" /><p className="mt-3 text-sm font-black text-slate-700 dark:text-slate-200">正在打开《{displayedResource?.title ?? detail.title}》</p><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-zinc-800"><span className="block h-full w-2/3 animate-pulse rounded-full bg-emerald-600" /></div>{pdfLoadingSlow ? <p className="mt-3 text-xs leading-5 text-slate-500">加载时间较长，可以点击“在新页面打开 PDF”继续阅读。</p> : <p className="mt-2 text-xs text-slate-400">正在加载 PDF 和资料信息</p>}</div></div> : null}
+                  {detailPending ? <div className="absolute inset-2 z-20 grid place-items-center rounded-lg bg-slate-100/95 px-5 text-center backdrop-blur-sm sm:inset-3 dark:bg-zinc-950/95" role="status" aria-live="polite"><div><LoaderCircle className="mx-auto h-7 w-7 animate-spin text-emerald-700" /><p className="mt-3 text-sm font-black text-slate-700 dark:text-slate-200">正在切换资料</p></div></div> : null}
                 </div>
               </div>
               {inspectorOpen && <button aria-label="关闭详情" onClick={() => setInspectorOpen(false)} className="fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-[1px] lg:hidden" />}
               <aside className={`${inspectorOpen ? "fixed inset-x-0 bottom-0 z-50 flex max-h-[82dvh] rounded-t-3xl bg-white shadow-2xl dark:bg-zinc-900" : "hidden"} min-h-0 flex-col overflow-hidden border-l border-slate-200/70 dark:border-zinc-800 lg:static lg:z-auto lg:flex lg:max-h-none lg:w-auto lg:rounded-none lg:bg-transparent lg:shadow-none`}>
                 <div className="flex items-center justify-between border-b border-slate-200/70 px-4 py-2 lg:hidden dark:border-zinc-800">
-                  <span className="text-sm font-black text-slate-700 dark:text-slate-100">资料详情</span>
+                  <span className="text-sm font-black text-slate-700 dark:text-slate-100">资料解析</span>
                   <button onClick={() => setInspectorOpen(false)} className="grid h-11 w-11 place-items-center rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800" aria-label="关闭详情面板"><X className="h-5 w-5" /></button>
                 </div>
                 <div className="grid grid-cols-4 border-b border-slate-200/70 dark:border-zinc-800">

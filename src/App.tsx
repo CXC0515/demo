@@ -71,6 +71,7 @@ export default function App() {
   const authState = useAuth();
   // Navigation & View State
   const [activePage, setActivePage] = useState<PageId>('workbench');
+  const [scheduleSection, setScheduleSection] = useState<'schedule' | 'reminders'>('schedule');
   const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [studentManagementTargetId, setStudentManagementTargetId] = useState<string | null>(null);
@@ -544,9 +545,11 @@ export default function App() {
       toastMessage={toastMessage}
       teacherProfile={teacherProfile}
       accountEmail={authState.user.email}
+      scheduleSection={scheduleSection}
       onSignOut={() => void authState.signOut()}
       onSelectClass={setSelectedClassId}
       onSelectPage={setActivePage}
+      onSelectScheduleSection={setScheduleSection}
       onToggleGroup={toggleGroup}
     >
       {/* Page Router */}
@@ -654,6 +657,8 @@ export default function App() {
               reminders={reminders}
               classes={classes}
               selectedClassId={selectedClassId}
+              section={scheduleSection}
+              onSectionChange={setScheduleSection}
               onSelectClass={setSelectedClassId}
               periods={schedulePeriods}
               showWeekends={showWeekends}

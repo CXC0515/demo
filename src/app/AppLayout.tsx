@@ -1,4 +1,4 @@
-import { Boxes, ChevronDown, GraduationCap, HelpCircle, LogOut, Menu, Network, Sparkles, X } from 'lucide-react';
+import { Bell, Boxes, CalendarDays, ChevronDown, GraduationCap, HelpCircle, LogOut, Menu, Network, Sparkles, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import type { SchoolClass, TeacherProfile } from '../domain/types';
 import type { NavGroup, PageId } from './navigation';
@@ -15,9 +15,11 @@ interface AppLayoutProps {
   toastMessage: string | null;
   teacherProfile: TeacherProfile;
   accountEmail: string;
+  scheduleSection: 'schedule' | 'reminders';
   children: ReactNode;
   onSelectClass: (classId: string) => void;
   onSelectPage: (pageId: PageId) => void;
+  onSelectScheduleSection: (section: 'schedule' | 'reminders') => void;
   onToggleGroup: (groupId: string) => void;
   onSignOut: () => void;
 }
@@ -34,9 +36,11 @@ export default function AppLayout({
   toastMessage,
   teacherProfile,
   accountEmail,
+  scheduleSection,
   children,
   onSelectClass,
   onSelectPage,
+  onSelectScheduleSection,
   onToggleGroup,
   onSignOut,
 }: AppLayoutProps) {
@@ -91,6 +95,16 @@ export default function AppLayout({
               >
                 <Boxes className="h-3.5 w-3.5" />
                 资料编辑
+              </button>
+            </div>
+          )}
+          {activePage === 'schedule' && (
+            <div className="flex min-w-0 items-center rounded-xl border border-slate-200/80 bg-slate-100/80 p-0.5 sm:hidden dark:border-zinc-700/80 dark:bg-zinc-800/80">
+              <button type="button" onClick={() => onSelectScheduleSection('schedule')} className={`flex min-h-9 items-center gap-1 rounded-[10px] px-3 text-[11px] font-bold ${scheduleSection === 'schedule' ? 'bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-200' : 'text-slate-500 dark:text-zinc-400'}`}>
+                <CalendarDays className="h-3.5 w-3.5" />课表
+              </button>
+              <button type="button" onClick={() => onSelectScheduleSection('reminders')} className={`flex min-h-9 items-center gap-1 rounded-[10px] px-3 text-[11px] font-bold ${scheduleSection === 'reminders' ? 'bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-200' : 'text-slate-500 dark:text-zinc-400'}`}>
+                <Bell className="h-3.5 w-3.5" />日程
               </button>
             </div>
           )}
