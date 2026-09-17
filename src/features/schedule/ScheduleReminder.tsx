@@ -416,8 +416,9 @@ function ReminderWorkspace({ reminders, view, onView, onAdd, onBatch, onEdit, on
   const [showCreateActions, setShowCreateActions] = useState(false);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(true);
+  const [hideOverdue, setHideOverdue] = useState(false);
   const [showRecurring, setShowRecurring] = useState(false);
-  const [showOverdue, setShowOverdue] = useState(false);
+  const [showOverdueDialog, setShowOverdueDialog] = useState(false);
   const quadrants = [
     ['重要且紧急', true, true, 'border-rose-200'],
     ['重要不紧急', true, false, 'border-amber-200'],
@@ -445,7 +446,8 @@ function ReminderWorkspace({ reminders, view, onView, onAdd, onBatch, onEdit, on
   const completed = reminders.filter((item) => item.status === 'completed').sort(sortRemindersByTime);
   const inactive = reminders.filter((item) => item.status === 'inactive').sort(sortRemindersByTime);
   const recurring = reminders.filter((item) => item.recurrence?.enabled && item.status !== 'completed').sort(sortRemindersByTime);
-  const quadrantItems = showCompleted ? [...activeItems, ...completed] : activeItems;
+  const visibleActiveItems = hideOverdue ? activeItems.filter((item) => !isReminderOverdue(item)) : activeItems;
+  const quadrantItems = showCompleted ? [...visibleActiveItems, ...completed] : visibleActiveItems;
   const group = (label: string, items: TimerReminder[], tone = 'text-slate-500') =>
     items.length ? (
       <section>
@@ -457,15 +459,6 @@ function ReminderWorkspace({ reminders, view, onView, onAdd, onBatch, onEdit, on
     ) : null;
   return (
     <section className="min-h-0 flex-1 pb-20 sm:pb-0">
-      {overdue.length ? (
-        <button onClick={() => setShowOverdue(true)} className="mb-3 flex w-full items-center justify-between rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-left text-xs text-red-800 transition-colors hover:bg-red-100 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
-          <span className="flex items-center gap-2 font-bold">
-            <AlertCircle className="h-4 w-4" />
-            当前有 {overdue.length} 个过期日程
-          </span>
-          <span className="font-black">调整日期 →</span>
-        </button>
-      ) : null}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg bg-slate-100 p-1 dark:bg-zinc-900">
           <Tab active={view === 'quadrant'} onClick={() => onView('quadrant')} icon={LayoutGrid}>
@@ -497,16 +490,25 @@ function ReminderWorkspace({ reminders, view, onView, onAdd, onBatch, onEdit, on
         </div>
       </div>
       {showTools && <ResponsiveDialog title="日程操作" onClose={() => setShowTools(false)}><div className="grid gap-3">
-        <button type="button" onClick={() => { setShowTools(false); onBatch(); }} className="min-h-11 rounded-xl border px-4 text-left">AI 批量创建</button>
+        <button type="button" aria-pressed={!showCompleted} onClick={() => setShowCompleted(value => !value)} className={`flex min-h-12 items-center gap-3 rounded-xl border px-4 text-left text-sm font-bold ${!showCompleted ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30' : 'border-slate-200 dark:border-zinc-700'}`}><span className={`grid h-5 w-5 place-items-center rounded border ${!showCompleted ? 'border-emerald-700 bg-emerald-700 text-white' : 'border-slate-400 bg-white dark:bg-zinc-900'}`}>{!showCompleted ? <Check className="h-3.5 w-3.5" /> : null}</span>隐藏已完成</button>
+        <button type="button" aria-pressed={hideOverdue} onClick={() => setHideOverdue(value => !value)} className={`flex min-h-12 items-center gap-3 rounded-xl border px-4 text-left text-sm font-bold ${hideOverdue ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30' : 'border-slate-200 dark:border-zinc-700'}`}><span className={`grid h-5 w-5 place-items-center rounded border ${hideOverdue ? 'border-emerald-700 bg-emerald-700 text-white' : 'border-slate-400 bg-white dark:bg-zinc-900'}`}>{hideOverdue ? <Check className="h-3.5 w-3.5" /> : null}</span>隐藏已过期</button>
         <button type="button" onClick={() => { setShowTools(false); setShowRecurring(true); }} className="min-h-11 rounded-xl border px-4 text-left">周期任务 · {recurring.length}</button>
-        {view === 'quadrant' && <button type="button" onClick={() => { setShowCompleted(value => !value); setShowTools(false); }} className="min-h-11 rounded-xl border px-4 text-left">{showCompleted ? '隐藏' : '显示'}已完成日程</button>}
       </div></ResponsiveDialog>}
+      {overdue.length ? (
+        <button onClick={() => setShowOverdueDialog(true)} className="mb-3 flex w-full items-center justify-between rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-left text-xs text-red-800 transition-colors hover:bg-red-100 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+          <span className="flex items-center gap-2 font-bold">
+            <AlertCircle className="h-4 w-4" />
+            当前有 {overdue.length} 个过期日程
+          </span>
+          <span className="font-black">调整日期 →</span>
+        </button>
+      ) : null}
       {view === 'list' ? (
         <div className="space-y-5">
           {group('时间待定', untimed, 'text-amber-700')}
-          {group('已过期', overdue, 'text-red-600')}
+          {!hideOverdue && group('已过期', overdue, 'text-red-600')}
           {group('接下来', upcoming)}
-          {group('已完成', completed, 'text-emerald-700')}
+          {showCompleted && group('已完成', completed, 'text-emerald-700')}
           {group('已停用', inactive)}
           {!reminders.length && <Empty />}
         </div>
@@ -515,7 +517,7 @@ function ReminderWorkspace({ reminders, view, onView, onAdd, onBatch, onEdit, on
           {quadrants.map(([label, important, urgent, color]) => (
             <div key={label} onDragOver={(event) => event.preventDefault()} onDrop={() => moveToQuadrant(important, urgent)} className={`min-h-44 min-w-0 rounded-2xl border bg-white p-2 sm:p-3 transition-colors ${color} ${draggedId ? 'border-dashed' : 'dark:border-zinc-800'} dark:bg-zinc-900/50`}>
               <h3 className="mb-2 text-xs font-black sm:mb-3">{label}</h3>
-              <div className="space-y-2">{quadrantItems.filter((item) => Boolean(item.important) === important && Boolean(item.urgent) === urgent).map(item => <React.Fragment key={item.id}><div className={`flex min-h-16 items-start rounded-xl border p-1.5 sm:hidden ${item.status === 'completed' ? 'bg-slate-50 text-slate-500' : 'bg-white text-slate-800'} dark:bg-zinc-900 dark:text-slate-200`}><button type="button" onClick={() => void onToggle(item.id)} className="grid h-11 w-9 shrink-0 place-items-center" aria-label={item.status === 'completed' ? '恢复日程' : '完成日程'}><span className={`grid h-4 w-4 place-items-center rounded-[4px] border-2 ${item.status === 'completed' ? 'border-emerald-700 bg-emerald-700 text-white' : 'border-slate-400 bg-white'}`}>{item.status === 'completed' ? <Check className="h-3 w-3" /> : null}</span></button><button type="button" onClick={() => onEdit(item)} className="min-w-0 flex-1 py-1 pr-1 text-left"><strong className={`block break-words text-[13px] leading-4 ${item.status === 'completed' ? 'line-through' : ''}`}>{item.name}</strong><span className="mt-1 block break-words text-xs leading-4 text-slate-500">{formatReminderTime(item)}</span><span className={`mt-0.5 block text-xs ${item.status === 'completed' ? 'text-emerald-700' : 'text-slate-400'}`}>{item.status === 'completed' ? '已完成' : item.className || '点击调整'}</span></button></div><div className="hidden sm:block">{card(item, item.status === 'active')}</div></React.Fragment>)}</div>
+              <div className="space-y-2">{quadrantItems.filter((item) => Boolean(item.important) === important && Boolean(item.urgent) === urgent).map(item => <React.Fragment key={item.id}><div className={`flex min-h-14 items-start rounded-xl border p-1.5 sm:hidden ${item.status === 'completed' ? 'bg-slate-50 text-slate-500' : 'bg-white text-slate-800'} dark:bg-zinc-900 dark:text-slate-200`}><button type="button" onClick={() => void onToggle(item.id)} className="grid h-11 w-9 shrink-0 place-items-center" aria-label={item.status === 'completed' ? '恢复日程' : '完成日程'}><span className={`grid h-4 w-4 place-items-center rounded-[4px] border-2 ${item.status === 'completed' ? 'border-emerald-700 bg-emerald-700 text-white' : 'border-slate-400 bg-white'}`}>{item.status === 'completed' ? <Check className="h-3 w-3" /> : null}</span></button><button type="button" onClick={() => onEdit(item)} className="min-w-0 flex-1 py-1 pr-1 text-left"><strong className={`block break-words text-[13px] leading-4 ${item.status === 'completed' ? 'line-through' : ''}`}>{item.name}</strong><span className="mt-1 block break-words text-xs leading-4 text-slate-500">{formatReminderTime(item)}{item.className ? ` · ${item.className}` : ''}</span></button></div><div className="hidden sm:block">{card(item, item.status === 'active')}</div></React.Fragment>)}</div>
             </div>
           ))}
         </div>
@@ -540,13 +542,13 @@ function ReminderWorkspace({ reminders, view, onView, onAdd, onBatch, onEdit, on
           }}
         />
       ) : null}
-      {showOverdue ? (
+      {showOverdueDialog ? (
         <OverdueReminderDialog
           items={overdue}
-          onClose={() => setShowOverdue(false)}
+          onClose={() => setShowOverdueDialog(false)}
           onApply={async (items) => {
             await onSaveBatch(items);
-            setShowOverdue(false);
+            setShowOverdueDialog(false);
           }}
         />
       ) : null}
