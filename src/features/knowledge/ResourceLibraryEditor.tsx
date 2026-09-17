@@ -14,6 +14,7 @@ import {
   ChevronRight,
   CircleAlert,
   Eye,
+  ExternalLink,
   FileText,
   Filter,
   LoaderCircle,
@@ -59,7 +60,6 @@ import {
   resourceStatusTones,
 } from "./knowledgeUi";
 import PdfPageViewer from "../../components/PdfPageViewer";
-import ProgressivePdfReader from "../../components/ProgressivePdfReader";
 import ResponsiveChoiceDialog from "../../components/ResponsiveChoiceDialog";
 
 interface ResourceLibraryEditorProps {
@@ -658,11 +658,11 @@ const OcrPageReader = ({
   };
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-slate-200/50 dark:bg-zinc-950">
-      <div className="z-20 flex shrink-0 items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-2.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
-        <span className="inline-flex items-center gap-2 text-xs font-black text-slate-700 dark:text-slate-200"><Eye className="h-4 w-4" />OCR 第 {selectedPage} 页</span>
-        <div className="flex items-center gap-3">
-          <span className="text-[10px] text-slate-400">仅显示已解析且未排除的页面 · 共 {visiblePages.length} 页</span>
-          <button type="button" onClick={() => setShowRecognitionBoxes((value) => !value)} className={`rounded-md px-2 py-1 text-[10px] font-bold ${showRecognitionBoxes ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-500 dark:bg-zinc-800"}`}>{showRecognitionBoxes ? "隐藏识别框" : "显示识别框"}</button>
+      <div className="z-20 flex shrink-0 items-center gap-2 border-b border-slate-200 bg-white/95 px-3 py-1.5 backdrop-blur sm:px-4 dark:border-zinc-800 dark:bg-zinc-900/95">
+        <span className="inline-flex min-w-0 flex-1 items-center gap-2 text-xs font-black text-slate-700 dark:text-slate-200"><Eye className="h-4 w-4 shrink-0" /><span className="truncate">OCR 第 {selectedPage} 页</span></span>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="hidden text-xs text-slate-400 md:inline">仅显示已解析且未排除的页面 · 共 {visiblePages.length} 页</span>
+          <button type="button" onClick={() => setShowRecognitionBoxes((value) => !value)} className={`min-h-11 shrink-0 whitespace-nowrap rounded-lg px-3 text-xs font-bold ${showRecognitionBoxes ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-500 dark:bg-zinc-800"}`}>{showRecognitionBoxes ? "隐藏识别框" : "显示识别框"}</button>
         </div>
       </div>
       <div ref={scrollRef} onScroll={updateCurrentPage} className="min-h-0 flex-1 scroll-smooth overflow-y-auto p-3">
@@ -967,11 +967,14 @@ export default function ResourceLibraryEditor({
                       }
                     }} className={`min-h-10 rounded-md px-3 py-1.5 text-xs font-bold sm:min-h-0 ${readingMode === "ocr" ? "bg-white text-emerald-800 shadow-sm dark:bg-zinc-700 dark:text-emerald-300" : "text-slate-500"}`}>OCR 识别</button>
                   </div>
-                  <div className="flex items-center gap-2">{readingMode === "ocr" ? <span className="whitespace-nowrap text-xs font-bold text-slate-500">第 {selectedPage} 页</span> : null}<button onClick={() => setInspectorOpen(true)} className="btn-secondary min-h-10 px-3 py-1.5 text-xs lg:hidden">详情</button></div>
+                  <div className="flex items-center gap-1 sm:gap-2">
+                    {readingMode === "pdf" ? <a href={detail.publicUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 sm:px-3 dark:text-emerald-300 dark:hover:bg-emerald-950/30" title="用系统 PDF 阅读器打开"><ExternalLink className="h-4 w-4" /><span>系统打开</span></a> : <span className="whitespace-nowrap text-xs font-bold text-slate-500">第 {selectedPage} 页</span>}
+                    <button onClick={() => setInspectorOpen(true)} className="btn-secondary min-h-11 px-3 py-1.5 text-xs lg:hidden">详情</button>
+                  </div>
                 </div>
                 <div className="relative min-h-0 flex-1 p-2 sm:p-3">
                   <div className={readingMode === "pdf" ? "h-full" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
-                    <ProgressivePdfReader pageCount={detail.pageCount ?? detail.pages.length} selectedPage={selectedPage} pageBaseUrl={detail.publicUrl.replace(/\/content$/, "")} onPageChange={navigatePage} openUrl={detail.publicUrl} className="h-full" />
+                    <iframe src={detail.publicUrl} title={`${detail.title} PDF 原文`} className="h-full min-h-0 w-full rounded-lg border border-slate-200 bg-white dark:border-zinc-800" />
                   </div>
                   <div className={readingMode === "ocr" ? "h-full" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
                     <OcrPageReader resourceId={detail.id} pages={detail.pages} chunks={detail.chunks} selectedPage={selectedPage} onSelectPage={onOpenPage} />

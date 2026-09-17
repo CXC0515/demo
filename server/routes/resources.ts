@@ -260,6 +260,16 @@ router.get("/resources/:resourceId/content", (request, response) => {
   }
   response.type(resource.mimeType);
   response.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+  response.setHeader(
+    "Content-Disposition",
+    `inline; filename*=UTF-8''${encodeURIComponent(resource.fileName)}`,
+  );
+  if (resource.mimeType === "application/pdf") {
+    response.setHeader(
+      "Content-Security-Policy",
+      "default-src 'none'; frame-ancestors 'self'",
+    );
+  }
   try {
     response.sendFile(assertPathInsideWorkspace(resource.diskPath));
   } catch {
