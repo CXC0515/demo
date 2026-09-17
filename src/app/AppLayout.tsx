@@ -1,4 +1,4 @@
-import { Bell, Boxes, CalendarDays, ChevronDown, GraduationCap, HelpCircle, LogOut, Menu, Network, Sparkles, X } from 'lucide-react';
+import { Bell, Boxes, CalendarDays, ChevronDown, GraduationCap, HelpCircle, LogOut, Menu, MoreHorizontal, Network, Sparkles, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import type { SchoolClass, TeacherProfile } from '../domain/types';
 import type { NavGroup, PageId } from './navigation';
@@ -20,6 +20,7 @@ interface AppLayoutProps {
   onSelectClass: (classId: string) => void;
   onSelectPage: (pageId: PageId) => void;
   onSelectScheduleSection: (section: 'schedule' | 'reminders') => void;
+  onOpenScheduleTools: () => void;
   onToggleGroup: (groupId: string) => void;
   onSignOut: () => void;
 }
@@ -41,6 +42,7 @@ export default function AppLayout({
   onSelectClass,
   onSelectPage,
   onSelectScheduleSection,
+  onOpenScheduleTools,
   onToggleGroup,
   onSignOut,
 }: AppLayoutProps) {
@@ -111,6 +113,11 @@ export default function AppLayout({
         </div>
 
         <div className="flex items-center gap-3">
+          {activePage === 'schedule' && (
+            <button type="button" onClick={onOpenScheduleTools} className="grid h-11 w-11 place-items-center rounded-xl text-slate-500 hover:bg-slate-100 sm:hidden dark:text-slate-300 dark:hover:bg-zinc-800" aria-label="更多课表操作" title="更多课表操作">
+              <MoreHorizontal className="h-5 w-5" />
+            </button>
+          )}
           <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/65 dark:bg-zinc-800/65 border border-slate-200/70 dark:border-zinc-700/70 text-[11px] text-slate-500 dark:text-slate-400">
             <span>2026 春季学期</span>
             <span className="w-1 h-1 rounded-full bg-slate-300"></span>

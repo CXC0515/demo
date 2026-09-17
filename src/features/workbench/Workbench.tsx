@@ -65,7 +65,7 @@ export default function Workbench({
       case 'grading': return <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />;
       case 'verify': return <CheckSquare className="w-5 h-5 text-amber-600 dark:text-amber-400" />;
       case 'report': return <FileText className="w-5 h-5 text-teal-600 dark:text-teal-400" />;
-      default: return <Clock className="w-5 h-5 text-slate-600 dark:text-slate-400" />;
+      default: return null;
     }
   };
 
@@ -117,37 +117,37 @@ export default function Workbench({
           </div>
 
           <div className="space-y-3">
-            {pendingTasks.map(task => (
-              <div 
+            {pendingTasks.map(task => {
+              const nodeIcon = getNodeIcon(task.node);
+              return (
+              <div
                 key={task.id}
                 id={`task-card-${task.id}`}
-                className="glass-panel glass-panel-hover rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-l-4 border-l-emerald-600 dark:border-l-emerald-500"
+                className="glass-panel glass-panel-hover flex flex-col items-start justify-between gap-3 rounded-2xl border-l-4 border-l-emerald-600 p-3.5 sm:flex-row sm:items-center sm:gap-4 sm:p-4 dark:border-l-emerald-500"
               >
-                <div className="flex items-start gap-3 flex-1">
-                  <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-zinc-800/60 mt-0.5">
-                    {getNodeIcon(task.node)}
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h4 className="font-semibold text-slate-800 dark:text-slate-100 text-sm sm:text-base">
-                        {task.name}
-                      </h4>
-                      <span className="px-2 py-0.5 text-xs bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-slate-400 rounded-md">
-                        {task.className}
-                      </span>
+                <div className="flex w-full min-w-0 flex-1 items-start gap-3">
+                  {nodeIcon ? <div className="mt-0.5 hidden shrink-0 rounded-xl bg-slate-100 p-2.5 sm:block dark:bg-zinc-800/60">{nodeIcon}</div> : null}
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h4 className="truncate text-sm font-semibold text-slate-800 sm:text-base dark:text-slate-100">
+                          {task.name}
+                        </h4>
+                        <span className="mt-1 inline-flex max-w-full truncate rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-zinc-800 dark:text-slate-400">
+                          {task.className}
+                        </span>
+                      </div>
+                      <span className="shrink-0 sm:hidden">{getStatusBadge(task.status)}</span>
                     </div>
-                    <div className="flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400">
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5" />
-                        截止：{task.deadline}
-                      </span>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                      <span>截止：{task.deadline}</span>
                       <span className="flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                         当前节点：<span className="font-medium text-emerald-700 dark:text-emerald-400">{task.nodeName}</span>
                       </span>
                     </div>
                     {task.progress !== undefined && (
-                      <div className="w-48 mt-1">
+                      <div className="mt-1 w-full max-w-xs">
                         <div className="flex justify-between text-[10px] text-slate-400 mb-0.5">
                           <span>处理进度</span>
                           <span>{task.progress}%</span>
@@ -163,17 +163,18 @@ export default function Workbench({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-                  {getStatusBadge(task.status)}
+                <div className="flex w-full items-center justify-end gap-3 sm:w-auto">
+                  <span className="hidden sm:inline">{getStatusBadge(task.status)}</span>
                   <button
                     onClick={() => onTriggerTask(task)}
-                    className="px-3.5 py-1.5 bg-emerald-700/10 hover:bg-emerald-700 hover:text-white dark:bg-emerald-500/10 dark:hover:bg-emerald-500 text-emerald-800 dark:text-emerald-300 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer whitespace-nowrap"
+                    className="min-h-11 whitespace-nowrap rounded-lg bg-emerald-700/10 px-4 text-xs font-semibold text-emerald-800 transition-all hover:bg-emerald-700 hover:text-white active:scale-95 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500"
                   >
                     去处理
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
 
             {pendingTasks.length === 0 && (
               <div className="glass-panel rounded-2xl p-8 text-center text-slate-500">
