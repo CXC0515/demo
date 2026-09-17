@@ -71,7 +71,6 @@ interface ResourceLibraryEditorProps {
   loading: boolean;
   narrowLayout: boolean;
   openReaderOnCompact: boolean;
-  readerVisible: boolean;
   onSelectResource: (id: string) => void;
   onOpenPage: (page: number) => void;
   onDataChanged: (resourceId?: string) => Promise<void>;
@@ -708,7 +707,6 @@ export default function ResourceLibraryEditor({
   loading,
   narrowLayout,
   openReaderOnCompact,
-  readerVisible,
   onSelectResource,
   onOpenPage,
   onDataChanged,
@@ -730,8 +728,11 @@ export default function ResourceLibraryEditor({
   const [ragQuery, setRagQuery] = useState("");
   const [ragResults, setRagResults] = useState<Array<ResourceChunk & { retrievalRank: number }>>([]);
   const [ragSearching, setRagSearching] = useState(false);
-  const [pdfFrameRevision, setPdfFrameRevision] = useState(0);
-  const previousReaderVisibleRef = useRef(readerVisible);
+  const [pdfReaderCache, setPdfReaderCache] = useState<Array<{
+    id: string;
+    source: string;
+    title: string;
+  }>>([]);
   const filtered = useMemo(
     () =>
       resources.filter(
@@ -754,13 +755,14 @@ export default function ResourceLibraryEditor({
   const displayedResource = selectedResource ?? detail;
   const detailPending = Boolean(selectedResourceId && detail?.id !== selectedResourceId);
   const pdfSourceUrl = displayedResource?.publicUrl ?? detail?.publicUrl ?? "";
-  const embeddedPdfUrl = pdfSourceUrl ? `${pdfSourceUrl}#page=1&view=FitH` : "";
   useEffect(() => {
-    if (readerVisible && !previousReaderVisibleRef.current) {
-      setPdfFrameRevision((revision) => revision + 1);
-    }
-    previousReaderVisibleRef.current = readerVisible;
-  }, [readerVisible]);
+    if (!selectedResourceId || !pdfSourceUrl) return;
+    const title = displayedResource?.title ?? detail?.title ?? "PDF 原文";
+    setPdfReaderCache((current) => [
+      ...current.filter((entry) => entry.id !== selectedResourceId),
+      { id: selectedResourceId, source: pdfSourceUrl, title },
+    ].slice(-3));
+  }, [detail?.title, displayedResource?.title, pdfSourceUrl, selectedResourceId]);
   useEffect(() => {
     if (narrowLayout && openReaderOnCompact && detail) setCompactSurface("reader");
   }, [detail?.id, narrowLayout, openReaderOnCompact]);
@@ -994,8 +996,15 @@ export default function ResourceLibraryEditor({
                 </div>
                 <div className="relative flex min-h-0 flex-1 flex-col p-2 sm:p-3">
                   {readingMode === "pdf" && <p className="mb-2 shrink-0 px-1 text-xs leading-5 text-slate-500 sm:hidden dark:text-slate-400">PDF 由浏览器加载，首次打开可能需要几秒，具体取决于文件大小。</p>}
-                  <div className={readingMode === "pdf" ? "min-h-0 flex-1" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
-                    <iframe key={`${selectedResourceId}:${pdfFrameRevision}`} src={embeddedPdfUrl} title={`${displayedResource?.title ?? detail.title} PDF 原文`} className="h-full min-h-0 w-full rounded-lg border border-slate-200 bg-white dark:border-zinc-800" />
+                  <div className={readingMode === "pdf" ? "relative min-h-0 flex-1" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
+                    {pdfReaderCache.map((entry) => (
+                      <iframe
+                        key={entry.id}
+                        src={entry.source}
+                        title={`${entry.title} PDF 原文`}
+                        className={`${entry.id === selectedResourceId ? "h-full w-full" : "invisible pointer-events-none absolute inset-0 h-full w-full"} min-h-0 rounded-lg border border-slate-200 bg-white dark:border-zinc-800`}
+                      />
+                    ))}
                   </div>
                   <div className={readingMode === "ocr" ? "min-h-0 flex-1" : "invisible pointer-events-none absolute inset-2 h-auto sm:inset-3"}>
                     <OcrPageReader resourceId={detail.id} pages={detail.pages} chunks={detail.chunks} selectedPage={selectedPage} onSelectPage={onOpenPage} />

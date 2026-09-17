@@ -72,6 +72,7 @@ export default function App() {
   // Navigation & View State
   const [activePage, setActivePage] = useState<PageId>('workbench');
   const [scheduleSection, setScheduleSection] = useState<'schedule' | 'reminders'>('schedule');
+  const [scheduleToolsRequest, setScheduleToolsRequest] = useState(0);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [studentManagementTargetId, setStudentManagementTargetId] = useState<string | null>(null);
@@ -550,6 +551,7 @@ export default function App() {
       onSelectClass={setSelectedClassId}
       onSelectPage={setActivePage}
       onSelectScheduleSection={setScheduleSection}
+      onOpenScheduleTools={() => setScheduleToolsRequest((request) => request + 1)}
       onToggleGroup={toggleGroup}
     >
       {/* Page Router */}
@@ -659,6 +661,7 @@ export default function App() {
               selectedClassId={selectedClassId}
               section={scheduleSection}
               onSectionChange={setScheduleSection}
+              toolsRequest={scheduleToolsRequest}
               onSelectClass={setSelectedClassId}
               periods={schedulePeriods}
               showWeekends={showWeekends}

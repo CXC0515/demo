@@ -5,7 +5,7 @@
 
 import ResponsiveDialog from '../../components/ResponsiveDialog';
 import ResponsiveChoiceDialog from '../../components/ResponsiveChoiceDialog';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Bell, CalendarDays, Check, ChevronDown, Circle, FileScan, GripVertical, LayoutGrid, ListTodo, LoaderCircle, Pencil, Plus, Repeat2, Settings2, Sparkles, Trash2, X } from 'lucide-react';
 import { ReminderImportDraft, ScheduleItem, SchedulePeriod, SchoolClass, TimerReminder } from '../../domain/types';
 import { createReminderImportDraft, importSchedule, ScheduleImportDraft, ScheduleImportItemDraft } from '../../services/scheduleApi';
@@ -19,6 +19,7 @@ interface Props {
   selectedClassId: string;
   section: 'schedule' | 'reminders';
   onSectionChange: (section: 'schedule' | 'reminders') => void;
+  toolsRequest: number;
   onSelectClass: (classId: string) => void;
   onOpenPeriodSettings: () => void;
   onAddScheduleItem: (item: ScheduleItem) => void | Promise<void>;
@@ -119,6 +120,10 @@ export default function ScheduleReminder(props: Props) {
   const itemMap = useMemo(() => new Map(filtered.map((item) => [`${item.day}-${item.period}`, item])), [filtered]);
   const colorSlots = useMemo(() => createScheduleColorSlots(filtered.map((item) => (scope === 'teacher' ? item.classId || item.className : item.title.trim().toLocaleLowerCase()))), [filtered, scope]);
 
+  useEffect(() => {
+    if (props.toolsRequest > 0) setShowTools(true);
+  }, [props.toolsRequest]);
+
   const saveCourse = async () => {
     if (!editingSchedule) return;
     const selected = activeClasses.find((item) => item.id === editingSchedule.classId);
@@ -170,7 +175,7 @@ export default function ScheduleReminder(props: Props) {
             </div>
             {scope === 'class' && (
               <>
-                <button type="button" onClick={() => setShowClassPicker(true)} className="inline-flex min-h-11 w-20 min-w-0 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 text-sm font-bold sm:hidden dark:border-zinc-700 dark:bg-zinc-950">
+                <button type="button" onClick={() => setShowClassPicker(true)} className="inline-flex min-h-11 min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold sm:hidden dark:border-zinc-700 dark:bg-zinc-950">
                   <span className="min-w-0 flex-1 truncate">{selectedClass?.name ?? '选择班级'}</span><ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
                 </button>
                 <select value={effectiveClassId} onChange={(e) => props.onSelectClass(e.target.value)} className="hidden h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold sm:block dark:border-zinc-700 dark:bg-zinc-950">
@@ -183,7 +188,6 @@ export default function ScheduleReminder(props: Props) {
               </>
             )}
             <span className="hidden text-xs text-slate-400 md:inline">{props.showWeekends ? '显示周一至周日' : '显示周一至周五'}</span>
-            <button type="button" onClick={() => setShowTools(true)} className="ml-auto min-h-11 shrink-0 rounded-lg border px-3 text-sm font-bold sm:hidden">更多</button>
             <div className="ml-auto hidden items-center gap-2 sm:flex">
               <button onClick={props.onOpenPeriodSettings} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-slate-300">
                 <Settings2 className="h-4 w-4" />

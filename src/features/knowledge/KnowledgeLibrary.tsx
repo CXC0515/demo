@@ -226,7 +226,6 @@ export default function KnowledgeLibrary({
             loading={loading}
             narrowLayout={narrowLayout}
             openReaderOnCompact={openReaderOnCompact}
-            readerVisible={active && mode === "editor"}
             onSelectResource={selectResource}
             onOpenPage={setSelectedPage}
             onDataChanged={(resourceId) => loadAll(resourceId, true)}
