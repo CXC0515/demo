@@ -297,16 +297,18 @@ export const importScheduleDocument = async (input: ScheduleImportInput) => {
     throw new Error('SCHEDULE_CLASS_NOT_FOUND');
   }
   let enhancedAt = startedAt;
+  let parserInput: ScheduleImportInput = input;
   if (input.mimeType.startsWith('image/')) {
     try {
-      await enhanceRecognitionPage(input.filePath, { maxDimension: 2400, jpegQuality: 89 });
+      const mimeType = await enhanceRecognitionPage(input.filePath, { maxDimension: 2400, jpegQuality: 89 });
+      parserInput = { ...input, mimeType };
       enhancedAt = performance.now();
     } catch (error) {
       throw new MaterialParserError('SCHEDULE_IMAGE_ENHANCEMENT_FAILED', { cause: error });
     }
   }
   const parser = new PaddleVisionMaterialParser(getDocumentParserConfig(), { profile: 'schedule' });
-  const parsedDocument = await parseScheduleWithRetry(parser, input);
+  const parsedDocument = await parseScheduleWithRetry(parser, parserInput);
   const document = parsedDocument.document;
   const parsedAt = performance.now();
   const structured = await structureScheduleText(

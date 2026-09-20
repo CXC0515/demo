@@ -6,7 +6,7 @@
 import ResponsiveDialog from '../../components/ResponsiveDialog';
 import ResponsiveChoiceDialog from '../../components/ResponsiveChoiceDialog';
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Bell, CalendarDays, Check, ChevronDown, Circle, FileScan, GripVertical, LayoutGrid, ListTodo, LoaderCircle, Pencil, Plus, Repeat2, Settings2, Sparkles, Trash2, X } from 'lucide-react';
+import { AlertCircle, Bell, CalendarDays, Camera, Check, ChevronDown, Circle, FileScan, FileUp, GripVertical, Images, LayoutGrid, ListTodo, LoaderCircle, Pencil, Plus, Repeat2, Settings2, Sparkles, Trash2, X } from 'lucide-react';
 import { ReminderImportDraft, ScheduleItem, SchedulePeriod, SchoolClass, TimerReminder } from '../../domain/types';
 import { createReminderImportDraft, importSchedule, ScheduleImportDraft, ScheduleImportItemDraft } from '../../services/scheduleApi';
 
@@ -1188,9 +1188,35 @@ function ReminderDraftRow({ item, index, classes, onUpdate }: { key?: React.Key;
 
 function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { scope: 'teacher' | 'class'; classId: string; classes: SchoolClass[]; periods: SchedulePeriod[]; onClose: () => void; onApply: (items: ScheduleItem[]) => Promise<void> }) {
   const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<{ file: File; url: string } | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
   const [draft, setDraft] = useState<ScheduleImportDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  useEffect(() => {
+    setPreview(null);
+    setPreviewFailed(false);
+    if (!file || !(file.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(file.name))) return;
+    const url = URL.createObjectURL(file);
+    setPreview({ file, url });
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  const selectFile = (selected: File | null) => {
+    if (!selected) return;
+    const supported = selected.type === 'application/pdf' || /^image\/(jpeg|png|webp|heic|heif)$/i.test(selected.type)
+      || /\.(pdf|jpe?g|png|webp|heic|heif)$/i.test(selected.name);
+    if (!supported || selected.size > 10 * 1024 * 1024) {
+      setFile(null);
+      setDraft(null);
+      setError(supported
+        ? '文件超过 10 MiB，尚未上传，课表未改动。请压缩照片或改选较小的文件。'
+        : '暂不支持这个文件格式，尚未上传，课表未改动。请选择照片或 PDF。');
+      return;
+    }
+    setFile(selected);
+    setDraft(null);
+    setError('');
+  };
   const recognize = async () => {
     if (!file) return;
     setBusy(true);
@@ -1199,15 +1225,20 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
       setDraft(await importSchedule(file, scope, classId));
     } catch (cause) {
       const code = cause instanceof Error ? cause.message : 'SCHEDULE_IMPORT_FAILED';
-      setError(code === 'PADDLEOCR_QUEUE_FULL' || code === 'PADDLEOCR_RATE_LIMITED'
-        ? 'OCR 服务当前排队较多，自动重试后仍未恢复，请稍后再试。'
+      const reason = code === 'PADDLEOCR_QUEUE_FULL' || code === 'PADDLEOCR_RATE_LIMITED'
+        ? 'OCR 服务当前排队较多，自动重试后仍未恢复。'
         : code === 'SCHEDULE_CLASS_NOT_FOUND'
           ? '所选班级已经失效，请关闭窗口后重新选择班级。'
+        : code === 'SCHEDULE_IMAGE_ENHANCEMENT_FAILED'
+          ? '这张照片暂时无法处理，请换用 JPG、PNG 照片或 PDF。'
+        : code === 'HTTP_413' || code === 'LIMIT_FILE_SIZE'
+          ? '文件超过服务器的 10 MiB 上限，请压缩后重选。'
         : code.startsWith('PADDLEOCR_')
-          ? 'OCR 服务暂时无法完成课表识别，请稍后重试。'
+          ? 'OCR 服务暂时无法完成课表识别。'
           : code === 'MODEL_CONNECTION_FAILED' || /^MODEL_REQUEST_FAILED:(502|503|504)$/.test(code)
-            ? 'AI 整理服务暂时不可用，自动重试后仍未恢复，请稍后再试。'
-            : code);
+            ? 'AI 整理服务暂时不可用，自动重试后仍未恢复。'
+            : '课表识别未完成。';
+      setError(`${reason} 已选文件仍保留，课表尚未写入；请重试或更换文件。`);
     } finally {
       setBusy(false);
     }
@@ -1296,15 +1327,29 @@ function ImportDialog({ scope, classId, classes, periods, onClose, onApply }: { 
     <Modal wide compactFull title="扫描纸质课表" onClose={onClose} footer={footer}>
       {!draft ? (
         <div className="space-y-4">
-          <label className="flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-white p-5 text-center dark:border-zinc-700 dark:bg-zinc-950">
-            <FileScan className="mb-3 h-8 w-8 text-emerald-700" />
-            <strong className="text-sm">上传课表照片或 PDF</strong>
-            <span className="mt-1 text-xs text-slate-600">图片先在本地增强，再由 PaddleOCR 与 AI 生成草稿</span>
-            <input type="file" accept="image/*,application/pdf" className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-            {file && <span className="mt-3 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold dark:bg-zinc-900">{file.name}</span>}
-          </label>
+          <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-950">
+            <div className="text-center">
+              <FileScan className="mx-auto mb-2 h-8 w-8 text-emerald-700" />
+              <strong className="text-sm">选择纸质课表</strong>
+              <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">单张照片或单个 PDF，最多 10 MiB；上传后生成可核对的草稿</p>
+            </div>
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              {([
+                { label: '拍照', icon: Camera, accept: 'image/*', capture: 'environment' as const },
+                { label: '从相册选', icon: Images, accept: 'image/*', capture: undefined },
+                { label: '选文件', icon: FileUp, accept: 'image/*,application/pdf,.pdf', capture: undefined },
+              ] as const).map(source => <label key={source.label} className={`inline-flex min-h-11 min-w-0 cursor-pointer items-center justify-center gap-1 rounded-xl border border-slate-300 px-1 text-sm font-semibold whitespace-nowrap focus-within:ring-2 focus-within:ring-emerald-600 dark:border-zinc-700 ${busy ? 'pointer-events-none opacity-50' : 'hover:border-emerald-600'}`}>
+                <source.icon className="h-4 w-4 shrink-0" />{source.label}
+                <input type="file" accept={source.accept} capture={source.capture} disabled={busy} className="sr-only" onClick={event => { event.currentTarget.value = ''; }} onChange={event => selectFile(event.currentTarget.files?.[0] ?? null)} />
+              </label>)}
+            </div>
+          </div>
+          {file && <div role="status" className="flex min-w-0 items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900 dark:bg-emerald-950/20">
+            {preview?.file === file && !previewFailed ? <img src={preview.url} alt="已选课表照片预览" onError={() => setPreviewFailed(true)} className="h-20 w-20 shrink-0 rounded-lg object-contain bg-white dark:bg-zinc-900" /> : <FileScan className="h-8 w-8 shrink-0 text-emerald-700" />}
+            <div className="min-w-0"><p className="truncate text-sm font-semibold">{file.name}</p><p className="mt-1 text-xs text-slate-600 dark:text-slate-300">{(file.size / 1024 / 1024).toFixed(1)} MiB · 可重新拍照或更换文件</p></div>
+          </div>}
           {error && (
-            <p className="flex items-center gap-1.5 rounded-lg bg-red-50 p-3 text-xs text-red-700">
+            <p role="alert" className="flex items-center gap-1.5 rounded-lg bg-red-50 p-3 text-sm text-red-700">
               <AlertCircle className="h-4 w-4" />
               {error}
             </p>
