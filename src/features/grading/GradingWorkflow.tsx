@@ -7,7 +7,10 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  ArrowDown,
+  ArrowUp,
   BookOpenCheck,
+  Camera,
   CalendarClock,
   Check,
   CheckCircle2,
@@ -167,6 +170,50 @@ const getFiles = (files: FileList | null) => {
   }
   return result;
 };
+
+function UploadSourceButtons({ accept, disabled, onFiles }: {
+  accept: string;
+  disabled: boolean;
+  onFiles: (files: FileList | null) => void;
+}) {
+  const sources = [
+    { label: '拍照', accept: 'image/*', capture: 'environment' as const, multiple: false, icon: Camera },
+    { label: '从图库选', accept: 'image/*', capture: undefined, multiple: true, icon: FileImage },
+    { label: '选文件', accept, capture: undefined, multiple: true, icon: Upload }
+  ];
+  return <div className="flex flex-wrap justify-center gap-2">
+    {sources.map(source => <label key={source.label} className={`inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-200 ${disabled ? 'pointer-events-none opacity-50' : 'hover:border-emerald-600'}`}>
+      <source.icon className="h-4 w-4" />{source.label}
+      <input type="file" accept={source.accept} capture={source.capture} multiple={source.multiple} className="sr-only" disabled={disabled} onClick={event => { event.currentTarget.value = ''; }} onChange={event => onFiles(event.currentTarget.files)} />
+    </label>)}
+  </div>;
+}
+
+function PendingUploadItem({ file, index, total, disabled, onMove, onRemove, onPreview }: {
+  key?: string;
+  file: File;
+  index: number;
+  total: number;
+  disabled: boolean;
+  onMove: (index: number, direction: -1 | 1) => void;
+  onRemove: (index: number) => void;
+  onPreview: (url: string, label: string) => void;
+}) {
+  const [previewUrl, setPreviewUrl] = useState('');
+  useEffect(() => {
+    if (!file.type.startsWith('image/')) return;
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  return <div className="flex min-h-16 items-center gap-2 rounded-xl bg-white p-2 dark:bg-zinc-950">
+    {previewUrl ? <button type="button" onClick={() => onPreview(previewUrl, file.name)} className="h-14 w-14 shrink-0 overflow-hidden rounded-lg" aria-label={`预览 ${file.name}`}><img src={previewUrl} alt="" className="h-full w-full object-cover" /></button> : <div className="grid h-14 w-14 shrink-0 place-items-center rounded-lg bg-slate-100 dark:bg-zinc-800"><FileText className="h-5 w-5 text-slate-500" /></div>}
+    <div className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-slate-700 dark:text-slate-200">{file.name}</span><span className="text-xs text-slate-500">第 {index + 1} / {total} 份{previewUrl ? ' · 点缩略图预览' : ''}</span></div>
+    <button type="button" disabled={disabled || index === 0} onClick={() => onMove(index, -1)} className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-slate-600 disabled:opacity-30" aria-label={`将 ${file.name} 前移`}><ArrowUp className="h-4 w-4" /></button>
+    <button type="button" disabled={disabled || index === total - 1} onClick={() => onMove(index, 1)} className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-slate-600 disabled:opacity-30" aria-label={`将 ${file.name} 后移`}><ArrowDown className="h-4 w-4" /></button>
+    <button type="button" disabled={disabled} onClick={() => onRemove(index)} className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-rose-700 disabled:opacity-30" aria-label={`移除 ${file.name}`}><X className="h-4 w-4" /></button>
+  </div>;
+}
 
 const getSubmissionStatus = (page: SubmissionPage, asset?: DocumentAsset) => {
   if (asset?.status === 'failed') return { label: asset.parseErrorCode === 'PADDLEOCR_QUEUE_FULL' ? 'OCR 队列已满，可重试' : asset.parseErrorCode === 'PADDLEOCR_RATE_LIMITED' ? 'OCR 受限，可重试' : 'OCR 失败，可重试', className: 'bg-rose-100 text-rose-800' };
@@ -1106,20 +1153,27 @@ export default function GradingWorkflow({
   const selectSubmissionFiles = (fileList: FileList | null) => {
     const files = getFiles(fileList);
     if (!files.length) return;
-    if (files.length > 20) {
+    if (submissionFiles.length + files.length > 20) {
       onShowToast('单次最多上传 20 个答卷文件');
       return;
     }
-    setSubmissionFiles(files);
+    setSubmissionFiles(current => [...current, ...files]);
     setSubmissionUploadPhase('idle');
     setSubmissionUploadError(null);
-    onUpdateState({ uploadedCount: files.length });
   };
 
   const removePendingSubmissionFile = (index: number) => {
     setSubmissionFiles(current => current.filter((_, fileIndex) => fileIndex !== index));
     setSubmissionUploadPhase('idle');
     setSubmissionUploadError(null);
+  };
+
+  const moveSubmissionFile = (index: number, direction: -1 | 1) => {
+    setSubmissionFiles(current => {
+      const next = [...current];
+      [next[index], next[index + direction]] = [next[index + direction], next[index]];
+      return next;
+    });
   };
 
   const toggleSubmissionSelection = (assetId: string) => setSelectedSubmissionIds(current => {
@@ -1272,13 +1326,25 @@ export default function GradingWorkflow({
   const selectMaterialFiles = (kind: 'assignment' | 'referenceAnswer', fileList: FileList | null) => {
     const files = getFiles(fileList);
     if (!files.length) return;
-    if (files.length > 20) {
+    if (pendingMaterialFiles[kind].length + files.length > 20) {
       onShowToast('题目或答案单次最多选择 20 个文件');
       return;
     }
-    setPendingMaterialFiles(current => ({ ...current, [kind]: files }));
+    setPendingMaterialFiles(current => ({ ...current, [kind]: [...current[kind], ...files] }));
     setMaterialUploadPhase('idle');
     setMaterialUploadError(null);
+  };
+
+  const moveMaterialFile = (kind: 'assignment' | 'referenceAnswer', index: number, direction: -1 | 1) => {
+    setPendingMaterialFiles(current => {
+      const next = [...current[kind]];
+      [next[index], next[index + direction]] = [next[index + direction], next[index]];
+      return { ...current, [kind]: next };
+    });
+  };
+
+  const removePendingMaterialFile = (kind: 'assignment' | 'referenceAnswer', index: number) => {
+    setPendingMaterialFiles(current => ({ ...current, [kind]: current[kind].filter((_, fileIndex) => fileIndex !== index) }));
   };
 
   const clearPendingMaterialFiles = (kind: 'assignment' | 'referenceAnswer') => {
@@ -1293,6 +1359,8 @@ export default function GradingWorkflow({
       { kind: 'reference-answer' as const, files: pendingMaterialFiles.referenceAnswer }
     ].filter(group => group.files.length);
     if (!pendingGroups.length && !stagedAssignmentAssets.length) return;
+    const replacing = pendingGroups.filter(group => workflowState.assignment.assets.some(asset => asset.kind === group.kind));
+    if (replacing.length && !window.confirm(`重新上传${replacing.map(group => group.kind === 'assignment' ? '题目' : '参考答案').join('和')}会替换该类已上传材料，并使原有拆题和试批结果失效。确定继续吗？`)) return;
     setMaterialUploadPhase('uploading');
     setMaterialUploadError(null);
     setAnalysisErrorCode(null);
@@ -1957,14 +2025,11 @@ export default function GradingWorkflow({
   const analysisSubquestionCount = assignmentAnalysis?.questions.reduce((total, question) => total + question.subquestions.length, 0) ?? 0;
   const selectedAnalysisQuestion = assignmentAnalysis?.questions.find(question => question.displayNo === analysisQuestionNo) ?? assignmentAnalysis?.questions[0];
   const submissionFilePicker = (
-    <label className="cursor-pointer rounded-2xl border border-emerald-700 px-4 py-2.5 text-sm font-bold text-emerald-700 hover:bg-emerald-50">
-      {matchRows.length ? '继续上传答卷' : '选择答卷文件'}
-      <input type="file" multiple accept="application/pdf,image/*" className="sr-only" disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onClick={event => { event.currentTarget.value = ''; }} onChange={event => selectSubmissionFiles(event.currentTarget.files)} />
-    </label>
+    <UploadSourceButtons accept="application/pdf,image/*" disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onFiles={selectSubmissionFiles} />
   );
   const pendingSubmissionUpload = (
     <>
-      {submissionFiles.length ? <div className="w-full rounded-lg border border-slate-200 bg-slate-50 p-4 text-left dark:border-zinc-800 dark:bg-zinc-900"><div className="flex items-center justify-between gap-3"><strong className="text-sm">待提交 {submissionFiles.length} 个文件</strong><button type="button" disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onClick={() => setSubmissionFiles([])} className="min-h-11 rounded-xl px-3 text-xs font-bold text-rose-700 disabled:opacity-50">清空待提交</button></div><div className="mt-3 space-y-1.5">{submissionFiles.map((file, index) => <div key={`${file.name}-${file.size}-${index}`} className="flex min-h-11 items-center gap-2 rounded-xl bg-white px-3 dark:bg-zinc-950"><span className="min-w-0 flex-1 truncate text-xs text-slate-600 dark:text-slate-300">{file.name}</span><button type="button" disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onClick={() => removePendingSubmissionFile(index)} title={`移除 ${file.name}`} aria-label={`移除 ${file.name}`} className="flex h-11 w-11 flex-none items-center justify-center rounded-xl text-slate-400 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"><X className="h-4 w-4" /></button></div>)}</div><button type="button" disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onClick={() => void submitStudentSubmissions()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60">{submissionUploadPhase === 'uploading' ? '正在上传...' : submissionUploadPhase === 'parsing' ? '正在 OCR 解析...' : '提交并开始质检'}<Upload className="h-4 w-4" /></button></div> : null}
+      {submissionFiles.length ? <div className="w-full rounded-lg border border-slate-200 bg-slate-50 p-4 text-left dark:border-zinc-800 dark:bg-zinc-900"><div className="flex items-center justify-between gap-3"><strong className="text-sm">待提交 {submissionFiles.length} 个文件</strong><button type="button" disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onClick={() => setSubmissionFiles([])} className="min-h-11 rounded-xl px-3 text-xs font-bold text-rose-700 disabled:opacity-50">清空待提交</button></div><p className="mt-1 text-xs text-slate-500">按名单顺序排列；同一学生的多页照片放在一起。提交前可调整顺序。</p><div className="mt-3 space-y-1.5">{submissionFiles.map((file, index) => <PendingUploadItem key={`${file.name}-${file.size}-${file.lastModified}-${index}`} file={file} index={index} total={submissionFiles.length} disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onMove={moveSubmissionFile} onRemove={removePendingSubmissionFile} onPreview={(url, label) => setPreviewImage({ url, label })} />)}</div><button type="button" disabled={submissionUploadPhase === 'uploading' || submissionUploadPhase === 'parsing'} onClick={() => void submitStudentSubmissions()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60">{submissionUploadPhase === 'uploading' ? '正在上传...' : submissionUploadPhase === 'parsing' ? '正在 OCR 解析...' : '提交并开始质检'}<Upload className="h-4 w-4" /></button></div> : null}
       {submissionUploadPhase === 'error' ? <div className="flex w-full flex-col gap-3 rounded-lg border border-rose-200 bg-rose-50 p-4 text-left text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between"><div><strong>{failedSubmissionAssets.length ? `${failedSubmissionAssets.length} 份答卷 OCR 未完成` : '答卷处理未完成'}</strong><p className="mt-1 font-normal">{failedSubmissionAssets.length ? '文件已经上传，再次识别不会新增上传记录。' : `错误码：${submissionUploadError}`}</p></div>{failedSubmissionAssets.length ? <button type="button" onClick={() => void retryFailedSubmissionParsing()} className="min-h-11 flex-none rounded-xl bg-rose-700 px-4 text-sm font-bold text-white">重试失败的 OCR</button> : null}</div> : null}
     </>
   );
@@ -1988,15 +2053,15 @@ export default function GradingWorkflow({
           <div className={`${panelClass} p-6`}>
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-5 dark:border-zinc-800"><div><h2 className="font-black text-slate-900 dark:text-white">作业材料</h2><p className="mt-1 text-xs text-slate-500">先确定学生收到的题目和本次评分参考。</p></div><div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-xs"><span className="flex items-center gap-1.5 text-slate-500"><CalendarClock className="h-4 w-4 text-emerald-700" /><strong className="text-slate-700 dark:text-slate-200">收作业提醒</strong>{selectedTask.deadline}</span><span className="text-slate-500"><strong className="mr-1.5 text-slate-700 dark:text-slate-200">当前班级</strong>{currentClassName} · 应交 {expectedStudentCount} 人</span><span className="rounded-xl bg-slate-100 px-2.5 py-1.5 font-bold text-slate-600 dark:bg-zinc-800 dark:text-slate-300">{analysisStatusLabel[workflowState.assignment.analysisStatus]}</span><span className={`rounded-xl px-2.5 py-1.5 font-bold ${assignmentReady ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{assignmentReady ? '已布置' : '待准备'}</span></div></div>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <label className={`flex min-h-36 flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors dark:border-zinc-700 dark:bg-zinc-900/50 ${materialUploadBusy ? 'cursor-wait opacity-60' : 'cursor-pointer hover:border-emerald-500'}`}><Upload className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">作业题目或试卷</strong><span className={`mt-1 max-w-full truncate text-xs ${pendingMaterialFiles.assignment.length ? 'font-bold text-amber-700' : 'text-slate-400'}`}>{pendingMaterialFiles.assignment.length ? `待解析 ${pendingMaterialFiles.assignment.length} 份：${pendingMaterialFiles.assignment.map(file => file.name).join('、')}` : workflowState.assignment.questionFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" disabled={materialUploadBusy} onClick={event => { event.currentTarget.value = ''; }} onChange={event => selectMaterialFiles('assignment', event.currentTarget.files)} /></label>
-              <label className={`flex min-h-36 flex-col items-center justify-center border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center transition-colors dark:border-zinc-700 dark:bg-zinc-900/50 ${materialUploadBusy ? 'cursor-wait opacity-60' : 'cursor-pointer hover:border-emerald-500'}`}><FileText className="h-6 w-6 text-emerald-700" /><strong className="mt-3 text-sm">参考答案</strong><span className={`mt-1 max-w-full truncate text-xs ${pendingMaterialFiles.referenceAnswer.length ? 'font-bold text-amber-700' : 'text-slate-400'}`}>{pendingMaterialFiles.referenceAnswer.length ? `待解析 ${pendingMaterialFiles.referenceAnswer.length} 份：${pendingMaterialFiles.referenceAnswer.map(file => file.name).join('、')}` : workflowState.assignment.answerFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><input type="file" multiple accept={materialAccept} className="sr-only" disabled={materialUploadBusy} onClick={event => { event.currentTarget.value = ''; }} onChange={event => selectMaterialFiles('referenceAnswer', event.currentTarget.files)} /></label>
+              <div className="flex min-h-36 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center dark:border-zinc-700 dark:bg-zinc-900/50"><strong className="text-sm">作业题目或试卷</strong><span className="max-w-full truncate text-xs text-slate-500">{pendingMaterialFiles.assignment.length ? `待提交 ${pendingMaterialFiles.assignment.length} 份` : workflowState.assignment.questionFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><UploadSourceButtons accept={materialAccept} disabled={materialUploadBusy} onFiles={files => selectMaterialFiles('assignment', files)} /></div>
+              <div className="flex min-h-36 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-5 text-center dark:border-zinc-700 dark:bg-zinc-900/50"><strong className="text-sm">参考答案</strong><span className="max-w-full truncate text-xs text-slate-500">{pendingMaterialFiles.referenceAnswer.length ? `待提交 ${pendingMaterialFiles.referenceAnswer.length} 份` : workflowState.assignment.answerFileNames.join('、') || 'DOCX、PDF、图片或文本'}</span><UploadSourceButtons accept={materialAccept} disabled={materialUploadBusy} onFiles={files => selectMaterialFiles('referenceAnswer', files)} /></div>
             </div>
             {pendingMaterialCount || stagedAssignmentAssets.length || materialUploadPhase === 'error' || failedAssignmentAssets.length ? <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900 dark:bg-amber-950/20">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0"><strong className="text-sm text-amber-950 dark:text-amber-100">{materialUploadBusy ? materialUploadPhase === 'uploading' ? '正在上传材料' : '正在并行解析材料' : pendingMaterialCount ? `已选择 ${pendingMaterialCount} 份材料` : stagedAssignmentAssets.length ? `${stagedAssignmentAssets.length} 份材料已上传，等待解析` : `${failedAssignmentAssets.length} 份已上传材料解析未完成`}</strong><p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-200">{pendingMaterialCount ? '先上传，上传后可预览或删除，再由你点击开始解析。' : stagedAssignmentAssets.length ? '请先检查原文件；确认无误后开始 OCR 与 AI 拆题准备。' : '原文件仍保存在系统中；重新解析不会产生副本。'}</p>{activeMaterialError ? <p className="mt-2 text-xs font-bold leading-5 text-rose-700">{materialParseErrorMessage(activeMaterialError)}</p> : null}</div>
                 <button type="button" disabled={materialUploadBusy || (!pendingMaterialCount && !stagedAssignmentAssets.length && !failedAssignmentAssets.length)} onClick={() => void (pendingMaterialCount || stagedAssignmentAssets.length ? startMaterialParsing() : retryFailedMaterialParsing())} className="flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">{pendingMaterialCount || stagedAssignmentAssets.length ? <Play className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}{materialUploadPhase === 'uploading' ? '正在上传...' : materialUploadPhase === 'parsing' ? '正在解析...' : pendingMaterialCount ? '先上传材料' : stagedAssignmentAssets.length ? '开始解析' : '重试已上传材料'}</button>
               </div>
-              {pendingMaterialCount && !materialUploadBusy ? <div className="mt-3 flex flex-col gap-2 border-t border-amber-200 pt-3 sm:flex-row dark:border-amber-900">{pendingMaterialFiles.assignment.length ? <button type="button" onClick={() => clearPendingMaterialFiles('assignment')} className="min-h-11 rounded-xl border border-amber-300 px-3 text-xs font-bold text-amber-900 dark:border-amber-800 dark:text-amber-100">清除待解析题目</button> : null}{pendingMaterialFiles.referenceAnswer.length ? <button type="button" onClick={() => clearPendingMaterialFiles('referenceAnswer')} className="min-h-11 rounded-xl border border-amber-300 px-3 text-xs font-bold text-amber-900 dark:border-amber-800 dark:text-amber-100">清除待解析答案</button> : null}</div> : null}
+              {pendingMaterialCount ? <div className="mt-3 space-y-3 border-t border-amber-200 pt-3 dark:border-amber-900">{(['assignment', 'referenceAnswer'] as const).map(kind => pendingMaterialFiles[kind].length ? <div key={kind}><div className="mb-2 flex items-center justify-between gap-2"><strong className="text-sm text-amber-950 dark:text-amber-100">{kind === 'assignment' ? '题目或试卷' : '参考答案'} · {pendingMaterialFiles[kind].length} 份</strong><button type="button" disabled={materialUploadBusy} onClick={() => clearPendingMaterialFiles(kind)} className="min-h-11 rounded-xl px-3 text-xs font-bold text-rose-700 disabled:opacity-40">清空待提交</button></div><div className="space-y-1.5">{pendingMaterialFiles[kind].map((file, index) => <PendingUploadItem key={`${file.name}-${file.size}-${file.lastModified}-${index}`} file={file} index={index} total={pendingMaterialFiles[kind].length} disabled={materialUploadBusy} onMove={(fileIndex, direction) => moveMaterialFile(kind, fileIndex, direction)} onRemove={fileIndex => removePendingMaterialFile(kind, fileIndex)} onPreview={(url, label) => setPreviewImage({ url, label })} />)}</div>{workflowState.assignment.assets.some(asset => asset.kind === (kind === 'assignment' ? 'assignment' : 'reference-answer')) ? <p className="mt-2 text-xs font-bold text-rose-700">提交后将替换已上传的{kind === 'assignment' ? '题目' : '参考答案'}，并使原拆题和试批结果失效。</p> : null}</div> : null)}</div> : null}
             </section> : null}
           {stagedAssignmentAssets.some(asset => asset.mimeType.startsWith('image/') && asset.publicUrl) ? <section className="mt-4"><strong className="text-xs text-slate-500">解析前预览与框选</strong><div className="mt-2 grid gap-3 sm:grid-cols-2">{stagedAssignmentAssets.filter(asset => asset.mimeType.startsWith('image/') && asset.publicUrl).map(asset => <SourceEvidenceViewer key={asset.id} label={asset.kind === 'assignment' ? '题目原图' : '答案原图'} evidence={{ id: `${asset.id}-preparse`, assetId: asset.id, assetKind: asset.kind, fileName: asset.fileName, pageNumber: 1, boundingBox: asset.preParseRegion ?? { x: 0, y: 0, width: 1, height: 1 }, ocrText: '', confidence: 1, imageUrl: asset.publicUrl, sourcePageUrl: asset.sourcePageUrl ?? asset.publicUrl }} onSaveRegion={async boundingBox => { const updated = await saveTaskMaterialRegion(selectedTask.id, asset.id, boundingBox); updateAssignment({ assets: workflowState.assignment.assets.map(item => item.id === updated.id ? updated : item) }); onShowToast('解析范围已保存'); }} />)}</div></section> : null}
             {assignmentAssets.length ? <section className="mt-5 border-y border-slate-200 dark:border-zinc-800"><div className="flex flex-wrap items-center gap-2 py-3">{assignmentAssets.map(asset => <span key={asset.id} className={`inline-flex max-w-full items-center gap-1 rounded-xl px-2 py-1 text-xs font-bold ${asset.status === 'failed' ? 'bg-rose-100 text-rose-800' : asset.status === 'needs-review' ? 'bg-amber-100 text-amber-800' : asset.status === 'ready' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-slate-300'}`}><span className="max-w-44 truncate">{asset.fileName}</span><span>{materialStatusLabel[asset.status]}</span>{asset.publicUrl ? <button type="button" title="预览原文件" onClick={() => asset.mimeType.startsWith('image/') ? setPreviewImage({ url: asset.publicUrl!, label: asset.fileName }) : window.open(asset.publicUrl, '_blank', 'noopener,noreferrer')} className="flex h-11 w-11 items-center justify-center rounded-lg"><Eye className="h-4 w-4" /></button> : null}{!questionSelectionLocked ? <button type="button" title="删除材料" onClick={() => void deleteAssignmentMaterial(asset)} className="flex h-11 w-11 items-center justify-center rounded-lg text-rose-700"><Trash2 className="h-4 w-4" /></button> : null}</span>)}</div>{assignmentDocuments.map(document => <Fragment key={document.assetId}><MaterialDocumentDetails document={document} asset={assignmentAssets.find(item => item.id === document.assetId)} activeQuestion={selectedAnalysisQuestion} onCompareEvidence={selectedAnalysisQuestion ? (assetKind, pageNumber, boundingBox, runOcr) => compareEvidenceRegion(selectedAnalysisQuestion.displayNo, assetKind, pageNumber, boundingBox, runOcr) : undefined} onSaveEvidence={selectedAnalysisQuestion ? (assetKind, pageNumber, boundingBox) => saveEvidenceRegion(selectedAnalysisQuestion.displayNo, assetKind, pageNumber, boundingBox) : undefined} onPreview={(url, label) => setPreviewImage({ url, label })} /></Fragment>)}</section> : null}
