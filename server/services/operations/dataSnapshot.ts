@@ -63,6 +63,10 @@ const tableSets: Record<(typeof DATABASE_FILES)[number], string[]> = {
     'knowledge_source_links',
     'discovery_suggestions',
     'resource_processing_jobs',
+    'pool_folders',
+    'pool_items',
+    'pool_tags',
+    'pool_item_tags',
   ],
 };
 
@@ -151,6 +155,9 @@ export const verifyAppData = async (rootInput: string): Promise<AppDataVerificat
     if (hasResources.count) {
       diskPaths = (resourceDatabase.prepare('SELECT disk_path FROM resources').all() as Array<{ disk_path: string }>).map((row) => row.disk_path);
     }
+    const hasPool = resourceDatabase.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'pool_items'").get() as { count: number };
+    if (hasPool.count) diskPaths.push(...(resourceDatabase.prepare('SELECT disk_path FROM pool_items').all() as Array<{ disk_path: string }>).map(row => row.disk_path));
+    diskPaths = [...new Set(diskPaths)];
   } finally {
     resourceDatabase.close();
   }
@@ -265,6 +272,14 @@ const remapResourceDatabasePaths = (targetRoot: string, sourceRoot: string) => {
       for (const row of rows) {
         if (!path.isAbsolute(row.disk_path) || !isInside(sourceRoot, row.disk_path)) continue;
         update.run(path.join(targetRoot, path.relative(sourceRoot, row.disk_path)), row.id);
+      }
+      const hasPool = database.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'pool_items'").get() as { count: number };
+      if (hasPool.count) {
+        const poolRows = database.prepare('SELECT id, disk_path FROM pool_items').all() as Array<{ id: string; disk_path: string }>;
+        const updatePool = database.prepare('UPDATE pool_items SET disk_path = ? WHERE id = ?');
+        for (const row of poolRows) {
+          if (path.isAbsolute(row.disk_path) && isInside(sourceRoot, row.disk_path)) updatePool.run(path.join(targetRoot, path.relative(sourceRoot, row.disk_path)), row.id);
+        }
       }
     })();
   } finally {

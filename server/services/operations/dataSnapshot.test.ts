@@ -22,8 +22,11 @@ const createFixture = async () => {
   temporaryRoots.push(root);
   await mkdir(path.join(root, 'data/parser-artifacts'), { recursive: true });
   await mkdir(path.join(root, 'uploads/resources'), { recursive: true });
+  await mkdir(path.join(root, 'uploads/material-pool/files'), { recursive: true });
   const resourceFile = path.join(root, 'uploads/resources/resource.pdf');
+  const poolFile = path.join(root, 'uploads/material-pool/files/pool-item');
   await writeFile(resourceFile, 'fixture-pdf');
+  await writeFile(poolFile, 'fixture-image');
   await writeFile(path.join(root, 'data/grading-tasks.json'), JSON.stringify([{ diskPath: resourceFile }]));
   await writeFile(path.join(root, 'data/parser-artifacts/resource.json'), JSON.stringify({ sourcePath: resourceFile }));
 
@@ -32,8 +35,9 @@ const createFixture = async () => {
   roster.close();
 
   const resources = new Database(path.join(root, 'data/resources.sqlite'));
-  resources.exec('CREATE TABLE resources (id TEXT PRIMARY KEY, disk_path TEXT NOT NULL); CREATE TABLE resource_pages (id TEXT); CREATE TABLE knowledge_nodes (id TEXT);');
+  resources.exec('CREATE TABLE resources (id TEXT PRIMARY KEY, disk_path TEXT NOT NULL); CREATE TABLE resource_pages (id TEXT); CREATE TABLE knowledge_nodes (id TEXT); CREATE TABLE pool_items (id TEXT PRIMARY KEY, disk_path TEXT NOT NULL);');
   resources.prepare('INSERT INTO resources (id, disk_path) VALUES (?, ?)').run('resource-1', resourceFile);
+  resources.prepare('INSERT INTO pool_items (id, disk_path) VALUES (?, ?)').run('pool-1', poolFile);
   resources.close();
   return root;
 };
@@ -51,8 +55,10 @@ test('creates an online SQLite and file snapshot, then restores to a new root', 
   assert.deepEqual(report.verification.missingReferencedFiles, []);
   const restoredDatabase = new Database(path.join(restored, 'data/resources.sqlite'), { readonly: true });
   const row = restoredDatabase.prepare('SELECT disk_path FROM resources WHERE id = ?').get('resource-1') as { disk_path: string };
+  const pool = restoredDatabase.prepare('SELECT disk_path FROM pool_items WHERE id = ?').get('pool-1') as { disk_path: string };
   restoredDatabase.close();
   assert.equal(row.disk_path, path.join(restored, 'uploads/resources/resource.pdf'));
+  assert.equal(pool.disk_path, path.join(restored, 'uploads/material-pool/files/pool-item'));
   assert.equal(JSON.parse(readFileSync(path.join(restored, 'data/grading-tasks.json'), 'utf8'))[0].diskPath, row.disk_path);
   assert.equal((await verifyAppData(restored)).databases[0].counts.classes, 1);
 });

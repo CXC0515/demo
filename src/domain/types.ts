@@ -723,6 +723,7 @@ export type KnowledgeRelationType = 'parent' | 'prerequisite' | 'related' | 'con
 
 export interface LibraryResource {
   id: string;
+  poolItemId?: string;
   title: string;
   fileName: string;
   mimeType: string;
