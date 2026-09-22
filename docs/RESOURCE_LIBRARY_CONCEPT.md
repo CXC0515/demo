@@ -1,5 +1,7 @@
 # 资料库与知识图谱设想
 
+> 材料池的产品边界、文件夹整理和技术实施方案见 [MATERIAL_POOL_IMPLEMENTATION_PLAN.md](./MATERIAL_POOL_IMPLEMENTATION_PLAN.md)。本文原有的资料编辑与知识图谱内容继续作为对应功能的概念说明。
+
 ## 目标
 
 资料库服务教师个人工作，不做传统文件管理软件。
