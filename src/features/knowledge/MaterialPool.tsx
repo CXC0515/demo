@@ -136,10 +136,10 @@ export default function MaterialPool({ presetKey, onOpenResource, onShowToast }:
   };
 
   const itemPreview = (item: PoolItem) => item.detectedMime === 'application/pdf'
-    ? <iframe title={`${item.originalName} 预览`} src={item.contentUrl} className="h-full min-h-[240px] w-full rounded-xl border border-slate-200 dark:border-zinc-700" />
+    ? <iframe title={`${item.originalName} 预览`} src={item.contentUrl} className="h-full w-full rounded-xl border border-slate-200 dark:border-zinc-700" />
     : item.detectedMime.startsWith('image/')
       ? <img src={item.contentUrl} alt={item.originalName} className="max-h-full max-w-full rounded-xl object-contain" />
-      : <div className="grid h-full min-h-[240px] place-items-center rounded-xl bg-slate-50 text-center text-sm text-slate-500 dark:bg-zinc-900"><div><FileText className="mx-auto mb-3 h-10 w-10" />此格式暂不支持在线预览<br />可以下载原件</div></div>;
+      : <div className="grid h-full place-items-center rounded-xl bg-slate-50 text-center text-sm text-slate-500 dark:bg-zinc-900"><div><FileText className="mx-auto mb-3 h-10 w-10" />此格式暂不支持在线预览<br />可以下载原件</div></div>;
 
   return <div className="flex h-full min-h-0 flex-col gap-3 animate-fade-in" id="material-pool-page">
     <header className="flex flex-wrap items-center justify-between gap-3">
@@ -161,7 +161,7 @@ export default function MaterialPool({ presetKey, onOpenResource, onShowToast }:
         if (dx < 0) setQuickIndex(current => current + 1);
         else void undoMove();
       }}>
-        <div className="min-h-0 flex-1 overflow-hidden">{itemPreview(quickItem)}</div>
+        <div className="h-[min(28dvh,220px)] shrink-0 overflow-hidden sm:h-auto sm:min-h-0 sm:flex-1">{itemPreview(quickItem)}</div>
         <div><p className="truncate font-bold">{quickItem.originalName}</p><p className="text-xs text-slate-500">{formatSize(quickItem.sizeBytes)} · 第 {quickIndex + 1} 份</p></div>
         <div className="flex gap-2"><button className="btn-secondary flex min-h-11 flex-1 items-center justify-center gap-1 text-sm" onClick={() => setQuickIndex(current => current + 1)}><SkipForward className="h-4 w-4" />跳过</button><button className="btn-secondary flex min-h-11 flex-1 items-center justify-center gap-1 text-sm" onClick={() => void undoMove()} disabled={!lastMove}><RotateCcw className="h-4 w-4" />撤销</button></div>
         <div className="grid grid-cols-2 gap-2">{(quickTargets.length ? quickTargets : folders.filter(folder => !folder.parentId).slice(0, 2).map(folder => folder.id)).map(id => {
