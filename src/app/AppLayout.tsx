@@ -47,7 +47,8 @@ export default function AppLayout({
   onSignOut,
 }: AppLayoutProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const isImmersiveWorkspace = activePage === 'knowledge-graph' || activePage === 'library-editor';
+  const isLibraryWorkspace = activePage === 'knowledge-graph' || activePage === 'library-editor';
+  const isImmersiveWorkspace = isLibraryWorkspace || activePage === 'material-pool' || activePage.startsWith('career-');
   const selectPage = (pageId: PageId) => {
     onSelectPage(pageId);
     setMobileNavOpen(false);
@@ -80,7 +81,7 @@ export default function AppLayout({
               <p className="hidden text-[10px] text-slate-400 sm:block">教学证据采集、作业 AI 批改、学情诊断和学生画像平台</p>
             </div>
           </div>
-          {isImmersiveWorkspace && (
+          {isLibraryWorkspace && (
             <div className="flex min-w-0 items-center rounded-xl border border-slate-200/80 bg-slate-100/80 p-0.5 sm:hidden dark:border-zinc-700/80 dark:bg-zinc-800/80">
               <button
                 type="button"
