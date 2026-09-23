@@ -106,6 +106,12 @@ export const uploadLibraryResource = async (
   ).resource;
 };
 
+export const usePoolPdfAsResource = async (poolItemId: string, metadata: ResourceMetadataInput) =>
+  (await requestJson<{ resource: LibraryResource; reused: boolean }>('/api/resources/from-pool', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ poolItemId, ...metadata }),
+  }));
+
 export const updateLibraryResource = async (
   resourceId: string,
   metadata: Partial<ResourceMetadataInput>,

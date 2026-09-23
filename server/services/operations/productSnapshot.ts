@@ -72,7 +72,15 @@ const remapWorkspacePaths = async (targetRoot: string, sourceRoot: string) => {
     try {
       const db = new Database(resourceDb); const rows = db.prepare('SELECT id, disk_path FROM resources').all() as Array<{ id: string; disk_path: string }>;
       const update = db.prepare('UPDATE resources SET disk_path = ? WHERE id = ?');
-      db.transaction(() => rows.forEach(row => { if (path.isAbsolute(row.disk_path) && isInside(sourceRoot, row.disk_path)) update.run(path.join(targetRoot, path.relative(sourceRoot, row.disk_path)), row.id); }))(); db.close();
+      db.transaction(() => {
+        rows.forEach(row => { if (path.isAbsolute(row.disk_path) && isInside(sourceRoot, row.disk_path)) update.run(path.join(targetRoot, path.relative(sourceRoot, row.disk_path)), row.id); });
+        const hasPool = db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'pool_items'").get() as { count: number };
+        if (hasPool.count) {
+          const poolRows = db.prepare('SELECT id, disk_path FROM pool_items').all() as Array<{ id: string; disk_path: string }>;
+          const updatePool = db.prepare('UPDATE pool_items SET disk_path = ? WHERE id = ?');
+          poolRows.forEach(row => { if (path.isAbsolute(row.disk_path) && isInside(sourceRoot, row.disk_path)) updatePool.run(path.join(targetRoot, path.relative(sourceRoot, row.disk_path)), row.id); });
+        }
+      })(); db.close();
     } catch { /* A newly invited empty workspace may not have a resource DB yet. */ }
     for (const relative of (await listFiles(root)).filter(item => item.endsWith('.json'))) {
       const file = path.join(root, relative); const content = await readFile(file, 'utf8');

@@ -20,6 +20,7 @@ import ResourceLibraryEditor from "./ResourceLibraryEditor";
 interface KnowledgeLibraryProps {
   mode: "graph" | "editor";
   active: boolean;
+  requestedResource?: { id: string; sequence: number } | null;
   graph: KnowledgeGraphSnapshot | null;
   onSwitchMode: (mode: "graph" | "editor") => void;
   onKnowledgeChanged: (force?: boolean) => Promise<KnowledgeGraphSnapshot>;
@@ -39,6 +40,7 @@ const emptyGraph: KnowledgeGraphSnapshot = {
 export default function KnowledgeLibrary({
   mode,
   active,
+  requestedResource,
   graph: graphSnapshot,
   onSwitchMode,
   onKnowledgeChanged,
@@ -55,6 +57,7 @@ export default function KnowledgeLibrary({
   const loadedRef = useRef(false);
   const selectedResourceIdRef = useRef("");
   const detailRequestRef = useRef(0);
+  const lastExternalRequestRef = useRef(0);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 1023px)");
@@ -121,6 +124,13 @@ export default function KnowledgeLibrary({
   useEffect(() => {
     if (active && !loadedRef.current) void loadAll();
   }, [active, loadAll]);
+
+  useEffect(() => {
+    if (!active || !requestedResource || lastExternalRequestRef.current === requestedResource.sequence) return;
+    lastExternalRequestRef.current = requestedResource.sequence;
+    setOpenReaderOnCompact(true);
+    void loadAll(requestedResource.id, true);
+  }, [active, requestedResource, loadAll]);
 
   useEffect(() => {
     if (!active || detail?.status !== "processing") return;

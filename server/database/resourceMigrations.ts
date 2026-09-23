@@ -314,6 +314,60 @@ const migrations = [
       markdown = text;
     `,
   },
+  {
+    version: 9,
+    sql: `
+      CREATE TABLE pool_folders (
+        id TEXT PRIMARY KEY,
+        parent_id TEXT REFERENCES pool_folders(id) ON DELETE RESTRICT,
+        name TEXT NOT NULL,
+        preset_key TEXT UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX pool_folders_parent_idx ON pool_folders(parent_id, sort_order);
+      CREATE UNIQUE INDEX pool_folders_sibling_name_idx ON pool_folders(COALESCE(parent_id, ''), name);
+      CREATE TABLE pool_items (
+        id TEXT PRIMARY KEY,
+        folder_id TEXT REFERENCES pool_folders(id) ON DELETE RESTRICT,
+        original_name TEXT NOT NULL,
+        detected_mime TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+        sha256 TEXT NOT NULL DEFAULT '',
+        disk_path TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'saved' CHECK (state IN ('saved', 'trashed')),
+        source TEXT NOT NULL DEFAULT 'upload',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        trashed_at TEXT
+      );
+      CREATE INDEX pool_items_folder_state_idx ON pool_items(folder_id, state, created_at);
+      CREATE TABLE pool_tags (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE pool_item_tags (
+        item_id TEXT NOT NULL REFERENCES pool_items(id) ON DELETE CASCADE,
+        tag_id TEXT NOT NULL REFERENCES pool_tags(id) ON DELETE CASCADE,
+        PRIMARY KEY (item_id, tag_id)
+      );
+      ALTER TABLE resources ADD COLUMN pool_item_id TEXT REFERENCES pool_items(id) ON DELETE RESTRICT;
+      CREATE UNIQUE INDEX resources_pool_item_idx ON resources(pool_item_id) WHERE pool_item_id IS NOT NULL;
+      INSERT INTO pool_folders (id, parent_id, name, preset_key, sort_order, created_at, updated_at) VALUES
+        ('pool-teaching', NULL, '教学资料', 'teaching', 0, datetime('now'), datetime('now')),
+        ('pool-open-class', NULL, '公开课', 'open-class', 1, datetime('now'), datetime('now')),
+        ('pool-competition', NULL, '教学比赛', 'competition', 2, datetime('now'), datetime('now')),
+        ('pool-paper', NULL, '论文课题', 'paper', 3, datetime('now'), datetime('now')),
+        ('pool-title', NULL, '职称材料', 'title', 4, datetime('now'), datetime('now'));
+      INSERT INTO pool_items
+        (id, original_name, detected_mime, size_bytes, sha256, disk_path, state, source, created_at, updated_at)
+      SELECT id, file_name, mime_type, 0, '', disk_path, 'saved', 'legacy-resource', created_at, updated_at
+      FROM resources;
+      UPDATE resources SET pool_item_id = id;
+    `,
+  },
 ];
 
 export const runResourceMigrations = (database: Database.Database) => {

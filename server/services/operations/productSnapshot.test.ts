@@ -69,6 +69,12 @@ test('creates a new recovery point when an older snapshot is damaged', async () 
 
 test('restores a snapshot when the workspaces root contains metadata files', async () => {
   const { source } = await createFixture();
+  const workspace = path.join(source, 'workspaces', 'workspace-test');
+  await mkdir(path.join(workspace, 'data'), { recursive: true });
+  const resourceDb = new Database(path.join(workspace, 'data', 'resources.sqlite'));
+  resourceDb.exec('CREATE TABLE resources (id TEXT PRIMARY KEY, disk_path TEXT); CREATE TABLE pool_items (id TEXT PRIMARY KEY, disk_path TEXT);');
+  resourceDb.prepare('INSERT INTO pool_items VALUES (?, ?)').run('pool-1', path.join(workspace, 'uploads', 'resource.pdf'));
+  resourceDb.close();
   await writeFile(path.join(source, 'workspaces', '.DS_Store'), 'metadata');
   const snapshot = path.join(path.dirname(source), 'snapshot');
   const restored = path.join(path.dirname(source), 'restored');
@@ -77,4 +83,7 @@ test('restores a snapshot when the workspaces root contains metadata files', asy
   await restoreProductSnapshot(snapshot, restored);
 
   assert.deepEqual((await readdir(path.join(restored, 'workspaces'))).sort(), ['.DS_Store', 'workspace-test']);
+  const restoredDb = new Database(path.join(restored, 'workspaces', 'workspace-test', 'data', 'resources.sqlite'), { readonly: true });
+  assert.equal((restoredDb.prepare('SELECT disk_path FROM pool_items WHERE id = ?').get('pool-1') as { disk_path: string }).disk_path, path.join(restored, 'workspaces', 'workspace-test', 'uploads', 'resource.pdf'));
+  restoredDb.close();
 });

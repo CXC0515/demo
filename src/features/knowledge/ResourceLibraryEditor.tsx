@@ -49,7 +49,10 @@ import {
   setLibraryResourcePageIncluded,
   updateLibraryResource,
   uploadLibraryResource,
+  usePoolPdfAsResource,
 } from "../../services/resourceApi";
+import type { PoolItem } from '../../domain/materialPool';
+import { listPoolItems } from '../../services/materialPoolApi';
 import { formatFileSize, RESOURCE_UPLOAD_LIMIT_BYTES, RESOURCE_UPLOAD_LIMIT_LABEL } from "../../domain/uploadPolicy";
 import {
   entityLabels,
@@ -264,13 +267,30 @@ const MetadataDialog = ({
       : emptyMetadata,
   );
   const [file, setFile] = useState<File | null>(null);
+  const [source, setSource] = useState<'upload' | 'pool'>('upload');
+  const [poolItemId, setPoolItemId] = useState('');
+  const [poolQuery, setPoolQuery] = useState('');
+  const [poolItems, setPoolItems] = useState<PoolItem[]>([]);
+  const [poolNextOffset, setPoolNextOffset] = useState<number | null>(null);
+  const [poolLoading, setPoolLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  useEffect(() => {
+    if (resource || source !== 'pool') return;
+    let cancelled = false;
+    setPoolLoading(true);
+    void listPoolItems({ q: poolQuery, mime: 'application/pdf' }).then(result => {
+      if (!cancelled) { setPoolItems(result.items); setPoolNextOffset(result.nextOffset); }
+    }).catch(error => {
+      if (!cancelled) setFormError(error instanceof Error ? error.message : '材料池加载失败');
+    }).finally(() => { if (!cancelled) setPoolLoading(false); });
+    return () => { cancelled = true; };
+  }, [resource, source, poolQuery]);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!resource && !file) {
-      setFormError("请选择 PDF 文件");
+    if (!resource && (source === 'pool' ? !poolItemId : !file)) {
+      setFormError(source === 'pool' ? '请选择材料池中的 PDF' : '请选择 PDF 文件');
       return;
     }
     if (file && file.size > RESOURCE_UPLOAD_LIMIT_BYTES) {
@@ -280,11 +300,12 @@ const MetadataDialog = ({
     setSaving(true);
     setFormError("");
     try {
+      const poolResult = !resource && source === 'pool' ? await usePoolPdfAsResource(poolItemId, metadata) : null;
       const saved = resource
         ? await updateLibraryResource(resource.id, metadata)
-        : await uploadLibraryResource(file!, metadata);
+        : poolResult?.resource ?? await uploadLibraryResource(file!, metadata);
       await onSaved(saved.id);
-      onShowToast(resource ? "资料信息已更新" : "资料已上传");
+      onShowToast(resource ? "资料信息已更新" : poolResult ? (poolResult.reused ? '这份材料已在资料编辑中，已打开已有资料' : '已从材料池选用 PDF，原件仍在材料池') : "资料已上传");
       onClose();
     } catch (error) {
       const message = getResourceErrorMessage(error);
@@ -327,7 +348,9 @@ const MetadataDialog = ({
           </button>
         </div>
         <div className="grid flex-1 grid-cols-1 gap-4 overflow-y-auto p-4 sm:grid-cols-2 sm:p-5">
-          {!resource && (
+          {!resource && <div className="flex gap-2 sm:col-span-2"><button type="button" onClick={() => { setSource('upload'); setPoolItemId(''); }} className={`min-h-11 flex-1 rounded-xl border px-3 text-sm font-bold ${source === 'upload' ? 'border-emerald-600 bg-emerald-50 text-emerald-800' : 'border-slate-200'}`}>上传新 PDF</button><button type="button" onClick={() => { setSource('pool'); setFile(null); }} className={`min-h-11 flex-1 rounded-xl border px-3 text-sm font-bold ${source === 'pool' ? 'border-emerald-600 bg-emerald-50 text-emerald-800' : 'border-slate-200'}`}>从材料池选择</button></div>}
+          {!resource && source === 'pool' && <div className="space-y-2 sm:col-span-2"><input aria-label="搜索材料池 PDF" value={poolQuery} onChange={event => setPoolQuery(event.target.value)} placeholder="搜索材料池 PDF" className={fieldClass} />{poolLoading ? <p className="text-sm text-slate-500">正在查找材料…</p> : poolItems.length ? <div className="max-h-44 space-y-1 overflow-y-auto rounded-xl border border-slate-200 p-2 dark:border-zinc-700">{poolItems.map(item => <button key={item.id} type="button" onClick={() => { setPoolItemId(item.id); if (!metadata.title) update('title', item.originalName.replace(/\.pdf$/i, '')); }} className={`min-h-11 w-full rounded-lg px-3 text-left text-sm ${poolItemId === item.id ? 'bg-emerald-100 font-bold text-emerald-900' : 'hover:bg-slate-100 dark:hover:bg-zinc-800'}`}>{item.originalName}{item.resourceId ? ' · 已用于资料编辑' : ''}</button>)}</div> : <p className="text-sm text-slate-500">未找到 PDF。可以在材料池上传后再选择。</p>}{poolNextOffset !== null && <button type="button" className="btn-secondary min-h-11 w-full text-sm" onClick={async () => { try { const result = await listPoolItems({ q: poolQuery, mime: 'application/pdf', offset: poolNextOffset }); setPoolItems(current => [...current, ...result.items]); setPoolNextOffset(result.nextOffset); } catch (error) { setFormError(error instanceof Error ? error.message : '加载更多材料失败'); } }}>加载更多 PDF</button>}</div>}
+          {!resource && source === 'upload' && (
             <button
               type="button"
               onClick={() => {
@@ -366,7 +389,7 @@ const MetadataDialog = ({
               </span>
             </button>
           )}
-          {!resource && file && (
+          {!resource && source === 'upload' && file && (
             <div className="sm:col-span-2">
               <button type="button" onClick={() => setShowPreview(value => !value)} className="min-h-11 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 dark:border-zinc-700 dark:text-slate-200">
                 {showPreview ? "收起预览" : "预览首页"}
@@ -455,7 +478,7 @@ const MetadataDialog = ({
             className="btn-primary px-4 py-2 text-sm flex items-center gap-2"
           >
             {saving && <LoaderCircle className="w-4 h-4 animate-spin" />}
-            {resource ? "保存" : "上传"}
+            {resource ? "保存" : source === 'pool' ? '选用材料' : "上传"}
           </button>
         </div>
       </form>

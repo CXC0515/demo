@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { randomUUID } from "node:crypto";
-import { mkdirSync, rmSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
 import { resourceRepository } from "../repositories/resourceRepository";
+import { materialPoolRepository } from "../repositories/materialPoolRepository";
 import {
   getResourcePagePdfPath,
   processLibraryResource,
@@ -149,10 +150,17 @@ router.post("/resources", uploadRateLimit, upload.single("file"), resumeAuthenti
       });
     return;
   }
+  let createdPoolItemId: string | undefined;
   try {
     const id = randomUUID();
     const fileName = decodeUploadFileName(file.originalname);
     const pageCount = await readPdfPageCount(file.path);
+    const poolItem = materialPoolRepository.createItem({
+      id: randomUUID(), originalName: fileName, detectedMime: "application/pdf",
+      sizeBytes: file.size, sha256: createHash("sha256").update(readFileSync(file.path)).digest("hex"),
+      diskPath: file.path, source: "resource-upload",
+    });
+    createdPoolItemId = poolItem.id;
     const resource = resourceRepository.createResource({
       id,
       ...parsed.data,
@@ -161,11 +169,12 @@ router.post("/resources", uploadRateLimit, upload.single("file"), resumeAuthenti
       pageCount,
       diskPath: file.path,
       publicUrl: `/api/resources/${id}/content`,
-    });
+    }, poolItem.id);
     response
       .status(201)
       .json({ resource: { ...resource, diskPath: undefined } });
   } catch (error) {
+    if (createdPoolItemId) materialPoolRepository.removeItemRecord(createdPoolItemId);
     rmSync(file.path, { force: true });
     response
       .status(400)
@@ -173,6 +182,30 @@ router.post("/resources", uploadRateLimit, upload.single("file"), resumeAuthenti
         code: "INVALID_PDF",
         detail: error instanceof Error ? error.message : undefined,
       });
+  }
+});
+
+router.post("/resources/from-pool", async (request, response) => {
+  const parsed = metadataSchema.extend({ poolItemId: z.string().uuid() }).safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ code: "INVALID_RESOURCE_METADATA" });
+  const item = materialPoolRepository.getItem(parsed.data.poolItemId);
+  if (!item || item.state !== 'saved') return response.status(404).json({ code: 'ITEM_NOT_FOUND' });
+  if (item.detectedMime !== 'application/pdf') return response.status(400).json({ code: 'PDF_REQUIRED' });
+  const existing = resourceRepository.listResources().find(resource => resource.poolItemId === item.id);
+  if (existing) return response.json({ resource: existing, reused: true });
+  const id = randomUUID();
+  try {
+    const pageCount = await readPdfPageCount(assertPathInsideWorkspace(item.diskPath));
+    const { poolItemId: _poolItemId, ...metadata } = parsed.data;
+    const resource = resourceRepository.createResource({
+      id, ...metadata, fileName: item.originalName, mimeType: 'application/pdf', pageCount,
+      diskPath: item.diskPath, publicUrl: `/api/resources/${id}/content`,
+    }, item.id);
+    return response.status(201).json({ resource: { ...resource, diskPath: undefined }, reused: false });
+  } catch {
+    const nowExisting = resourceRepository.listResources().find(resource => resource.poolItemId === item.id);
+    if (nowExisting) return response.json({ resource: nowExisting, reused: true });
+    return response.status(400).json({ code: 'INVALID_PDF' });
   }
 });
 
@@ -242,7 +275,7 @@ router.delete("/resources/:resourceId", (request, response) => {
     return;
   }
   resourceRepository.deleteResource(resource.id);
-  rmSync(resource.diskPath, { force: true });
+  if (!resource.poolItemId) rmSync(resource.diskPath, { force: true });
   rmSync(uploadFilePath("parsed", resource.id), {
     recursive: true,
     force: true,

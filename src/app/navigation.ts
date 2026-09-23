@@ -36,6 +36,7 @@ export type PageId =
   | 'career-paper'
   | 'career-title'
   | 'knowledge-graph'
+  | 'material-pool'
   | 'library-editor'
   | 'settings';
 
@@ -103,6 +104,7 @@ export function createNavGroups(activeGradingTaskCount: number): NavGroup[] {
       label: '资料库',
       icon: Database,
       items: [
+        { id: 'material-pool', label: '材料池', icon: FolderOpen },
         { id: 'knowledge-graph', label: '知识图谱', icon: Network },
         { id: 'library-editor', label: '资料编辑', icon: LibraryBig }
       ]

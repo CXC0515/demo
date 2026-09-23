@@ -37,13 +37,13 @@ import StudentManagement from './features/students/StudentManagement';
 import ScheduleReminder from './features/schedule/ScheduleReminder';
 import SystemSettings from './features/settings/SystemSettingsPanel';
 import KnowledgeLibrary from './features/knowledge/KnowledgeLibrary';
+import MaterialPool from './features/knowledge/MaterialPool';
 import { getKnowledgeGraph } from './services/resourceApi';
 import { getScheduleWorkspace, removeReminder, removeScheduleItem, saveReminder, saveReminderBatch, saveReminderSeries, saveScheduleBatch, saveScheduleItem, saveSchedulePeriods } from './services/scheduleApi';
 import TagManagement from './features/tags/TagManagement';
 import LessonPlanWorkspace from './features/lesson-plan/LessonPlanWorkspace';
 import GradingWorkspace from './features/grading/GradingWorkspace';
 import DiagnosisWorkspace, { DiagnosisTab } from './features/diagnosis/DiagnosisWorkspace';
-import CareerPlaceholder from './features/career/CareerPlaceholder';
 import { useAuth } from './features/auth/AuthGate';
 import { apiFetch } from './services/apiClient';
 
@@ -71,6 +71,7 @@ export default function App() {
   const authState = useAuth();
   // Navigation & View State
   const [activePage, setActivePage] = useState<PageId>('workbench');
+  const [libraryResourceRequest, setLibraryResourceRequest] = useState<{ id: string; sequence: number } | null>(null);
   const [scheduleSection, setScheduleSection] = useState<'schedule' | 'reminders'>('schedule');
   const [scheduleToolsRequest, setScheduleToolsRequest] = useState(0);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -763,6 +764,7 @@ export default function App() {
             <KnowledgeLibrary
               mode={activePage === 'knowledge-graph' ? 'graph' : 'editor'}
               active={activePage === 'knowledge-graph' || activePage === 'library-editor'}
+              requestedResource={libraryResourceRequest}
               graph={knowledgeGraph}
               onSwitchMode={(mode) => {
                 setActivePage(mode === 'graph' ? 'knowledge-graph' : 'library-editor');
@@ -771,6 +773,14 @@ export default function App() {
               onShowToast={triggerToast}
             />
           </div>
+
+          {(activePage === 'material-pool' || activePage.startsWith('career-')) && (
+            <MaterialPool
+              presetKey={activePage === 'career-open-class' ? 'open-class' : activePage === 'career-competition' ? 'competition' : activePage === 'career-paper' ? 'paper' : activePage === 'career-title' ? 'title' : undefined}
+              onOpenResource={(id) => { setLibraryResourceRequest(current => ({ id, sequence: (current?.sequence ?? 0) + 1 })); setActivePage('library-editor'); }}
+              onShowToast={triggerToast}
+            />
+          )}
 
           {activePage === 'tag-mgmt' && (
             <TagManagement onShowToast={triggerToast} />
@@ -821,37 +831,6 @@ export default function App() {
             />
           )}
 
-          {activePage === 'career-open-class' && (
-            <CareerPlaceholder
-              title="公开课"
-              description="未来用于整理公开课选题、教学设计、磨课记录和展示材料。"
-              onShowToast={triggerToast}
-            />
-          )}
-
-          {activePage === 'career-competition' && (
-            <CareerPlaceholder
-              title="教学比赛"
-              description="未来用于管理参赛任务、材料清单、课例打磨和评审反馈。"
-              onShowToast={triggerToast}
-            />
-          )}
-
-          {activePage === 'career-paper' && (
-            <CareerPlaceholder
-              title="论文课题"
-              description="未来用于沉淀教学案例、研究问题、论文草稿和课题过程材料。"
-              onShowToast={triggerToast}
-            />
-          )}
-
-          {activePage === 'career-title' && (
-            <CareerPlaceholder
-              title="职称材料"
-              description="未来用于汇总成果证明、公开课记录、论文课题和教学反思材料。"
-              onShowToast={triggerToast}
-            />
-          )}
 
     </AppLayout>
   );

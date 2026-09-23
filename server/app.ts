@@ -23,6 +23,7 @@ import rosterRouter from './routes/roster';
 import classroomRouter from './routes/classroom';
 import gradingTaskManagementRouter from './routes/gradingTaskManagement';
 import resourcesRouter from './routes/resources';
+import materialPoolRouter from './routes/materialPool';
 import scheduleRouter from './routes/schedule';
 import registrationRouter from './routes/registration';
 import accountRouter from './routes/account';
@@ -110,6 +111,7 @@ export const createApp = (config: RuntimeConfig = runtimeConfig) => {
   app.use('/api', gradingTaskManagementRouter);
   app.use('/api/grading-tasks', gradingTasksRouter);
   app.use('/api', resourcesRouter);
+  app.use('/api', materialPoolRouter);
   app.use('/api', scheduleRouter);
   app.use('/api', (_request, response) => response.status(404).json({ code: 'API_NOT_FOUND' }));
 

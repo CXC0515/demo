@@ -38,6 +38,7 @@ const parseJson = <T>(value: string | null, fallback: T): T => {
 
 const toResource = (row: JsonObject): LibraryResource => ({
   id: String(row.id),
+  poolItemId: row.pool_item_id ? String(row.pool_item_id) : undefined,
   title: String(row.title),
   fileName: String(row.file_name),
   mimeType: String(row.mime_type),
@@ -585,16 +586,17 @@ export class ResourceRepository {
   createResource(
     input: Omit<
       StoredLibraryResource,
-      "createdAt" | "updatedAt" | "summary" | "tags" | "pageCount" | "status"
+      "createdAt" | "updatedAt" | "summary" | "tags" | "pageCount" | "status" | "poolItemId"
     > & { pageCount?: number | null },
+    poolItemId?: string,
   ) {
     const now = new Date().toISOString();
     this.database.transaction(() => {
       this.database.prepare(
         `
       INSERT INTO resources
-      (id, title, file_name, mime_type, kind, subject, grade, publisher, edition, is_primary, status, page_count, disk_path, public_url, summary, tags_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploaded', ?, ?, ?, '', '[]', ?, ?)
+      (id, title, file_name, mime_type, kind, subject, grade, publisher, edition, is_primary, status, page_count, disk_path, public_url, summary, tags_json, pool_item_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploaded', ?, ?, ?, '', '[]', ?, ?, ?)
     `,
       )
       .run(
@@ -611,6 +613,7 @@ export class ResourceRepository {
         input.pageCount ?? null,
         input.diskPath,
         input.publicUrl,
+        poolItemId ?? null,
         now,
         now,
       );
