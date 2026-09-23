@@ -1,7 +1,7 @@
 # DEMO 项目当前交接
 
 > 本文是当前统一交接入口。历史专项文档只用于追溯当时的决策，不再代表当前 Git、数据路径或部署状态。
-> 更新时间：2026-09-23；当前应用生产提交：`54b3159`（PR #46）。
+> 更新时间：2026-09-23；当前应用生产提交：`88bf9f5`（PR #48）。
 
 ## 1. 当前阶段与产品边界
 
@@ -32,7 +32,7 @@ flowchart LR
 - DNS：阿里云 `td` A 记录指向 `43.172.77.153`，TTL 10 分钟。
 - 公网只使用 80/443；80 自动跳转 HTTPS，应用端口 4317 只监听回环。
 - 服务：`teacher-dashboard.service`；每日备份：`teacher-dashboard-backup.timer`。
-- 代码：2026-09-23 核对 `/opt/teacher-dashboard/current` 指向 `/opt/teacher-dashboard/releases/54b3159`；上一版本 `296443c` 仍保留。材料池发布包含数据库 v9 迁移，应用回滚前须同时评估数据结构兼容性，不得直接用旧代码假定新表不存在。
+- 代码：2026-09-23 核对 `/opt/teacher-dashboard/current` 指向 `/opt/teacher-dashboard/releases/88bf9f5`；上一版本 `54b3159` 仍保留。本次仅修正材料池移动布局与协作规则，未修改数据结构；若回滚至材料池发布前版本，仍须评估数据库 v9 兼容性。
 - 数据：`/var/lib/teacher-dashboard/product-2026-09-16-r2`。
 - 证书：Let's Encrypt，当前证书到期日 2026-12-15，Certbot 自动续期。
 - 健康检查：`/api/health/live` 与 `/api/health/ready`。
@@ -95,6 +95,7 @@ flowchart LR
 4. 自动备份与生产数据仍在同一实例，只能处理误操作和逻辑损坏，不能覆盖整机故障；规模扩大后再评估异地加密备份。
 5. 2 GB 内存适合当前小规模试用，不代表可承载高并发 OCR/AI 任务。
 6. 材料池服务端迁移和权限边界已验证，但尚未使用真实教师账号完成「上传 → 文件夹整理 → 资料编辑选用 PDF」的生产闭环；上线健康检查不能替代这项验收。
+7. PR #48 修正材料池手机布局，尚未用真实账号在手机上完成列表滚动、快速整理和文件夹操作验收。
 
 运维、发布和证书操作见 [WEB_OPERATIONS_RUNBOOK.md](./WEB_OPERATIONS_RUNBOOK.md)；数据恢复见 [WEB_DATA_MIGRATION_RUNBOOK.md](./WEB_DATA_MIGRATION_RUNBOOK.md)；本次部署证据见 [OVERSEAS_PRODUCTION_DEPLOYMENT.md](./OVERSEAS_PRODUCTION_DEPLOYMENT.md)。
 
@@ -110,4 +111,5 @@ flowchart LR
 | v3.4 | 2026-09-17 | 历史 | PR #32 手机控件第三轮收敛发布为 80787d5；数据目录保持 -r2。 |
 | v3.5 | 2026-09-17 | 历史 | PR #34 PDF.js 阅读器、上传前首页预览和移动选择器修复发布为 fd0f8f7；数据目录保持 -r2。 |
 | v3.6 | 2026-09-20 | 历史 | 核对生产指向 693b534，补记 PR #35–#41 的 PDF/移动端发布历程和手机 A→B→A 待验收状态；数据目录保持 -r2。 |
-| v3.7 | 2026-09-23 | 当前 | PR #46 材料池发布为 54b3159；记录迁移前手工恢复点、三个工作区 schema v9 验证、线上健康边界与真实账号待验收项。 |
+| v3.7 | 2026-09-23 | 历史 | PR #46 材料池发布为 54b3159；记录迁移前手工恢复点、三个工作区 schema v9 验证、线上健康边界与真实账号待验收项。 |
+| v3.8 | 2026-09-23 | 当前 | PR #48 手机壳层滚动与快速整理预览高度修正发布为 88bf9f5；本地 lint/build、服务器 build、回环与公网健康通过，真实账号手机操作待复测。 |
