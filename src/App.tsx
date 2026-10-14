@@ -36,6 +36,7 @@ import ClassManagement from './features/classes/ClassManagement';
 import StudentManagement from './features/students/StudentManagement';
 import ScheduleReminder from './features/schedule/ScheduleReminder';
 import SystemSettings from './features/settings/SystemSettingsPanel';
+import AdminConsole from './features/admin/AdminConsole';
 import KnowledgeLibrary from './features/knowledge/KnowledgeLibrary';
 import MaterialPool from './features/knowledge/MaterialPool';
 import { getKnowledgeGraph } from './services/resourceApi';
@@ -69,6 +70,8 @@ const createInitialWorkflowState = (task: WorkbenchTask) => {
 
 export default function App() {
   const authState = useAuth();
+  const [adminRoute, setAdminRoute] = useState(() => window.location.pathname.startsWith('/admin'));
+  const teacherReturnPage = useRef<PageId>('workbench');
   // Navigation & View State
   const [activePage, setActivePage] = useState<PageId>('workbench');
   const [libraryResourceRequest, setLibraryResourceRequest] = useState<{ id: string; sequence: number } | null>(null);
@@ -108,6 +111,25 @@ export default function App() {
   const knowledgeGraphCacheRef = useRef<KnowledgeGraphSnapshot | null>(null);
   const knowledgeGraphRequestRef = useRef<Promise<KnowledgeGraphSnapshot> | null>(null);
   const [teacherProfile, setTeacherProfile] = useState<TeacherProfile>(authState.profile);
+
+  useEffect(() => {
+    const syncRoute = () => setAdminRoute(window.location.pathname.startsWith('/admin'));
+    window.addEventListener('popstate', syncRoute);
+    return () => window.removeEventListener('popstate', syncRoute);
+  }, []);
+
+  const enterAdmin = () => {
+    if (authState.role !== 'owner') return;
+    teacherReturnPage.current = activePage;
+    window.history.pushState({}, '', '/admin/accounts');
+    setAdminRoute(true);
+  };
+
+  const returnToTeacher = () => {
+    window.history.replaceState({}, '', '/');
+    setActivePage(teacherReturnPage.current);
+    setAdminRoute(false);
+  };
 
   const loadKnowledgeCatalog = useCallback(async (force = false) => {
     if (!force && knowledgeGraphCacheRef.current) return knowledgeGraphCacheRef.current;
@@ -503,6 +525,13 @@ export default function App() {
     setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
   };
 
+  if (adminRoute) {
+    if (authState.role !== 'owner' || window.location.pathname !== '/admin/accounts') {
+      return <main className="grid min-h-dvh place-items-center bg-slate-50 px-4 text-center"><div className="max-w-md rounded-2xl border border-slate-200 bg-white p-6"><h1 className="text-xl font-black">{authState.role === 'owner' ? '管理页面不存在' : '无权访问管理后台'}</h1><p className="mt-2 text-sm text-slate-500">{authState.role === 'owner' ? '请从教师工作台重新进入管理后台。' : '此页面仅供管理员使用，你的工作区数据没有改变。'}</p><button type="button" onClick={returnToTeacher} className="mt-5 min-h-11 rounded-xl bg-emerald-700 px-4 text-sm font-bold text-white">返回教师工作台</button></div></main>;
+    }
+    return <AdminConsole accountEmail={authState.user.email} onReturn={returnToTeacher} onSignOut={() => void authState.signOut()} />;
+  }
+
   if (rosterLoading) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center text-sm font-semibold text-slate-500">
@@ -548,6 +577,8 @@ export default function App() {
       teacherProfile={teacherProfile}
       accountEmail={authState.user.email}
       scheduleSection={scheduleSection}
+      isOwner={authState.role === 'owner'}
+      onEnterAdmin={enterAdmin}
       onSignOut={() => void authState.signOut()}
       onSelectClass={setSelectedClassId}
       onSelectPage={setActivePage}
