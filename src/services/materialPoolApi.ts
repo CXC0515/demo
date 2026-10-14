@@ -11,6 +11,8 @@ const messages: Record<string, string> = {
   FOLDER_NOT_FOUND: '目标文件夹不存在，材料仍在原位置',
   FOLDER_DEPTH_EXCEEDED: '文件夹最多建三级，请选上一级位置',
   FOLDER_NAME_EXISTS: '同一位置已有同名文件夹，请换个名称',
+  FOLDER_NOT_EMPTY: '文件夹里仍有材料或子文件夹，尚未归档；请先移走或归档其中内容',
+  FOLDER_ARCHIVED: '文件夹已归档，本次操作未保存；请从归档盒恢复后重试',
   ITEM_NOT_AVAILABLE: '这份材料不在可整理状态，请刷新列表',
   ITEM_NOT_FOUND: '材料已不存在或当前账号无权访问',
   RATE_LIMITED: '15 分钟内上传次数已达上限；已成功的文件仍保留，请稍后继续上传剩余文件',
@@ -39,6 +41,10 @@ export const createPoolFolder = async (name: string, parentId: string | null) =>
   (await request<{ folder: PoolFolder }>('/api/material-pool/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, parentId }) })).folder;
 export const renamePoolFolder = async (id: string, name: string) =>
   (await request<{ folder: PoolFolder }>(`/api/material-pool/folders/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })).folder;
+export const archivePoolFolder = async (id: string) =>
+  (await request<{ folder: PoolFolder }>(`/api/material-pool/folders/${id}/archive`, { method: 'POST' })).folder;
+export const restorePoolFolder = async (id: string) =>
+  (await request<{ folder: PoolFolder }>(`/api/material-pool/folders/${id}/restore`, { method: 'POST' })).folder;
 export const uploadPoolItem = async (file: File) => {
   if (file.size > RESOURCE_UPLOAD_LIMIT_BYTES) throw new Error(messages.LIMIT_FILE_SIZE);
   const form = new FormData();

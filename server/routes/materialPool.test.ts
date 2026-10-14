@@ -40,6 +40,14 @@ test('uploading a pool PDF, reusing it and deleting the resource keeps one origi
     const { item } = await upload.json() as { item: { id: string; contentUrl: string } };
     assert.ok(item.id);
     assert.equal((await fetch(`${base}${item.contentUrl}`)).status, 200);
+    const createdFolderResponse = await fetch(`${base}/api/material-pool/folders`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '备课文件夹' }) });
+    assert.equal(createdFolderResponse.status, 201);
+    const { folder } = await createdFolderResponse.json() as { folder: { id: string } };
+    assert.equal((await fetch(`${base}/api/material-pool/items/${item.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderId: folder.id }) })).status, 200);
+    assert.equal((await fetch(`${base}/api/material-pool/folders/${folder.id}/archive`, { method: 'POST' })).status, 409);
+    assert.equal((await fetch(`${base}/api/material-pool/items/${item.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderId: null }) })).status, 200);
+    assert.equal((await fetch(`${base}/api/material-pool/folders/${folder.id}/archive`, { method: 'POST' })).status, 200);
+    assert.equal((await fetch(`${base}/api/material-pool/folders/${folder.id}/restore`, { method: 'POST' })).status, 200);
 
     const metadata = { poolItemId: item.id, title: '示例教案', kind: 'lesson-plan', subject: '数学', grade: '七年级', publisher: '', edition: '', isPrimary: false };
     const selected = await fetch(`${base}/api/resources/from-pool`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(metadata) });

@@ -368,6 +368,13 @@ const migrations = [
       UPDATE resources SET pool_item_id = id;
     `,
   },
+  {
+    version: 10,
+    sql: `
+      ALTER TABLE pool_folders ADD COLUMN archived_at TEXT;
+      CREATE INDEX pool_folders_archived_parent_idx ON pool_folders(archived_at, parent_id, sort_order);
+    `,
+  },
 ];
 
 export const runResourceMigrations = (database: Database.Database) => {
