@@ -8,7 +8,6 @@ import { BookOpen, Database, Palette, Pencil, Plus, Save, Settings2, Sliders, Tr
 import { CommitteeRole, ScheduleItem, SchedulePeriod, SchoolClass, TeacherProfile } from '../../domain/types';
 import ScheduleTimeInput from '../../components/ScheduleTimeInput';
 import { isScheduleTime } from '../../domain/scheduleTime';
-import AccountAccessPanel from './AccountAccessPanel';
 import { useAuth } from '../auth/AuthGate';
 import { readClassroomExportStudentNo, writeClassroomExportStudentNo } from '../../domain/userPreferences';
 
@@ -217,8 +216,8 @@ export default function SystemSettingsPanel({
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div>
           <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wider">设置</p>
-          <h2 className="text-2xl font-black text-slate-900 dark:text-slate-50 tracking-tight">系统设置</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">配置教师信息、教学默认项、AI 参数、数据存储和外观偏好。</p>
+          <h2 className="text-2xl font-black text-slate-900 dark:text-slate-50 tracking-tight">我的设置</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">管理当前教师工作区的资料、教学设置和外观偏好。</p>
         </div>
         <button
           onClick={() => void handleSaveSettings()}
@@ -256,7 +255,6 @@ export default function SystemSettingsPanel({
             <SettingInput label="姓名" value={realName} onChange={setRealName} />
             <SettingInput label="学校" value={schoolName} onChange={setSchoolName} />
             <SettingInput label="职称" value={title} onChange={setTitle} />
-            <AccountAccessPanel onShowToast={onShowToast} />
           </div>
         )}
 

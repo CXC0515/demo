@@ -114,7 +114,7 @@ export function createNavGroups(activeGradingTaskCount: number): NavGroup[] {
       label: '设置',
       icon: Settings2,
       items: [
-        { id: 'settings', label: '系统设置', icon: Sliders }
+        { id: 'settings', label: '我的设置', icon: Sliders }
       ]
     }
   ];

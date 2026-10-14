@@ -1,8 +1,8 @@
 # 管理后台信息架构与首期设计
 
-> 版本：v1.0
+> 版本：v1.1
 > 日期：2026-10-14
-> 状态：设计方案；尚未实施代码
+> 状态：首期代码已完成本地验证；待 PR 与生产验收
 > 基线：`origin/main@d7c3ca6`
 
 ## 本次概要
@@ -81,7 +81,7 @@
 
 ## 7. 实施范围与验证门槛
 
-本文件仅批准设计文档，不授权代码修改。后续代码方案预计涉及 `src/app/navigation.ts`、`src/app/AppLayout.tsx`、`src/App.tsx`、`src/features/settings/AccountAccessPanel.tsx` 与 `src/features/settings/SystemSettingsPanel.tsx`；具体文件范围需在实施前重新确认。
+用户另行批准首期代码方案后，已在独立分支实现账号菜单入口、`/admin/accounts` 页面、教师工作台返回路径，以及账号与邀请管理。实现涉及 `src/app/navigation.ts`、`src/app/AppLayout.tsx`、`src/App.tsx`、`src/features/settings/AccountAccessPanel.tsx`、`src/features/settings/SystemSettingsPanel.tsx` 和新增的 `src/features/admin/AdminConsole.tsx`。未改变服务端权限、数据结构、AI/OCR 阈值或生产密钥。
 
 后续验收至少覆盖：管理员和普通教师的进入/直达边界；进入、返回、刷新、退出登录；邀请创建与撤销、重置链接；失败反馈；桌面与窄屏/矮屏手机的真实应用壳层触控和滚动。不得用构建通过替代真实界面验收。
 
@@ -96,3 +96,4 @@
 | 版本 | 日期 | 状态 | 修改概要 |
 | --- | --- | --- | --- |
 | v1.0 | 2026-10-14 | 设计方案 | 基于最新 `main`、现有权限边界和后台导航参考，确定首期管理入口、账号页面与内容归属。 |
+| v1.1 | 2026-10-14 | 本地已验证 | 记录另行获批的首期代码范围与本地验收状态，待 PR 和生产验收。 |

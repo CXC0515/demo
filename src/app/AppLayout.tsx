@@ -1,5 +1,5 @@
-import { Bell, Boxes, CalendarDays, ChevronDown, GraduationCap, HelpCircle, LogOut, Menu, MoreHorizontal, Network, Sparkles, X } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { Bell, Boxes, CalendarDays, ChevronDown, GraduationCap, HelpCircle, LogOut, Menu, MoreHorizontal, Network, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { SchoolClass, TeacherProfile } from '../domain/types';
 import type { NavGroup, PageId } from './navigation';
 
@@ -23,6 +23,8 @@ interface AppLayoutProps {
   onOpenScheduleTools: () => void;
   onToggleGroup: (groupId: string) => void;
   onSignOut: () => void;
+  isOwner: boolean;
+  onEnterAdmin: () => void;
 }
 
 export default function AppLayout({
@@ -45,8 +47,17 @@ export default function AppLayout({
   onOpenScheduleTools,
   onToggleGroup,
   onSignOut,
+  isOwner,
+  onEnterAdmin,
 }: AppLayoutProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setAccountMenuOpen(false); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [accountMenuOpen]);
   const isLibraryWorkspace = activePage === 'knowledge-graph' || activePage === 'library-editor';
   const isImmersiveWorkspace = isLibraryWorkspace || activePage === 'material-pool' || activePage.startsWith('career-');
   const selectPage = (pageId: PageId) => {
@@ -140,12 +151,20 @@ export default function AppLayout({
             </select>
           </div>
 
-          <div className="hidden items-center gap-2 sm:flex">
-            <span className="hidden sm:inline text-right"><span className="block text-xs font-semibold text-slate-700 dark:text-slate-200">{teacherProfile.nickname}</span><span className="block max-w-36 truncate text-[10px] text-slate-400">{accountEmail}</span></span>
-            <div className="w-8 h-8 rounded-full bg-slate-200/90 dark:bg-zinc-800 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center text-xs">
-              {(teacherProfile.nickname.trim() || teacherProfile.realName.trim() || '师')[0]}
-            </div>
-            <button type="button" onClick={onSignOut} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-zinc-800" aria-label="退出登录"><LogOut className="h-4 w-4" /></button>
+          <div className="relative">
+            <button type="button" onClick={() => setAccountMenuOpen(open => !open)} aria-label="账号菜单" aria-expanded={accountMenuOpen} className="flex min-h-11 items-center gap-2 rounded-xl px-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800">
+              <span className="hidden text-right sm:block"><span className="block text-xs font-semibold text-slate-700 dark:text-slate-200">{teacherProfile.nickname}</span><span className="block max-w-36 truncate text-[10px] text-slate-400">{accountEmail}</span></span>
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-200/90 text-xs font-bold text-slate-700 dark:bg-zinc-800 dark:text-slate-200">{(teacherProfile.nickname.trim() || teacherProfile.realName.trim() || '师')[0]}</span>
+              <ChevronDown className="hidden h-3.5 w-3.5 text-slate-400 sm:block" />
+            </button>
+            {accountMenuOpen && <>
+              <button type="button" aria-label="关闭账号菜单" className="fixed inset-0 z-40 cursor-default" onClick={() => setAccountMenuOpen(false)} />
+              <div aria-label="账号操作" className="absolute right-0 top-full z-50 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+                <p className="break-all px-3 py-2 text-xs text-slate-500">{accountEmail}</p>
+                {isOwner && <button type="button" onClick={() => { setAccountMenuOpen(false); onEnterAdmin(); }} className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-left text-sm font-semibold text-slate-700 hover:bg-emerald-50 dark:text-slate-100 dark:hover:bg-zinc-800"><ShieldCheck className="h-4 w-4 text-emerald-700" />进入管理后台</button>}
+                <button type="button" onClick={() => { setAccountMenuOpen(false); onSignOut(); }} className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-left text-sm text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-zinc-800"><LogOut className="h-4 w-4" />退出登录</button>
+              </div>
+            </>}
           </div>
         </div>
       </header>
