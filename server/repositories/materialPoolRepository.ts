@@ -11,6 +11,7 @@ const folderFromRow = (row: Row): PoolFolder => ({
   name: String(row.name),
   presetKey: row.preset_key ? String(row.preset_key) : null,
   sortOrder: Number(row.sort_order),
+  archivedAt: row.archived_at ? String(row.archived_at) : null,
 });
 
 export class MaterialPoolRepository {
@@ -30,7 +31,7 @@ export class MaterialPoolRepository {
     let ancestor = parentId;
     while (ancestor) {
       const parent = this.getFolder(ancestor);
-      if (!parent) throw new Error('FOLDER_NOT_FOUND');
+      if (!parent || parent.archivedAt) throw new Error('FOLDER_NOT_FOUND');
       depth += 1;
       ancestor = parent.parentId;
     }
@@ -46,9 +47,34 @@ export class MaterialPoolRepository {
   renameFolder(id: string, name: string) {
     const current = this.getFolder(id);
     if (!current) return undefined;
+    if (current.archivedAt) throw new Error('FOLDER_ARCHIVED');
     const duplicate = this.database.prepare('SELECT 1 FROM pool_folders WHERE parent_id IS ? AND name = ? AND id <> ?').get(current.parentId, name, id);
     if (duplicate) throw new Error('FOLDER_NAME_EXISTS');
     const result = this.database.prepare('UPDATE pool_folders SET name = ?, updated_at = ? WHERE id = ?').run(name, new Date().toISOString(), id);
+    return result.changes ? this.getFolder(id) : undefined;
+  }
+
+  archiveFolder(id: string) {
+    const folder = this.getFolder(id);
+    if (!folder) return undefined;
+    if (folder.archivedAt) throw new Error('FOLDER_ARCHIVED');
+    const now = new Date().toISOString();
+    const result = this.database.prepare(`
+      UPDATE pool_folders SET archived_at = ?, updated_at = ?
+      WHERE id = ? AND archived_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM pool_items WHERE folder_id = ?)
+        AND NOT EXISTS (SELECT 1 FROM pool_folders WHERE parent_id = ?)
+    `).run(now, now, id, id, id);
+    if (!result.changes) throw new Error('FOLDER_NOT_EMPTY');
+    return this.getFolder(id);
+  }
+
+  restoreFolder(id: string) {
+    const folder = this.getFolder(id);
+    if (!folder) return undefined;
+    if (!folder.archivedAt) return folder;
+    const result = this.database.prepare('UPDATE pool_folders SET archived_at = NULL, updated_at = ? WHERE id = ? AND archived_at IS NOT NULL')
+      .run(new Date().toISOString(), id);
     return result.changes ? this.getFolder(id) : undefined;
   }
 
@@ -110,7 +136,9 @@ export class MaterialPoolRepository {
   }
 
   createItem(input: { id: string; originalName: string; detectedMime: string; sizeBytes: number; sha256: string; diskPath: string; source: string; folderId?: string | null }) {
-    if (input.folderId && !this.getFolder(input.folderId)) throw new Error('FOLDER_NOT_FOUND');
+    const destination = input.folderId ? this.getFolder(input.folderId) : null;
+    if (input.folderId && !destination) throw new Error('FOLDER_NOT_FOUND');
+    if (destination?.archivedAt) throw new Error('FOLDER_ARCHIVED');
     const now = new Date().toISOString();
     this.database.prepare(`INSERT INTO pool_items
       (id, folder_id, original_name, detected_mime, size_bytes, sha256, disk_path, state, source, created_at, updated_at)
@@ -124,7 +152,9 @@ export class MaterialPoolRepository {
   }
 
   moveItem(id: string, folderId: string | null) {
-    if (folderId && !this.getFolder(folderId)) throw new Error('FOLDER_NOT_FOUND');
+    const destination = folderId ? this.getFolder(folderId) : null;
+    if (folderId && !destination) throw new Error('FOLDER_NOT_FOUND');
+    if (destination?.archivedAt) throw new Error('FOLDER_ARCHIVED');
     const result = this.database.prepare("UPDATE pool_items SET folder_id = ?, updated_at = ? WHERE id = ? AND state = 'saved'").run(folderId, new Date().toISOString(), id);
     return result.changes ? this.getItem(id) : undefined;
   }

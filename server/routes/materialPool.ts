@@ -73,7 +73,19 @@ router.post('/material-pool/folders', (request, response) => {
 router.patch('/material-pool/folders/:id', (request, response) => {
   const parsed = nameSchema.pick({ name: true }).safeParse(request.body);
   if (!parsed.success) return response.status(400).json({ code: 'INVALID_FOLDER' });
-  const folder = materialPoolRepository.renameFolder(request.params.id, parsed.data.name);
+  try {
+    const folder = materialPoolRepository.renameFolder(request.params.id, parsed.data.name);
+    return folder ? response.json({ folder }) : response.status(404).json({ code: 'FOLDER_NOT_FOUND' });
+  } catch (error) { return response.status(409).json({ code: error instanceof Error ? error.message : 'INVALID_FOLDER' }); }
+});
+router.post('/material-pool/folders/:id/archive', (request, response) => {
+  try {
+    const folder = materialPoolRepository.archiveFolder(request.params.id);
+    return folder ? response.json({ folder }) : response.status(404).json({ code: 'FOLDER_NOT_FOUND' });
+  } catch (error) { return response.status(409).json({ code: error instanceof Error ? error.message : 'FOLDER_ARCHIVE_FAILED' }); }
+});
+router.post('/material-pool/folders/:id/restore', (request, response) => {
+  const folder = materialPoolRepository.restoreFolder(request.params.id);
   return folder ? response.json({ folder }) : response.status(404).json({ code: 'FOLDER_NOT_FOUND' });
 });
 

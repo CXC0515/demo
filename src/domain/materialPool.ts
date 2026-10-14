@@ -4,6 +4,7 @@ export interface PoolFolder {
   name: string;
   presetKey: string | null;
   sortOrder: number;
+  archivedAt: string | null;
 }
 
 export interface PoolItem {

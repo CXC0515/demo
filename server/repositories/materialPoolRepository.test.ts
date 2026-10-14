@@ -56,3 +56,28 @@ test('folders, tags, reuse and referenced original protection share one database
     assert.equal(pool.setTrashed(item.id, false)?.state, 'saved');
   } finally { database.close(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test('only an empty folder can be archived and restored without losing its identity', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'pool-archive-'));
+  const database = createResourceDatabase(path.join(root, 'resources.sqlite'));
+  try {
+    const pool = new MaterialPoolRepository(database);
+    const parent = pool.createFolder('备课', null);
+    const child = pool.createFolder('讲义', parent.id);
+    assert.throws(() => pool.archiveFolder(parent.id), /FOLDER_NOT_EMPTY/);
+    assert.ok(pool.archiveFolder(child.id)?.archivedAt);
+    assert.throws(() => pool.archiveFolder(parent.id), /FOLDER_NOT_EMPTY/);
+    assert.throws(() => pool.createFolder('新目录', child.id), /FOLDER_NOT_FOUND/);
+    assert.equal(pool.restoreFolder(child.id)?.id, child.id);
+    const item = pool.createItem({ id: randomUUID(), originalName: 'lesson.pdf', detectedMime: 'application/pdf', sizeBytes: 12, sha256: 'abc', diskPath: path.join(root, 'lesson.pdf'), source: 'upload', folderId: child.id });
+    assert.throws(() => pool.archiveFolder(child.id), /FOLDER_NOT_EMPTY/);
+    pool.setTrashed(item.id, true);
+    assert.throws(() => pool.archiveFolder(child.id), /FOLDER_NOT_EMPTY/);
+    pool.setTrashed(item.id, false);
+    pool.moveItem(item.id, null);
+    assert.ok(pool.archiveFolder(child.id)?.archivedAt);
+    assert.throws(() => pool.moveItem(item.id, child.id), /FOLDER_ARCHIVED/);
+    assert.equal(pool.restoreFolder(child.id)?.archivedAt, null);
+    assert.equal(pool.moveItem(item.id, child.id)?.folderId, child.id);
+  } finally { database.close(); rmSync(root, { recursive: true, force: true }); }
+});
