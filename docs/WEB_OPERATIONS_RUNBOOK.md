@@ -1,4 +1,4 @@
-# DEMO 海外生产运维手册
+# 青松教师 海外生产运维手册
 
 > 文档版本：`v2.0`
 > 日期：2026-09-16
@@ -6,7 +6,7 @@
 
 ## 1. 边界与目录
 
-本手册只适用于腾讯云硅谷实例上的 DEMO。上海实例预留给 Hermes，不是 DEMO 的回滚源或数据源。旧 MacBook + Cloudflare Tunnel 部署已退出当前架构，历史记录仅通过 Git 追溯。
+本手册只适用于腾讯云硅谷实例上的 青松教师。上海实例预留给 Hermes，不是 青松教师 的回滚源或数据源。旧 MacBook + Cloudflare Tunnel 部署已退出当前架构，历史记录仅通过 Git 追溯。
 
 ```text
 /opt/teacher-dashboard/current

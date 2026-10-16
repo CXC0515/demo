@@ -7,7 +7,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/Users/cxc/Projects/DEMO/scripts/run-production-tunnel.sh</string>
+    <string>/Users/cxc/Projects/qingsong/scripts/run-production-tunnel.sh</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

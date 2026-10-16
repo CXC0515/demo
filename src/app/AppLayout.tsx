@@ -84,7 +84,7 @@ export default function AppLayout({
             </div>
             <div>
               <h1 className="text-sm font-black text-slate-800 dark:text-slate-100 tracking-tight flex items-center gap-1.5">
-                教师 AI 助手
+                青松教师
                 <span className="text-[10px] bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 font-bold px-1.5 py-0.2 rounded-full border border-emerald-500/10">
                   PRO v1.5
                 </span>

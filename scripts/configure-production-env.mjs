@@ -22,9 +22,9 @@ const values = new Map([
   ['APP_URL', 'https://td.unreached.cn'],
   ['API_HOST', '127.0.0.1'],
   ['API_PORT', '4317'],
-  ['APP_DATA_ROOT', '/Users/cxc/Projects/DEMO/var-product'],
-  ['APP_BACKUP_ROOT', '/Users/cxc/Projects/DEMO/var-product/backups'],
-  ['APP_DIST_DIR', '/Users/cxc/Projects/DEMO/dist'],
+  ['APP_DATA_ROOT', '/Users/cxc/Projects/qingsong/var-product'],
+  ['APP_BACKUP_ROOT', '/Users/cxc/Projects/qingsong/var-product/backups'],
+  ['APP_DIST_DIR', '/Users/cxc/Projects/qingsong/dist'],
   ['SHUTDOWN_TIMEOUT_MS', '15000'],
   ['AUTH_SECRET', generatedSecret ? randomBytes(48).toString('base64url') : currentSecret],
 ]);

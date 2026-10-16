@@ -7,10 +7,10 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/Users/cxc/Projects/DEMO/scripts/run-production-backup.sh</string>
+    <string>/Users/cxc/Projects/qingsong/scripts/run-production-backup.sh</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/cxc/Projects/DEMO</string>
+  <string>/Users/cxc/Projects/qingsong</string>
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>
