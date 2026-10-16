@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-project_root="/Users/cxc/Projects/DEMO"
+project_root="/Users/cxc/Projects/qingsong"
 launch_agents_root="/Users/cxc/Library/LaunchAgents"
 templates_root="$project_root/ops/launchd"
 data_root="$project_root/var-product"

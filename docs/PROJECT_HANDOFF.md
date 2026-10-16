@@ -1,18 +1,20 @@
-# DEMO 项目当前交接
+# 青松教师 项目当前交接
 
 > 本文是当前统一交接入口。历史专项文档只用于追溯当时的决策，不再代表当前 Git、数据路径或部署状态。
-> 更新时间：2026-10-12；当前应用生产提交：`88bf9f5`（PR #48）。
+> 更新时间：2026-10-16；当前应用生产提交：`88bf9f5`（PR #48）。
+
+> 改名进度：中文品牌「青松教师」，英文项目名 `qingsong`。本分支包含网站和路径变更；仓库与母文件夹实际切换结果见 [改名记录](./QINGSONG_RENAME.md)。生产服务是否更新以实际部署验收为准。
 
 ## 1. 当前阶段与产品边界
 
-DEMO 已进入少量受邀教师使用的海外单实例生产阶段。
+青松教师 已进入少量受邀教师使用的海外单实例生产阶段。
 
 - 生产入口：`https://td.unreached.top`
 - 生产实例：腾讯云 Lighthouse `lhins-mtpcwz75`，硅谷二区，Ubuntu 26.04，公网 IP `43.172.77.153`
 - 运行规格：2 vCPU、2 GB 内存、50 GB SSD、30 Mbps 峰值带宽、2 GB swap
 - 用户：管理员 Cleo 与最多两名受邀教师
 - 身份边界：邀请注册、密码登录、管理员权限、每教师独立工作区
-- 上海实例不运行 DEMO，后续单独用于 Hermes；本次没有修改该实例
+- 上海实例不运行 青松教师，后续单独用于 Hermes；本次没有修改该实例
 - 暂不承诺：内地不同运营商可达率、多人高并发、跨实例容灾和异地备份
 
 ## 2. 当前生产架构
@@ -40,7 +42,7 @@ flowchart LR
 ## 3. 数据权威性与恢复边界
 
 - 当前生产运行权威数据已切换为服务器目录 `/var/lib/teacher-dashboard/product-2026-09-16-r2`。
-- 迁移源 `/Users/cxc/Projects/DEMO/var-product` 与手工恢复点 `/Users/cxc/Projects/DEMO/var/backups/product-2026-09-16-pre-overseas-cutover` 保留为切换前回滚证据，不再接受生产写入。
+- 迁移源 `/Users/cxc/Projects/qingsong/var-product` 与手工恢复点 `/Users/cxc/Projects/qingsong/var/backups/product-2026-09-16-pre-overseas-cutover` 保留为切换前回滚证据，不再接受生产写入。
 - 迁移快照包含 1,255 个产品文件和 5 个 SQLite，约 506 MiB；本地和服务器端的清单哈希、数据库完整性检查均通过。
 - 服务器原始快照保留在 `/var/lib/teacher-dashboard/snapshots/product-2026-09-16-pre-overseas-cutover`。
 - 首次恢复因 macOS `.DS_Store` 被误判为工作区而失败，失败目录 `/var/lib/teacher-dashboard/product-2026-09-16` 保留用于调查；修复经 PR #24 合并后恢复到全新 `-r2` 目录成功。
@@ -51,7 +53,7 @@ flowchart LR
 
 - GitHub `origin/main` 是唯一稳定基线；2026-09-20 核对生产应用运行 `693b534`（PR #41）。
 - PR #24 修复产品恢复工具：只遍历实际工作区目录，忽略 `.DS_Store` 等非目录元数据；聚焦测试 4/4 和 lint 通过。
-- 母文件夹固定为 `/Users/cxc/Projects/DEMO`；正式发布只能来自已合并的 `origin/main`，不得长期依赖临时 worktree。
+- 母文件夹固定为 `/Users/cxc/Projects/qingsong`；正式发布只能来自已合并的 `origin/main`，不得长期依赖临时 worktree。
 - 真实环境变量只存于服务器 `/etc/teacher-dashboard/teacher-dashboard.env`，权限 `600 root:root`；不得提交或输出密钥。
 - 后续修改继续遵守根目录 `AGENTS.md` 的方案、授权、验证和 Git 边界。
 

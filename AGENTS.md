@@ -1,6 +1,6 @@
-# DEMO 项目协作规则
+# 青松教师 项目协作规则
 
-本文件适用于 `/Users/cxc/Projects/DEMO`。与母文件夹中的母级规则冲突时，以本文件为准。
+本文件适用于 `/Users/cxc/Projects/qingsong`。与母文件夹中的母级规则冲突时，以本文件为准。
 
 ## 总体方法
 
